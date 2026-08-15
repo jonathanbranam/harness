@@ -13,7 +13,7 @@ This directory contains the phased implementation plan for the AI Engineering In
 
 | Phase | Proposal | Status |
 |---|---|---|
-| Phase 1 | [phase-01-live-event-capture.md](./phase-01-live-event-capture.md) | not started |
+| Phase 1 | [phase-01-live-event-capture.md](./phase-01-live-event-capture.md) | ready to implement |
 | Phase 2 | [phase-02-recording-replay.md](./phase-02-recording-replay.md) | not started |
 | Phase 3 | [phase-03-tree-navigation.md](./phase-03-tree-navigation.md) | not started |
 | Phase 4 | [phase-04-openspec-skills-guides-sensors.md](./phase-04-openspec-skills-guides-sensors.md) | not started |
