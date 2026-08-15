@@ -1,0 +1,15 @@
+# Optional — mirrors track-web's Caddyfile.local (see
+# docs/arch/track-web-architecture.md). Only useful for reaching the
+# client-deck dev server from another device on the LAN (e.g. testing on a
+# tablet); `npm run dev` + `npm run dev:client-deck` on localhost don't need
+# this at all.
+#
+# Replace deck-local.test below with whatever LAN hostname you've set up for
+# this dev machine, or skip Caddy locally and hit
+# http://<this-machine's-LAN-IP>:5175 directly.
+#
+# Formatting: tabs not spaces. Run `caddy fmt --overwrite Caddyfile.local` after edits.
+
+deck-local.test:80 {
+	reverse_proxy localhost:5175
+}

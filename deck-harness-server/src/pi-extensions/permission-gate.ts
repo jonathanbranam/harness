@@ -18,9 +18,9 @@ import { isToolCallEventType } from '@earendil-works/pi-coding-agent'
 import { resolve } from 'node:path'
 
 // rm -rf, mkfs, dd to a raw device, clobbering a device node, and the classic
-// curl/wget-pipe-to-shell remote-code-execution pattern.
-const DANGEROUS_BASH =
-  /\b(rm\s+(-\w*r\w*f\w*|-\w*f\w*r\w*)\s|mkfs(\.\w+)?\s|dd\s+if=|>\s*\/dev\/(?!null\b))|\b(curl|wget)\b[^\n|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b/i
+// curl/wget-pipe-to-shell remote-code-execution pattern. Exported for testing.
+export const DANGEROUS_BASH =
+  /\brm\s+-\w*(?:r\w*f\w*|f\w*r\w*)\s|\bmkfs(?:\.\w+)?\s|\bdd\s+if=|>\s*\/dev\/(?!null\b)|\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh)\b/i
 
 /** Tools that only read state — never worth an approval prompt. */
 const READ_ONLY_TOOLS = new Set([

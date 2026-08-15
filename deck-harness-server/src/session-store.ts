@@ -5,7 +5,7 @@
 // connections) until logout disposes it.
 
 import { join } from 'node:path'
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, type AgentSession } from '@earendil-works/pi-coding-agent'
+import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, type AgentSession } from '@earendil-works/pi-coding-agent'
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
 import { createPermissionGateExtension, type RequestApproval } from './pi-extensions/permission-gate'
@@ -31,6 +31,7 @@ export async function getOrCreateSession(sessionId: string, requestApproval: Req
 
   const resourceLoader = new DefaultResourceLoader({
     cwd,
+    agentDir: getAgentDir(),
     extensionFactories: [createPermissionGateExtension({ cwd, requestApproval }), presentationBridge],
   })
   await resourceLoader.reload()
