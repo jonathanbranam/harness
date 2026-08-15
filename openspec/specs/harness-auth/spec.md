@@ -30,6 +30,17 @@ The system SHALL reject requests to protected routes (`/api/auth/me`, `/ws`, and
 - **WHEN** a client requests a protected route using a cookie whose session has passed its expiry
 - **THEN** the system responds 401 and removes the expired session from the session store
 
+### Requirement: Introspection harness routes are session-gated
+The auth system SHALL apply the same cookie-session validation to the introspection-harness-server routes and its `/ws` endpoint as it does to the deck-harness-server routes.
+
+#### Scenario: Introspection login
+- **WHEN** a client POSTs the correct password to `/api/auth/login` on the introspection harness
+- **THEN** the system creates a session, sets the same HttpOnly session cookie, and protects subsequent introspection harness requests
+
+#### Scenario: Introspection WebSocket without cookie
+- **WHEN** a client attempts to open `/ws` on the introspection harness without a valid session cookie
+- **THEN** the connection is rejected with 401
+
 ### Requirement: Session expiry
 Sessions SHALL expire 30 days after creation.
 
