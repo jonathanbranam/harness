@@ -1,22 +1,23 @@
-# Optional reverse proxy for deck-harness-server. NOT required to run the
-# harness — deck-harness-server already serves both /api/* and the built
-# client-deck SPA itself on its own PORT (see deck-harness-server/.env,
-# default 4100). Use this only if/when you want:
-#
-#   - a stable port-80 LAN hostname instead of remembering :4100
-#   - to front multiple harnesses behind one Caddy instance on the same box
-#     later, per docs/arch/pi-harness.md's "Suggested structure"
+# Optional reverse proxy for harness servers. NOT required to run the
+# harnesses — each server already serves both /api/* and the built client SPA
+# on its own PORT (see each server .env). Use this only if/when you want a
+# stable port-80 LAN hostname instead of remembering ports, or to front multiple
+# harnesses behind one Caddy instance later.
 #
 # Intentionally LAN-only, unlike track-web's Caddyfile: no public DNS record,
-# no automatic Let's Encrypt. This harness is meant to run somewhere with no
-# exposure to the public internet (e.g. a NUC on the home LAN) — see
+# no automatic Let's Encrypt. This harness family is meant to run somewhere with
+# no exposure to the public internet (e.g. a NUC on the home LAN) — see
 # docs/arch/pi-harness.md's security notes on why (the bash/write/edit tool
 # surface is a much bigger blast radius than anything track-web exposes
-# publicly). Replace deck.local with a hostname you've pointed at this box
+# publicly). Replace the hostnames with names you've pointed at this box
 # (router DNS, /etc/hosts, mDNS/avahi) or just proxy by IP.
 #
 # Formatting: tabs not spaces. Run `caddy fmt --overwrite Caddyfile` after edits.
 
 deck.local {
 	reverse_proxy localhost:4100
+}
+
+introspect.local {
+	reverse_proxy localhost:4200
 }

@@ -4,16 +4,23 @@
   "private": true,
   "workspaces": [
     "deck-harness-server",
-    "client-deck"
+    "client-deck",
+    "introspect-harness-server",
+    "client-introspect"
   ],
   "scripts": {
     "dev": "npm run dev -w deck-harness-server",
     "dev:client-deck": "npm run dev -w client-deck",
+    "dev:introspect": "npm run dev -w introspect-harness-server",
+    "dev:client-introspect": "npm run dev -w client-introspect",
     "build:client-deck": "npm run build -w client-deck",
-    "build": "npm run build:client-deck",
+    "build:client-introspect": "npm run build -w client-introspect",
+    "build": "npm run build:client-deck && npm run build:client-introspect",
     "start": "npm run start -w deck-harness-server",
-    "typecheck": "npm run typecheck -w deck-harness-server && tsc -b client-deck --noEmit",
+    "start:introspect": "npm run start -w introspect-harness-server",
+    "typecheck": "npm run typecheck -w deck-harness-server && npm run typecheck -w introspect-harness-server && tsc -b client-deck --noEmit && tsc -b client-introspect --noEmit",
     "hash-password": "npm run hash-password -w deck-harness-server",
+    "hash-password:introspect": "npm run hash-password -w introspect-harness-server",
     "test": "vitest run"
   },
   "devDependencies": {

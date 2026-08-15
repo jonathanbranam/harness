@@ -7,24 +7,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 the `pi` coding agent (`@earendil-works/pi-coding-agent`) in-process behind a
 browser UI. The first harness is `deck-harness-server` + `client-deck`, a
 live presentation-editing chat UI — see `docs/talks/deck-harness/planning.md`
-for its design and `docs/arch/track-web-architecture.md` for the patterns
-this project deliberately reuses (monorepo shape, Hono, Vite/React/RR7/
-Tailwind, cookie-session auth, Caddy per-subdomain pattern, PM2).
+for its design. The second harness is `introspect-harness-server` +
+`client-introspect`, a browser chat that drives an in-process `AgentSession`
+and visualizes the agent's context window. See `docs/arch/track-web-architecture.md`
+for the patterns this project deliberately reuses (monorepo shape, Hono,
+Vite/React/Tailwind, cookie-session auth, Caddy per-subdomain pattern, PM2).
 
 ## Commands
 
 ```bash
-# Development (run both from repo root, in separate terminals — or use
+# Development (run from repo root in separate terminals — or use
 # ./dev-local.sh inside a tmux session to split panes for you)
-npm run dev               # deck-harness-server (tsx watch)
-npm run dev:client-deck   # client-deck (Vite)
+npm run dev                  # deck-harness-server (tsx watch)
+npm run dev:client-deck      # client-deck (Vite)
+npm run dev:introspect       # introspect-harness-server (tsx watch)
+npm run dev:client-introspect # client-introspect (Vite)
 
-# Build (client only — deck-harness-server ships via tsx, see below)
-npm run build
+# Build (clients only — servers ship via tsx, see below)
+npm run build                # builds both client-deck and client-introspect
+npm run build:client-deck
+npm run build:client-introspect
 
 # Production (after `npm run build`)
-npm run start              # runs deck-harness-server, which also serves
-                            # client-deck/dist as the SPA
+npm run start                # runs deck-harness-server, which also serves
+                              # client-deck/dist as the SPA
+npm run start:introspect     # runs introspect-harness-server, which also serves
+                              # client-introspect/dist as the SPA
 
 # Typecheck (no emit)
 npm run typecheck
@@ -34,24 +42,24 @@ npm test
 
 # Utilities
 npm run hash-password -w deck-harness-server -- 'your-password'
+npm run hash-password -w introspect-harness-server -- 'your-password'
 ```
 
 No lint is configured.
 
-## Why deck-harness-server ships via `tsx`, not `tsc`
+## Why the harness servers ship via `tsx`, not `tsc`
 
 Every other Node service in this family (track-web) builds with `tsc` to
-`out/` and runs the compiled JS in production. deck-harness-server instead
-runs `tsx src/index.ts` directly in both dev and prod (see its
+`out/` and runs the compiled JS in production. The harness servers instead
+run `tsx src/index.ts` directly in both dev and prod (see each server's
 `package.json`). Two reasons this diverges from track-web's pattern
 deliberately, not by oversight:
 
 1. `@earendil-works/pi-coding-agent` ships ESM-only (`"type": "module"`, no
-   CommonJS export condition), so deck-harness-server has to be an ESM
-   package too — building it with `tsc`'s `NodeNext` module mode would
-   require explicit `.js` extensions on every relative import, for no benefit
-   here.
-2. This harness is explicitly meant to "run locally for many iterations,"
+   CommonJS export condition), so the servers have to be ESM packages too —
+   building them with `tsc`'s `NodeNext` module mode would require explicit
+   `.js` extensions on every relative import, for no benefit here.
+2. These harnesses are explicitly meant to "run locally for many iterations,"
    not survive on a resource-constrained shared box the way track-web does —
    see track-web-architecture.md's "Deploy pipeline" section on the t4g.micro
    constraint that motivated its build step. Trading `tsx`'s slightly slower
@@ -82,40 +90,45 @@ implementation intentionally diverges from those docs' sketches:
 - **No `packages/` tier yet.** pi-harness.md's "Suggested structure"
   explicitly says not to design the shared `packages/` tier up front — build
   it "incrementally as a second harness makes the shared surface obvious."
-  With one harness so far, auth/config code lives directly in
-  `deck-harness-server`/`client-deck`. When a second harness appears, look
-  for real duplication (auth, a dev-ports registry, the extension-loading
-  glue) before extracting anything.
+  With two harnesses now in the repo, auth/config code still lives directly in
+  each `*-harness-server`/`client-*` pair. Look for real duplication (auth, a
+  dev-ports registry, the extension-loading glue) before extracting anything.
 - **In-memory auth, not SQLite.** track-web's cookie-session model is
   reused (opaque token, only its hash stored server-side — see
   `deck-harness-server/src/auth.ts`), but the session table is an in-memory
   `Map`, not SQLite. This harness has exactly one user and one process, so a
   restart just means logging in again; that's a fine trade for not needing a
   database at all.
-- **`sessionId` = auth token.** The `sessionId -> AgentSession` map in
-  `session-store.ts` is keyed by the browser's auth session token, so one
-  login gets one long-lived `AgentSession` reused across WebSocket
+- **`sessionId` = auth token.** The `sessionId -> AgentSession` map in each
+  server's `session-store.ts` is keyed by the browser's auth session token, so
+  one login gets one long-lived `AgentSession` reused across WebSocket
   reconnects, disposed on logout.
 
 ### Agent sandboxing
 
 The pi `AgentSession`'s `cwd` (where its `bash`/`write`/`edit` tools operate,
 and where `.pi/skills/` + `AGENTS.md` are discovered from) is **not** the
-server source tree. It's `deck-harness-server/data/workspace/`
-(gitignored, runtime-only), seeded on first run from
-`deck-harness-server/templates/agent-workspace/` (committed — that's where
-to edit the default `AGENTS.md` / `SKILL.md`). See `agent-workspace.ts`.
-The permission-gate extension's path jail enforces that `write`/`edit` can't
-escape this directory regardless.
+server source tree. Each server has its own workspace:
+
+- `deck-harness-server/data/workspace/` (gitignored, runtime-only), seeded from
+  `deck-harness-server/templates/agent-workspace/`.
+- `introspect-harness-server/data/workspace/` (gitignored, runtime-only), seeded
+  from `introspect-harness-server/templates/agent-workspace/`.
+
+See each server's `agent-workspace.ts`. The deck harness's permission-gate
+extension's path jail enforces that `write`/`edit` can't escape that
+server's workspace directory.
 
 ## Deployment
 
-- **Local dev**: `npm run dev` + `npm run dev:client-deck`, or
-  `./dev-local.sh` inside tmux. No Caddy needed — Vite proxies `/api` and
-  `/ws` straight to deck-harness-server.
+- **Local dev**: run the server and client for the harness you're working on
+  (e.g. `npm run dev:introspect` + `npm run dev:client-introspect`), or use
+  `./dev-local.sh` inside tmux to spin up all four panes at once. No Caddy
+  needed — Vite proxies `/api` and `/ws` straight to the corresponding
+  server.
 - **NUC / always-on local box**: `server-deploy.sh` + `ecosystem.config.cjs`
   + `Caddyfile` are set up but not required day-to-day — see the comments in
-  each file. This harness is meant to run **without exposure to the public
+  each file. These harnesses are meant to run **without exposure to the public
   internet** (unlike track-web's `branam.us` subdomains): the
   `bash`/`write`/`edit` tool surface is a materially bigger blast radius than
   anything track-web exposes publicly, per pi-harness.md's security section.
@@ -137,4 +150,4 @@ pi's `ModelRuntime` resolves credentials the normal pi way (`~/.pi/agent/auth.js
 env vars, `pi login`) — see the "API Keys and OAuth" section of the installed
 `@earendil-works/pi-coding-agent` package's `docs/sdk.md`. Nothing
 harness-specific is required beyond having a working `pi` login on whatever
-box runs deck-harness-server.
+box runs a harness server.
