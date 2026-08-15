@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+/logs/
+.env
+.mcp.json
+/data/
+data.db
+*.db
+*.pem
+*.tsbuildinfo
+
+/exports/
+.playwright-cli/
+version.json
+data.db-shm
+data.db-wal
