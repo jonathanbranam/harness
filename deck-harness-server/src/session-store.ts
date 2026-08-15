@@ -8,8 +8,10 @@ import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, type AgentSession } from '@earendil-works/pi-coding-agent'
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
+import { deckManagement } from './pi-extensions/deck-management'
 import { createPermissionGateExtension, type RequestApproval } from './pi-extensions/permission-gate'
 import { presentationBridge } from './pi-extensions/presentation-bridge'
+import { createSlideVisualInspectionExtension, type RequestRender } from './pi-extensions/slide-visual-inspection'
 
 const TEMPLATES_DIR = join(import.meta.dirname, '..', 'templates', 'agent-workspace')
 
@@ -20,9 +22,26 @@ const modelRuntimePromise = ModelRuntime.create()
 const sessions = new Map<string, AgentSession>()
 
 const BUILTIN_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const
-const CUSTOM_TOOL_NAMES = ['presentation_get_state', 'presentation_update', 'presentation_select_by_text'] as const
+const CUSTOM_TOOL_NAMES = [
+  'presentation_get_state',
+  'presentation_update',
+  'presentation_select_by_text',
+  'deck_create',
+  'deck_list',
+  'deck_select',
+  'deck_delete',
+  'slide_add',
+  'slide_remove',
+  'slide_select',
+  'slide_view',
+] as const
 
-export async function getOrCreateSession(sessionId: string, requestApproval: RequestApproval): Promise<AgentSession> {
+export interface SessionCallbacks {
+  requestApproval: RequestApproval
+  requestRender: RequestRender
+}
+
+export async function getOrCreateSession(sessionId: string, callbacks: SessionCallbacks): Promise<AgentSession> {
   const existing = sessions.get(sessionId)
   if (existing) return existing
 
@@ -32,7 +51,12 @@ export async function getOrCreateSession(sessionId: string, requestApproval: Req
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir: getAgentDir(),
-    extensionFactories: [createPermissionGateExtension({ cwd, requestApproval }), presentationBridge],
+    extensionFactories: [
+      createPermissionGateExtension({ cwd, requestApproval: callbacks.requestApproval }),
+      presentationBridge,
+      deckManagement,
+      createSlideVisualInspectionExtension({ requestRender: callbacks.requestRender }),
+    ],
   })
   await resourceLoader.reload()
 

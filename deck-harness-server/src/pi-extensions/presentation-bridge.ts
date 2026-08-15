@@ -20,8 +20,8 @@ export function presentationBridge(pi: ExtensionAPI) {
     name: 'presentation_get_state',
     label: 'Get Presentation State',
     description:
-      'Get the current presentation state: every object (id, bounds, text, styling) and the current selection. Call this before making changes so you are reasoning about the live deck, not a stale copy.',
-    promptSnippet: 'Read the live deck: all objects and the current selection',
+      'Get the current presentation state: the active deck and slide identity, every object on the active slide (id, bounds, text, styling), and the current selection. Call this before making changes so you are reasoning about the live deck, not a stale copy.',
+    promptSnippet: 'Read the live deck: active deck/slide identity, all objects on the active slide, and the current selection',
     parameters: Type.Object({}),
     execute: async () => {
       const state = editorStore.getState()
@@ -90,7 +90,7 @@ Always prefer the most specific action. If multiple objects are selected and the
       message: {
         customType: 'editor_context',
         role: 'user' as const,
-        content: `Current presentation state (selected: ${state.selection.join(', ') || '(none)'}):\n${JSON.stringify(state, null, 2)}`,
+        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, selected: ${state.selection.join(', ') || '(none)'}):\n${JSON.stringify(state, null, 2)}`,
         display: false,
       },
     }

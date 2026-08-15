@@ -1,3 +1,4 @@
+import { toPng } from 'html-to-image'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { genId } from '../id'
 
@@ -12,7 +13,21 @@ export interface DeckObject {
   fontSize: number
 }
 
+export interface DeckSummary {
+  id: string
+  name: string
+  slideCount: number
+}
+
+export interface SlideSummary {
+  id: string
+}
+
 export interface DeckState {
+  decks: DeckSummary[]
+  activeDeckId: string
+  slides: SlideSummary[]
+  activeSlideId: string
   objects: DeckObject[]
   selection: string[]
 }
@@ -62,8 +77,16 @@ function summarize(value: unknown): string {
 export function useDeckSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const streamingIdRef = useRef<string | null>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
   const [connected, setConnected] = useState(false)
-  const [deckState, setDeckState] = useState<DeckState>({ objects: [], selection: [] })
+  const [deckState, setDeckState] = useState<DeckState>({
+    decks: [],
+    activeDeckId: '',
+    slides: [],
+    activeSlideId: '',
+    objects: [],
+    selection: [],
+  })
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
 
@@ -74,6 +97,24 @@ export function useDeckSocket() {
 
     ws.onopen = () => setConnected(true)
     ws.onclose = () => setConnected(false)
+
+    // Renders the DOM node captured by canvasRef and returns the result to
+    // the server over this same connection — see websocket.ts's
+    // requestRender/pendingRenders, which backs the slide_view pi tool
+    // (design.md's "captures the real canvas in the browser" decision).
+    async function handleRenderRequest(requestId: string) {
+      const node = canvasRef.current
+      if (!node) {
+        ws.send(JSON.stringify({ type: 'render_response', requestId, error: 'Canvas not mounted' }))
+        return
+      }
+      try {
+        const image = await toPng(node, { width: 960, height: 540 })
+        ws.send(JSON.stringify({ type: 'render_response', requestId, image }))
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'render_response', requestId, error: err instanceof Error ? err.message : 'Render failed' }))
+      }
+    }
 
     ws.onmessage = (evt) => {
       let msg: { type: string; [key: string]: unknown }
@@ -90,6 +131,12 @@ export function useDeckSocket() {
 
       if (msg.type === 'approval_required') {
         setPendingApproval(msg.request as ApprovalRequest)
+        return
+      }
+
+      if (msg.type === 'render_request') {
+        const request = msg.request as { requestId: string }
+        void handleRenderRequest(request.requestId)
         return
       }
 
@@ -178,5 +225,44 @@ export function useDeckSocket() {
     setPendingApproval(null)
   }, [])
 
-  return { connected, deckState, transcript, pendingApproval, sendPrompt, sendSelection, respondApproval }
+  const selectDeck = useCallback((deckId: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'select_deck', deckId }))
+  }, [])
+
+  const createDeck = useCallback((name: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'create_deck', name }))
+  }, [])
+
+  const deleteDeck = useCallback((deckId: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'delete_deck', deckId }))
+  }, [])
+
+  const addSlide = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'add_slide' }))
+  }, [])
+
+  const removeSlide = useCallback((slideId: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'remove_slide', slideId }))
+  }, [])
+
+  const selectSlide = useCallback((slideId: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'select_slide', slideId }))
+  }, [])
+
+  return {
+    connected,
+    deckState,
+    transcript,
+    pendingApproval,
+    canvasRef,
+    sendPrompt,
+    sendSelection,
+    respondApproval,
+    selectDeck,
+    createDeck,
+    deleteDeck,
+    addSlide,
+    removeSlide,
+    selectSlide,
+  }
 }

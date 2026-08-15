@@ -15,18 +15,29 @@ import type { WSContext, WSEvents } from 'hono/ws'
 import { SESSION_COOKIE } from './auth'
 import { type DeckState, editorStore } from './editor-state'
 import type { ApprovalRequest, RequestApproval } from './pi-extensions/permission-gate'
+import type { RenderRequest, RenderResult, RequestRender } from './pi-extensions/slide-visual-inspection'
 import { getOrCreateSession } from './session-store'
+
+const RENDER_TIMEOUT_MS = 15_000
 
 type ClientMessage =
   | { type: 'prompt'; text: string }
   | { type: 'selection'; ids: string[] }
   | { type: 'approval_response'; toolCallId: string; approved: boolean }
+  | { type: 'select_deck'; deckId: string }
+  | { type: 'create_deck'; name: string }
+  | { type: 'delete_deck'; deckId: string }
+  | { type: 'add_slide' }
+  | { type: 'remove_slide'; slideId: string }
+  | { type: 'select_slide'; slideId: string }
+  | { type: 'render_response'; requestId: string; image?: string; error?: string }
 
 type ServerMessage =
   | { type: 'history'; messages: unknown }
   | { type: 'agent_event'; event: unknown }
   | { type: 'deck_state'; state: DeckState }
   | { type: 'approval_required'; request: ApprovalRequest }
+  | { type: 'render_request'; request: RenderRequest }
   | { type: 'error'; message: string }
 
 function safeSend(ws: WSContext, msg: ServerMessage) {
@@ -47,6 +58,7 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
   const token = getCookie(c, SESSION_COOKIE)
 
   const pendingApprovals = new Map<string, (approved: boolean) => void>()
+  const pendingRenders = new Map<string, (result: RenderResult) => void>()
   let ws: WSContext | undefined
   let unsubscribeDeck: (() => void) | undefined
   let unsubscribeAgent: (() => void) | undefined
@@ -55,6 +67,26 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
     new Promise((resolve) => {
       pendingApprovals.set(request.toolCallId, resolve)
       if (ws) safeSend(ws, { type: 'approval_required', request })
+    })
+
+  // Mirrors requestApproval's pending-map pattern (see permission-gate.ts),
+  // plus a timeout since a render round trip depends on the originating
+  // browser tab's main thread staying responsive (design.md's render-request
+  // risk/mitigation).
+  const requestRender: RequestRender = (request) =>
+    new Promise((resolve) => {
+      if (!ws) {
+        resolve({ ok: false, error: 'No browser connection to render from' })
+        return
+      }
+      const timeout = setTimeout(() => {
+        if (pendingRenders.delete(request.requestId)) resolve({ ok: false, error: 'Render request timed out' })
+      }, RENDER_TIMEOUT_MS)
+      pendingRenders.set(request.requestId, (result) => {
+        clearTimeout(timeout)
+        resolve(result)
+      })
+      safeSend(ws, { type: 'render_request', request })
     })
 
   return {
@@ -72,7 +104,7 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
       safeSend(socket, { type: 'deck_state', state: editorStore.getState() })
 
       try {
-        const session = await getOrCreateSession(token, requestApproval)
+        const session = await getOrCreateSession(token, { requestApproval, requestRender })
         safeSend(socket, { type: 'history', messages: session.messages })
         unsubscribeAgent = session.subscribe((event) => safeSend(socket, { type: 'agent_event', event }))
       } catch (err) {
@@ -98,9 +130,49 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
           pendingApprovals.delete(msg.toolCallId)
           return
 
+        case 'render_response': {
+          const resolve = pendingRenders.get(msg.requestId)
+          if (!resolve) return
+          pendingRenders.delete(msg.requestId)
+          resolve(msg.image ? { ok: true, dataUrl: msg.image } : { ok: false, error: msg.error ?? 'Render failed' })
+          return
+        }
+
+        case 'select_deck': {
+          const result = editorStore.selectDeck(msg.deckId)
+          if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
+          return
+        }
+
+        case 'create_deck':
+          editorStore.createDeck(msg.name)
+          return
+
+        case 'delete_deck': {
+          const result = editorStore.deleteDeck(msg.deckId)
+          if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
+          return
+        }
+
+        case 'add_slide':
+          editorStore.addSlide()
+          return
+
+        case 'remove_slide': {
+          const result = editorStore.removeSlide(msg.slideId)
+          if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
+          return
+        }
+
+        case 'select_slide': {
+          const result = editorStore.selectSlide(msg.slideId)
+          if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
+          return
+        }
+
         case 'prompt': {
           try {
-            const session = await getOrCreateSession(token, requestApproval)
+            const session = await getOrCreateSession(token, { requestApproval, requestRender })
             await session.prompt(msg.text, session.isStreaming ? { streamingBehavior: 'steer' } : undefined)
           } catch (err) {
             safeSend(socket, { type: 'error', message: err instanceof Error ? err.message : 'Prompt failed' })
@@ -113,10 +185,12 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
     onClose: () => {
       unsubscribeDeck?.()
       unsubscribeAgent?.()
-      // Deny anything still pending so the agent doesn't hang forever
+      // Deny/fail anything still pending so the agent doesn't hang forever
       // waiting on a browser tab that just went away.
       for (const resolve of pendingApprovals.values()) resolve(false)
       pendingApprovals.clear()
+      for (const resolve of pendingRenders.values()) resolve({ ok: false, error: 'Browser connection closed' })
+      pendingRenders.clear()
     },
   }
 }

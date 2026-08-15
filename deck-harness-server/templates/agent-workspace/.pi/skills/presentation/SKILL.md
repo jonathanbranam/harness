@@ -9,15 +9,32 @@ Use this skill when the user is working with the live presentation editor.
 
 ## Key concepts
 
-- The editor maintains a list of objects (currently text boxes; shapes/images
-  are future work).
+- The editor holds multiple decks, each with an ordered list of slides.
+  Exactly one deck and one slide within it are active at a time.
+- The editor maintains a list of objects on the active slide (currently text
+  boxes; shapes/images are future work). Object ids are unique only within
+  their slide, not across the whole deck.
 - Each object has an `id`, `x`, `y`, `width`, `height`, `text`, `fillColor`,
   and `fontSize`.
 - The user can select objects in the browser; the current selection IDs are
-  injected into context on every message, and also available on demand via
-  `presentation_get_state`.
+  injected into context on every message (along with the active deck/slide
+  identity), and also available on demand via `presentation_get_state`.
+  Selection always resets to empty when the active deck or slide changes.
 - Changes made by the user or by you are immediately reflected in the shared
   state and pushed to the browser canvas.
+
+## Deck and slide management
+
+- Use `deck_list` / `deck_create` / `deck_select` / `deck_delete` to manage
+  decks. Creating a deck makes it active with one blank slide.
+- Use `slide_add` / `slide_remove` / `slide_select` to manage slides within
+  the active deck. Adding a slide makes it active and starts it blank.
+- Confirm which deck/slide is active (via context or `presentation_get_state`)
+  before editing objects by id — ids from a different slide won't match.
+- Use `slide_view` to render the active slide to an image and visually check
+  for layout problems (text overflowing its box, objects overlapping, sizing
+  that looks wrong) that aren't obvious from bounds alone. Call it after
+  making layout changes you're unsure about, not on every edit.
 
 ## Common patterns
 
