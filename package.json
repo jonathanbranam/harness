@@ -1,0 +1,25 @@
+{
+  "name": "harness",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": [
+    "deck-harness-server",
+    "client-deck"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w deck-harness-server",
+    "dev:client-deck": "npm run dev -w client-deck",
+    "build:client-deck": "npm run build -w client-deck",
+    "build": "npm run build:client-deck",
+    "start": "npm run start -w deck-harness-server",
+    "typecheck": "npm run typecheck -w deck-harness-server && tsc -b client-deck --noEmit",
+    "hash-password": "npm run hash-password -w deck-harness-server",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "tsx": "^4.23.12",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9"
+  }
+}
