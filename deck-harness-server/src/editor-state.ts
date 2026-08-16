@@ -66,11 +66,56 @@ export interface DeckState {
   activeSlideId: string
   objects: DeckObject[]
   selection: string[]
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export interface OpResult {
   ok: boolean
   error?: string
+}
+
+// --- Undo/redo history ---
+//
+// See openspec/changes/add-undo-redo-support/design.md's "Whole-state
+// snapshots per entry, not inverse operations": each entry stores a
+// deep-cloned before/after `{ decks, activeDeckId, selection }` snapshot
+// rather than a hand-written inverse per action, so undo/redo is correct by
+// construction regardless of which mutation produced the entry.
+
+export type Actor = 'user' | 'agent'
+
+interface HistorySnapshot {
+  decks: Deck[]
+  activeDeckId: string
+  selection: string[]
+}
+
+interface HistoryEntry {
+  id: string
+  actor: Actor
+  timestamp: number
+  description: string
+  before: HistorySnapshot
+  after: HistorySnapshot
+}
+
+export interface HistoryEntrySummary {
+  actor: Actor
+  timestamp: number
+  description: string
+}
+
+export interface HistoryResult {
+  entries: HistoryEntrySummary[]
+  canUndo: boolean
+  canRedo: boolean
+}
+
+export interface HistoryStepResult {
+  steppedEntries: HistoryEntrySummary[]
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export type UpdateAction =
@@ -226,6 +271,48 @@ function clampToSlide(obj: { x: number; y: number; width: number; height: number
   obj.y = Math.min(Math.max(0, obj.y), SLIDE_HEIGHT - obj.height)
 }
 
+// Shared by getState()/exportSnapshot() (both need an isolated copy so a
+// caller can't mutate live state through the returned objects) and the
+// undo/redo history snapshots below (which need every entry's before/after
+// state to stay independent of subsequent live mutations).
+function cloneObject(o: DeckObject): DeckObject {
+  return { ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) }
+}
+
+function cloneSlide(s: Slide): Slide {
+  return { ...s, objects: s.objects.map(cloneObject) }
+}
+
+function cloneDeck(d: Deck): Deck {
+  return { ...d, slides: d.slides.map(cloneSlide) }
+}
+
+function cloneDecks(decks: Deck[]): Deck[] {
+  return decks.map(cloneDeck)
+}
+
+function toHistorySummary(e: HistoryEntry): HistoryEntrySummary {
+  return { actor: e.actor, timestamp: e.timestamp, description: e.description }
+}
+
+const UPDATE_DESCRIPTIONS: Record<UpdateAction, (targetCount: number) => string> = {
+  setPosition: (n) => `Moved ${n} object${n === 1 ? '' : 's'}`,
+  setSize: (n) => `Resized ${n} object${n === 1 ? '' : 's'}`,
+  setText: (n) => `Edited text on ${n} object${n === 1 ? '' : 's'}`,
+  setFillColor: (n) => `Changed fill color on ${n} object${n === 1 ? '' : 's'}`,
+  setFontColor: (n) => `Changed font color on ${n} object${n === 1 ? '' : 's'}`,
+  setBorderColor: (n) => `Changed border color on ${n} object${n === 1 ? '' : 's'}`,
+  setFontSize: (n) => `Changed font size on ${n} object${n === 1 ? '' : 's'}`,
+  applyGridLayout: (n) => `Laid out ${n} object${n === 1 ? '' : 's'} in a grid`,
+  addObject: () => 'Added object',
+  removeObject: (n) => `Removed ${n} object${n === 1 ? '' : 's'}`,
+  applyTextStyle: (n) => `Changed text style on ${n} object${n === 1 ? '' : 's'}`,
+}
+
+function describeUpdate(action: UpdateAction, targetIds: string[]): string {
+  return UPDATE_DESCRIPTIONS[action](targetIds.length)
+}
+
 function seedObjects(): DeckObject[] {
   return [
     {
@@ -267,11 +354,15 @@ function seedObjects(): DeckObject[] {
   ]
 }
 
+const HISTORY_CAP = 100
+
 export class EditorStore {
   private decks = new Map<string, Deck>()
   private activeDeckId: string
   private selection: string[] = []
   private listeners = new Set<(state: DeckState) => void>()
+  private history: HistoryEntry[] = []
+  private redoStack: HistoryEntry[] = []
 
   /** @param initial Restored snapshot to seed from (see deck-persistence.ts's `loadSnapshot`); omitted/null builds the hardcoded demo deck (first run / no persisted state). */
   constructor(initial?: { decks: Deck[]; activeDeckId: string } | null) {
@@ -296,6 +387,34 @@ export class EditorStore {
     for (const listener of this.listeners) listener(snapshot)
   }
 
+  private snapshotState(): HistorySnapshot {
+    return { decks: cloneDecks([...this.decks.values()]), activeDeckId: this.activeDeckId, selection: [...this.selection] }
+  }
+
+  /** Deep-clones the target snapshot before adopting it as live state, so a later mutation can never corrupt a still-reachable history entry (see design.md's "correct by construction" guarantee — restoring by reference would let a subsequent edit mutate the very entry it was restored from). */
+  private restoreSnapshot(snapshot: HistorySnapshot) {
+    this.decks = new Map(cloneDecks(snapshot.decks).map((d) => [d.id, d]))
+    this.activeDeckId = snapshot.activeDeckId
+    this.selection = [...snapshot.selection]
+  }
+
+  /** Centralizes the cap/eviction/redo-invalidation rule (design.md's "History capture centralized in one private wrapper") — pushes one entry from an already-captured before/after pair, then emits once. */
+  private commitHistory(actor: Actor, description: string, before: HistorySnapshot, after: HistorySnapshot) {
+    this.redoStack = []
+    this.history.push({ id: randomUUID(), actor, timestamp: Date.now(), description, before, after })
+    if (this.history.length > HISTORY_CAP) this.history.shift()
+    this.emit()
+  }
+
+  /** Snapshots before/after around `mutate`, unconditionally committing a history entry — for methods (createDeck, deleteDeck, addSlide, removeSlide) whose callers already guard against no-op calls before invoking them. applyUpdate captures its own before/after instead, since it must skip the commit when every target id failed (see its comment). */
+  private withHistory<T>(actor: Actor, description: string, mutate: () => T): T {
+    const before = this.snapshotState()
+    const result = mutate()
+    const after = this.snapshotState()
+    this.commitHistory(actor, description, before, after)
+    return result
+  }
+
   private activeDeck(): Deck {
     // A deck always exists: deleteDeck refuses to remove the last one.
     return this.decks.get(this.activeDeckId)!
@@ -315,21 +434,24 @@ export class EditorStore {
       activeDeckId: this.activeDeckId,
       slides: deck.slides.map((s) => ({ id: s.id })),
       activeSlideId: deck.activeSlideId,
-      objects: slide.objects.map((o) => ({ ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) })),
+      objects: slide.objects.map(cloneObject),
       selection: [...this.selection],
+      canUndo: this.history.length > 0,
+      canRedo: this.redoStack.length > 0,
     }
   }
 
   // --- Deck management ---
 
-  createDeck(name: string): { deckId: string } {
-    const slide: Slide = { id: randomUUID(), objects: [] }
-    const deck: Deck = { id: randomUUID(), name, slides: [slide], activeSlideId: slide.id }
-    this.decks.set(deck.id, deck)
-    this.activeDeckId = deck.id
-    this.selection = []
-    this.emit()
-    return { deckId: deck.id }
+  createDeck(actor: Actor, name: string): { deckId: string } {
+    return this.withHistory(actor, `Created deck "${name}"`, () => {
+      const slide: Slide = { id: randomUUID(), objects: [] }
+      const deck: Deck = { id: randomUUID(), name, slides: [slide], activeSlideId: slide.id }
+      this.decks.set(deck.id, deck)
+      this.activeDeckId = deck.id
+      this.selection = []
+      return { deckId: deck.id }
+    })
   }
 
   listDecks(): DeckSummary[] {
@@ -354,43 +476,47 @@ export class EditorStore {
     return { ok: true }
   }
 
-  deleteDeck(deckId: string): OpResult {
-    if (!this.decks.has(deckId)) return { ok: false, error: `No deck with id "${deckId}"` }
+  deleteDeck(actor: Actor, deckId: string): OpResult {
+    const deck = this.decks.get(deckId)
+    if (!deck) return { ok: false, error: `No deck with id "${deckId}"` }
     if (this.decks.size === 1) return { ok: false, error: 'Cannot delete the only remaining deck' }
-    this.decks.delete(deckId)
-    if (this.activeDeckId === deckId) {
-      this.activeDeckId = this.decks.keys().next().value!
-      this.selection = []
-    }
-    this.emit()
-    return { ok: true }
+    return this.withHistory(actor, `Deleted deck "${deck.name}"`, () => {
+      this.decks.delete(deckId)
+      if (this.activeDeckId === deckId) {
+        this.activeDeckId = this.decks.keys().next().value!
+        this.selection = []
+      }
+      return { ok: true }
+    })
   }
 
   // --- Slide management (active deck) ---
 
-  addSlide(): { slideId: string } {
-    const deck = this.activeDeck()
-    const slide: Slide = { id: randomUUID(), objects: [] }
-    deck.slides.push(slide)
-    deck.activeSlideId = slide.id
-    this.selection = []
-    this.emit()
-    return { slideId: slide.id }
+  addSlide(actor: Actor): { slideId: string } {
+    return this.withHistory(actor, 'Added slide', () => {
+      const deck = this.activeDeck()
+      const slide: Slide = { id: randomUUID(), objects: [] }
+      deck.slides.push(slide)
+      deck.activeSlideId = slide.id
+      this.selection = []
+      return { slideId: slide.id }
+    })
   }
 
-  removeSlide(slideId: string): OpResult {
+  removeSlide(actor: Actor, slideId: string): OpResult {
     const deck = this.activeDeck()
     const index = deck.slides.findIndex((s) => s.id === slideId)
     if (index === -1) return { ok: false, error: `No slide with id "${slideId}" in the active deck` }
     if (deck.slides.length === 1) return { ok: false, error: 'Cannot remove the only remaining slide in a deck' }
-    deck.slides.splice(index, 1)
-    if (deck.activeSlideId === slideId) {
-      const neighborIndex = Math.min(index, deck.slides.length - 1)
-      deck.activeSlideId = deck.slides[neighborIndex].id
-      this.selection = []
-    }
-    this.emit()
-    return { ok: true }
+    return this.withHistory(actor, 'Removed slide', () => {
+      deck.slides.splice(index, 1)
+      if (deck.activeSlideId === slideId) {
+        const neighborIndex = Math.min(index, deck.slides.length - 1)
+        deck.activeSlideId = deck.slides[neighborIndex].id
+        this.selection = []
+      }
+      return { ok: true }
+    })
   }
 
   selectSlide(slideId: string): OpResult {
@@ -424,7 +550,23 @@ export class EditorStore {
       .map((o) => o.id)
   }
 
-  applyUpdate(action: UpdateAction, targetIds: string[], args: Record<string, unknown>): UpdateResult {
+  /**
+   * Captures its own before/after snapshot instead of routing through
+   * `withHistory` because, unlike createDeck/deleteDeck/addSlide/removeSlide
+   * (which each validate upfront and always succeed once past that guard),
+   * a call here can process a batch of target ids where every one fails
+   * (unknown id, addObject's required-field/duplicate-id checks) — nothing
+   * actually mutates, and per deck-undo-redo spec's "Content mutations are
+   * captured in history" a no-op call must not push a history entry.
+   */
+  applyUpdate(actor: Actor, action: UpdateAction, targetIds: string[], args: Record<string, unknown>): UpdateResult {
+    const before = this.snapshotState()
+    const result = this.runUpdate(action, targetIds, args)
+    if (result.changed.length > 0) this.commitHistory(actor, describeUpdate(action, targetIds), before, this.snapshotState())
+    return result
+  }
+
+  private runUpdate(action: UpdateAction, targetIds: string[], args: Record<string, unknown>): UpdateResult {
     const slide = this.activeSlide()
     const errors: string[] = []
     const changed: string[] = []
@@ -445,7 +587,6 @@ export class EditorStore {
         }
         changed.push(t.id)
       }
-      this.emit()
       return { changed, errors }
     }
 
@@ -475,7 +616,6 @@ export class EditorStore {
       clampToSlide(newObject)
       slide.objects.push(newObject)
       changed.push(newObject.id)
-      this.emit()
       return { changed, errors }
     }
 
@@ -493,7 +633,6 @@ export class EditorStore {
         const known = new Set(slide.objects.map((o) => o.id))
         this.selection = this.selection.filter((id) => known.has(id))
       }
-      this.emit()
       return { changed, errors }
     }
 
@@ -546,24 +685,56 @@ export class EditorStore {
       changed.push(id)
     }
 
-    this.emit()
     return { changed, errors }
   }
 
   /** Full decks/slides/objects snapshot (not the `getState()` broadcast shape, which only carries the active slide's objects) — used by deck-persistence.ts's debounced auto-save. */
   exportSnapshot(): { decks: Deck[]; activeDeckId: string } {
-    return {
-      decks: [...this.decks.values()].map((d) => ({
-        id: d.id,
-        name: d.name,
-        activeSlideId: d.activeSlideId,
-        slides: d.slides.map((s) => ({
-          id: s.id,
-          objects: s.objects.map((o) => ({ ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) })),
-        })),
-      })),
-      activeDeckId: this.activeDeckId,
+    return { decks: cloneDecks([...this.decks.values()]), activeDeckId: this.activeDeckId }
+  }
+
+  // --- Undo/redo ---
+  //
+  // `actor` is accepted (not currently branched on) for the same "explicit
+  // parameter on every mutating method" convention as applyUpdate/createDeck/
+  // etc. (design.md's "actor becomes an explicit parameter" decision) — undo
+  // and redo don't themselves push a new history entry, so there's nothing
+  // to attribute yet, but keeping the parameter here matches every other
+  // mutating call site and leaves room for future provenance on the
+  // undo/redo action itself.
+
+  undo(actor: Actor, count = 1): HistoryStepResult {
+    const stepped: HistoryEntry[] = []
+    for (let i = 0; i < count && this.history.length > 0; i++) {
+      const entry = this.history.pop()!
+      this.redoStack.push(entry)
+      stepped.push(entry)
     }
+    if (stepped.length > 0) {
+      this.restoreSnapshot(stepped[stepped.length - 1].before)
+      this.emit()
+    }
+    return { steppedEntries: stepped.map(toHistorySummary), canUndo: this.history.length > 0, canRedo: this.redoStack.length > 0 }
+  }
+
+  redo(actor: Actor, count = 1): HistoryStepResult {
+    const stepped: HistoryEntry[] = []
+    for (let i = 0; i < count && this.redoStack.length > 0; i++) {
+      const entry = this.redoStack.pop()!
+      this.history.push(entry)
+      stepped.push(entry)
+    }
+    if (stepped.length > 0) {
+      this.restoreSnapshot(stepped[stepped.length - 1].after)
+      this.emit()
+    }
+    return { steppedEntries: stepped.map(toHistorySummary), canUndo: this.history.length > 0, canRedo: this.redoStack.length > 0 }
+  }
+
+  getHistory(limit?: number): HistoryResult {
+    const ordered = [...this.history].reverse()
+    const entries = (limit !== undefined ? ordered.slice(0, limit) : ordered).map(toHistorySummary)
+    return { entries, canUndo: this.history.length > 0, canRedo: this.redoStack.length > 0 }
   }
 }
 

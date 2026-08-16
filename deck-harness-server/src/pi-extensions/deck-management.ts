@@ -18,7 +18,7 @@ export function deckManagement(pi: ExtensionAPI) {
       name: Type.String({ description: 'Display name for the new deck.' }),
     }),
     execute: async (_id, params) => {
-      const result = editorStore.createDeck(params.name)
+      const result = editorStore.createDeck('agent', params.name)
       return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result }
     },
   })
@@ -64,7 +64,7 @@ export function deckManagement(pi: ExtensionAPI) {
       deckId: Type.String(),
     }),
     execute: async (_id, params) => {
-      const result = editorStore.deleteDeck(params.deckId)
+      const result = editorStore.deleteDeck('agent', params.deckId)
       return {
         content: [{ type: 'text' as const, text: result.ok ? 'OK' : `Error: ${result.error}` }],
         details: result,
@@ -100,7 +100,7 @@ export function deckManagement(pi: ExtensionAPI) {
     promptSnippet: 'Add a blank slide to the active deck',
     parameters: Type.Object({}),
     execute: async () => {
-      const result = editorStore.addSlide()
+      const result = editorStore.addSlide('agent')
       return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result }
     },
   })
@@ -115,7 +115,7 @@ export function deckManagement(pi: ExtensionAPI) {
       slideId: Type.String(),
     }),
     execute: async (_id, params) => {
-      const result = editorStore.removeSlide(params.slideId)
+      const result = editorStore.removeSlide('agent', params.slideId)
       return {
         content: [{ type: 'text' as const, text: result.ok ? 'OK' : `Error: ${result.error}` }],
         details: result,

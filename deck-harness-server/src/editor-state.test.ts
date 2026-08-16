@@ -8,7 +8,7 @@ describe('editorStore', () => {
   })
 
   it('applyUpdate setPosition updates x/y and reports changed ids', () => {
-    const result = editorStore.applyUpdate('setPosition', ['title'], { x: 10, y: 20 })
+    const result = editorStore.applyUpdate('user', 'setPosition', ['title'], { x: 10, y: 20 })
     expect(result.changed).toEqual(['title'])
     expect(result.errors).toEqual([])
     const obj = editorStore.getState().objects.find((o) => o.id === 'title')
@@ -17,13 +17,13 @@ describe('editorStore', () => {
   })
 
   it('applyUpdate reports an error for unknown target ids instead of throwing', () => {
-    const result = editorStore.applyUpdate('setText', ['does-not-exist'], { text: 'hi' })
+    const result = editorStore.applyUpdate('user', 'setText', ['does-not-exist'], { text: 'hi' })
     expect(result.changed).toEqual([])
     expect(result.errors).toEqual(['No object with id "does-not-exist"'])
   })
 
   it('applyGridLayout lays targets out left-to-right with the given gap', () => {
-    const result = editorStore.applyUpdate('applyGridLayout', ['box-1', 'box-2'], { direction: 'horizontal', gap: 10 })
+    const result = editorStore.applyUpdate('user', 'applyGridLayout', ['box-1', 'box-2'], { direction: 'horizontal', gap: 10 })
     expect(result.errors).toEqual([])
     const state = editorStore.getState()
     const box1 = state.objects.find((o) => o.id === 'box-1')!
@@ -44,7 +44,7 @@ describe('editorStore', () => {
 describe('editorStore deck management', () => {
   it('createDeck adds a deck with one blank slide and makes it active', () => {
     const before = editorStore.listDecks().length
-    const { deckId } = editorStore.createDeck('New Deck')
+    const { deckId } = editorStore.createDeck('user', 'New Deck')
     const decks = editorStore.listDecks()
     expect(decks.length).toBe(before + 1)
     expect(decks.find((d) => d.id === deckId)).toEqual({ id: deckId, name: 'New Deck', slideCount: 1 })
@@ -61,41 +61,41 @@ describe('editorStore deck management', () => {
   })
 
   it("selectDeck restores the deck's own last-active slide", () => {
-    const { deckId: deckA } = editorStore.createDeck('Deck A')
-    const { slideId: deckASlide2 } = editorStore.addSlide()
-    editorStore.createDeck('Deck B')
+    const { deckId: deckA } = editorStore.createDeck('user', 'Deck A')
+    const { slideId: deckASlide2 } = editorStore.addSlide('user')
+    editorStore.createDeck('user', 'Deck B')
     editorStore.selectDeck(deckA)
     expect(editorStore.getState().activeSlideId).toBe(deckASlide2)
   })
 
   it('deleteDeck rejects deleting the only remaining deck', () => {
     const decks = editorStore.listDecks()
-    for (const d of decks.slice(1)) editorStore.deleteDeck(d.id)
+    for (const d of decks.slice(1)) editorStore.deleteDeck('user', d.id)
     const remaining = editorStore.listDecks()
     expect(remaining.length).toBe(1)
-    const result = editorStore.deleteDeck(remaining[0].id)
+    const result = editorStore.deleteDeck('user', remaining[0].id)
     expect(result.ok).toBe(false)
     expect(editorStore.listDecks().length).toBe(1)
   })
 
   it('deleteDeck activates a remaining deck when deleting the active deck', () => {
-    const { deckId } = editorStore.createDeck('Another Deck')
+    const { deckId } = editorStore.createDeck('user', 'Another Deck')
     expect(editorStore.getState().activeDeckId).toBe(deckId)
-    const result = editorStore.deleteDeck(deckId)
+    const result = editorStore.deleteDeck('user', deckId)
     expect(result.ok).toBe(true)
     expect(editorStore.getState().activeDeckId).not.toBe(deckId)
   })
 
   it('renameDeck renames the active deck', () => {
-    const { deckId } = editorStore.createDeck('Old Name')
+    const { deckId } = editorStore.createDeck('user', 'Old Name')
     const result = editorStore.renameDeck(deckId, 'New Name')
     expect(result.ok).toBe(true)
     expect(editorStore.listDecks().find((d) => d.id === deckId)?.name).toBe('New Name')
   })
 
   it('renameDeck renames a deck that is not active without changing the active deck', () => {
-    const { deckId: targetDeck } = editorStore.createDeck('Target Deck')
-    const { deckId: activeDeck } = editorStore.createDeck('Active Deck')
+    const { deckId: targetDeck } = editorStore.createDeck('user', 'Target Deck')
+    const { deckId: activeDeck } = editorStore.createDeck('user', 'Active Deck')
     const result = editorStore.renameDeck(targetDeck, 'Renamed Target')
     expect(result.ok).toBe(true)
     expect(editorStore.listDecks().find((d) => d.id === targetDeck)?.name).toBe('Renamed Target')
@@ -103,7 +103,7 @@ describe('editorStore deck management', () => {
   })
 
   it('renameDeck rejects an empty or whitespace-only name, leaving the name unchanged', () => {
-    const { deckId } = editorStore.createDeck('Keep Me')
+    const { deckId } = editorStore.createDeck('user', 'Keep Me')
     const result = editorStore.renameDeck(deckId, '   ')
     expect(result.ok).toBe(false)
     expect(editorStore.listDecks().find((d) => d.id === deckId)?.name).toBe('Keep Me')
@@ -118,7 +118,7 @@ describe('editorStore deck management', () => {
 describe('editorStore slide management', () => {
   it('addSlide appends a blank slide to the active deck and makes it active', () => {
     const before = editorStore.getState().slides.length
-    const { slideId } = editorStore.addSlide()
+    const { slideId } = editorStore.addSlide('user')
     const state = editorStore.getState()
     expect(state.slides.length).toBe(before + 1)
     expect(state.activeSlideId).toBe(slideId)
@@ -126,17 +126,17 @@ describe('editorStore slide management', () => {
   })
 
   it('removeSlide rejects removing the only remaining slide in a deck', () => {
-    editorStore.createDeck('Solo Deck')
+    editorStore.createDeck('user', 'Solo Deck')
     const slides = editorStore.getState().slides
     expect(slides.length).toBe(1)
-    const result = editorStore.removeSlide(slides[0].id)
+    const result = editorStore.removeSlide('user', slides[0].id)
     expect(result.ok).toBe(false)
     expect(editorStore.getState().slides.length).toBe(1)
   })
 
   it('removeSlide activates a neighboring slide when removing the active slide', () => {
-    const { slideId } = editorStore.addSlide()
-    const result = editorStore.removeSlide(slideId)
+    const { slideId } = editorStore.addSlide('user')
+    const result = editorStore.removeSlide('user', slideId)
     expect(result.ok).toBe(true)
     expect(editorStore.getState().activeSlideId).not.toBe(slideId)
   })
@@ -155,7 +155,7 @@ describe('editorStore slide management', () => {
     editorStore.selectDeck(decks[0].id)
     const seedSlideId = editorStore.getState().slides[0].id
     editorStore.selectSlide(seedSlideId)
-    const { slideId: otherSlideId } = editorStore.addSlide()
+    const { slideId: otherSlideId } = editorStore.addSlide('user')
     editorStore.selectSlide(seedSlideId)
     editorStore.setSelection(['title'])
     expect(editorStore.getState().selection).toEqual(['title'])
@@ -176,7 +176,7 @@ describe('editorStore object CRUD (addObject / removeObject)', () => {
   it('addObject creates a new object with the given bounds and reports its id as changed', () => {
     seedSlide()
     const before = editorStore.getState().objects.length
-    const result = editorStore.applyUpdate('addObject', [], { x: 10, y: 20, width: 100, height: 50, text: 'hello' })
+    const result = editorStore.applyUpdate('user', 'addObject', [], { x: 10, y: 20, width: 100, height: 50, text: 'hello' })
     expect(result.errors).toEqual([])
     expect(result.changed.length).toBe(1)
     const state = editorStore.getState()
@@ -191,24 +191,24 @@ describe('editorStore object CRUD (addObject / removeObject)', () => {
 
   it('addObject requires numeric x/y/width/height', () => {
     seedSlide()
-    const result = editorStore.applyUpdate('addObject', [], { x: 10, y: 20 })
+    const result = editorStore.applyUpdate('user', 'addObject', [], { x: 10, y: 20 })
     expect(result.changed).toEqual([])
     expect(result.errors.length).toBeGreaterThan(0)
   })
 
   it('addObject rejects a duplicate explicit id', () => {
     seedSlide()
-    const result = editorStore.applyUpdate('addObject', [], { id: 'title', x: 0, y: 0, width: 10, height: 10 })
+    const result = editorStore.applyUpdate('user', 'addObject', [], { id: 'title', x: 0, y: 0, width: 10, height: 10 })
     expect(result.changed).toEqual([])
     expect(result.errors).toEqual(['Object with id "title" already exists on the active slide'])
   })
 
   it('removeObject removes the object and drops it from the selection', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 10, height: 10 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 0, y: 0, width: 10, height: 10 })
     const id = changed[0]
     editorStore.setSelection([id])
-    const result = editorStore.applyUpdate('removeObject', [id], {})
+    const result = editorStore.applyUpdate('user', 'removeObject', [id], {})
     expect(result.changed).toEqual([id])
     expect(result.errors).toEqual([])
     expect(editorStore.getState().objects.find((o) => o.id === id)).toBeUndefined()
@@ -217,9 +217,9 @@ describe('editorStore object CRUD (addObject / removeObject)', () => {
 
   it('removeObject reports unknown ids without affecting other targets', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 10, height: 10 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 0, y: 0, width: 10, height: 10 })
     const id = changed[0]
-    const result = editorStore.applyUpdate('removeObject', [id, 'does-not-exist'], {})
+    const result = editorStore.applyUpdate('user', 'removeObject', [id, 'does-not-exist'], {})
     expect(result.changed).toEqual([id])
     expect(result.errors).toEqual(['No object with id "does-not-exist"'])
   })
@@ -228,7 +228,7 @@ describe('editorStore object CRUD (addObject / removeObject)', () => {
 describe('editorStore slide-bounds clamping (960x540)', () => {
   it('addObject clamps an object placed beyond the slide edge', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 900, y: 500, width: 100, height: 80 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 900, y: 500, width: 100, height: 80 })
     const obj = editorStore.getState().objects.find((o) => o.id === changed[0])!
     expect(obj.width).toBe(100)
     expect(obj.height).toBe(80)
@@ -238,37 +238,37 @@ describe('editorStore slide-bounds clamping (960x540)', () => {
 
   it('addObject leaves an in-bounds object exactly as requested', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 10, y: 20, width: 100, height: 50 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 10, y: 20, width: 100, height: 50 })
     const obj = editorStore.getState().objects.find((o) => o.id === changed[0])!
     expect(obj).toMatchObject({ x: 10, y: 20, width: 100, height: 50 })
   })
 
   it('setPosition clamps an object moved past each edge without changing its size', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 100, height: 80 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 0, y: 0, width: 100, height: 80 })
     const id = changed[0]
 
-    editorStore.applyUpdate('setPosition', [id], { x: -50, y: -50 })
+    editorStore.applyUpdate('user', 'setPosition', [id], { x: -50, y: -50 })
     expect(editorStore.getState().objects.find((o) => o.id === id)).toMatchObject({ x: 0, y: 0, width: 100, height: 80 })
 
-    editorStore.applyUpdate('setPosition', [id], { x: 900, y: 500 })
+    editorStore.applyUpdate('user', 'setPosition', [id], { x: 900, y: 500 })
     const obj = editorStore.getState().objects.find((o) => o.id === id)!
     expect(obj).toMatchObject({ x: 860, y: 460, width: 100, height: 80 })
   })
 
   it('setPosition leaves an in-bounds move exactly as requested', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 100, height: 80 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 0, y: 0, width: 100, height: 80 })
     const id = changed[0]
-    editorStore.applyUpdate('setPosition', [id], { x: 300, y: 200 })
+    editorStore.applyUpdate('user', 'setPosition', [id], { x: 300, y: 200 })
     expect(editorStore.getState().objects.find((o) => o.id === id)).toMatchObject({ x: 300, y: 200, width: 100, height: 80 })
   })
 
   it('setSize clamps an object grown past each edge', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 900, y: 500, width: 10, height: 10 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 900, y: 500, width: 10, height: 10 })
     const id = changed[0]
-    editorStore.applyUpdate('setSize', [id], { width: 200, height: 150 })
+    editorStore.applyUpdate('user', 'setSize', [id], { width: 200, height: 150 })
     const obj = editorStore.getState().objects.find((o) => o.id === id)!
     expect(obj.width).toBe(200)
     expect(obj.height).toBe(150)
@@ -278,18 +278,18 @@ describe('editorStore slide-bounds clamping (960x540)', () => {
 
   it('setSize clamps a requested size larger than the slide itself', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 10, height: 10 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 0, y: 0, width: 10, height: 10 })
     const id = changed[0]
-    editorStore.applyUpdate('setSize', [id], { width: 2000, height: 1000 })
+    editorStore.applyUpdate('user', 'setSize', [id], { width: 2000, height: 1000 })
     const obj = editorStore.getState().objects.find((o) => o.id === id)!
     expect(obj).toMatchObject({ x: 0, y: 0, width: 960, height: 540 })
   })
 
   it('setSize leaves an in-bounds resize exactly as requested', () => {
     seedSlide()
-    const { changed } = editorStore.applyUpdate('addObject', [], { x: 10, y: 10, width: 50, height: 50 })
+    const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 10, y: 10, width: 50, height: 50 })
     const id = changed[0]
-    editorStore.applyUpdate('setSize', [id], { width: 120, height: 90 })
+    editorStore.applyUpdate('user', 'setSize', [id], { width: 120, height: 90 })
     expect(editorStore.getState().objects.find((o) => o.id === id)).toMatchObject({ x: 10, y: 10, width: 120, height: 90 })
   })
 })
@@ -297,8 +297,8 @@ describe('editorStore slide-bounds clamping (960x540)', () => {
 describe('editorStore font/border/fill color, including transparent', () => {
   it('setFontColor and setBorderColor update their fields', () => {
     seedSlide()
-    editorStore.applyUpdate('setFontColor', ['title'], { color: '#ff0000' })
-    editorStore.applyUpdate('setBorderColor', ['title'], { color: '#00ff00' })
+    editorStore.applyUpdate('user', 'setFontColor', ['title'], { color: '#ff0000' })
+    editorStore.applyUpdate('user', 'setBorderColor', ['title'], { color: '#00ff00' })
     const obj = editorStore.getState().objects.find((o) => o.id === 'title')!
     expect(obj.fontColor).toBe('#ff0000')
     expect(obj.borderColor).toBe('#00ff00')
@@ -306,8 +306,8 @@ describe('editorStore font/border/fill color, including transparent', () => {
 
   it('setBorderColor and setFillColor accept "transparent"', () => {
     seedSlide()
-    editorStore.applyUpdate('setBorderColor', ['title'], { color: 'transparent' })
-    editorStore.applyUpdate('setFillColor', ['title'], { color: 'transparent' })
+    editorStore.applyUpdate('user', 'setBorderColor', ['title'], { color: 'transparent' })
+    editorStore.applyUpdate('user', 'setFillColor', ['title'], { color: 'transparent' })
     const obj = editorStore.getState().objects.find((o) => o.id === 'title')!
     expect(obj.borderColor).toBe('transparent')
     expect(obj.fillColor).toBe('transparent')
@@ -317,8 +317,8 @@ describe('editorStore font/border/fill color, including transparent', () => {
 describe('editorStore applyTextStyle', () => {
   it('bold splits a run at the given plain-text offsets', () => {
     seedSlide()
-    editorStore.applyUpdate('setText', ['box-1'], { text: 'Hello world' })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
+    editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Hello world' })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
     const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
     expect(plainTextOf(obj)).toBe('Hello world')
     const runs = obj.text[0].runs
@@ -329,18 +329,18 @@ describe('editorStore applyTextStyle', () => {
 
   it('toggles bold off when re-applied with value: false', () => {
     seedSlide()
-    editorStore.applyUpdate('setText', ['box-1'], { text: 'Hello world' })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: false })
+    editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Hello world' })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: false })
     const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
     expect(obj.text[0].runs.every((r) => !r.bold)).toBe(true)
   })
 
   it('listType converts the touched block to a bulleted list, preserving runs', () => {
     seedSlide()
-    editorStore.applyUpdate('setText', ['box-1'], { text: 'Item one' })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 4, mark: 'bold', value: true })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 8, listType: 'bulleted' })
+    editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Item one' })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 4, mark: 'bold', value: true })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 8, listType: 'bulleted' })
     const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
     const block = obj.text[0]
     if (block.kind !== 'listItem') throw new Error('expected a listItem block')
@@ -351,16 +351,16 @@ describe('editorStore applyTextStyle', () => {
 
   it('listType: null converts a list item back to a paragraph', () => {
     seedSlide()
-    editorStore.applyUpdate('setText', ['box-1'], { text: 'Item one' })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 8, listType: 'numbered' })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 8, listType: null })
+    editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Item one' })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 8, listType: 'numbered' })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 8, listType: null })
     const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
     expect(obj.text[0].kind).toBe('paragraph')
   })
 
   it('addresses multi-block offsets across the "\\n" block separator', () => {
     seedSlide()
-    editorStore.applyUpdate('setText', ['box-1'], {
+    editorStore.applyUpdate('user', 'setText', ['box-1'], {
       text: [
         { kind: 'paragraph', runs: [{ text: 'First' }] },
         { kind: 'paragraph', runs: [{ text: 'Second' }] },
@@ -368,7 +368,7 @@ describe('editorStore applyTextStyle', () => {
     })
     expect(plainTextOf(editorStore.getState().objects.find((o) => o.id === 'box-1')!)).toBe('First\nSecond')
     // "Second" starts at offset 6: 5 chars of "First" plus 1 for the "\n" separator.
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 6, end: 12, mark: 'italic', value: true })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 6, end: 12, mark: 'italic', value: true })
     const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
     expect(obj.text[0].runs.every((r) => !r.italic)).toBe(true)
     expect(obj.text[1].runs[0]).toEqual({ text: 'Second', italic: true })
@@ -393,8 +393,8 @@ describe('plainTextOf and select_by_text over structured text', () => {
 
   it('matches a query spanning a bold run and a non-bold run', () => {
     seedSlide()
-    editorStore.applyUpdate('setText', ['box-1'], { text: 'Hello world' })
-    editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
+    editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Hello world' })
+    editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
     expect(editorStore.selectByText('lo wo')).toContain('box-1')
   })
 })
@@ -443,5 +443,171 @@ describe('EditorStore construction from a persisted snapshot', () => {
     const state = store.getState()
     expect(state.decks.length).toBe(1)
     expect(state.objects.length).toBeGreaterThan(0)
+  })
+})
+
+// Fresh, isolated EditorStore instances (not the shared `editorStore`
+// singleton other describe blocks above mutate sequentially) — undo/redo
+// scenarios need a deterministic starting history, which a store shared
+// across ~40 prior tests can't offer.
+describe('editorStore undo/redo', () => {
+  it('undo restores content, selection, and active slide to their state before the entry', () => {
+    const store = new EditorStore(null)
+    const seedSlideId = store.getState().activeSlideId
+    store.setSelection(['box-1'])
+    const { slideId: newSlideId } = store.addSlide('user')
+    expect(store.getState().selection).toEqual([])
+    expect(store.getState().activeSlideId).toBe(newSlideId)
+
+    const result = store.undo('user')
+    expect(result.steppedEntries).toEqual([{ actor: 'user', description: 'Added slide', timestamp: expect.any(Number) }])
+    const state = store.getState()
+    expect(state.activeSlideId).toBe(seedSlideId)
+    expect(state.selection).toEqual(['box-1'])
+    expect(state.slides.length).toBe(1)
+  })
+
+  it('undo with an empty history is a no-op that does not throw', () => {
+    const store = new EditorStore(null)
+    const before = store.getState()
+    let result: ReturnType<typeof store.undo> | undefined
+    expect(() => {
+      result = store.undo('user')
+    }).not.toThrow()
+    expect(result!.steppedEntries).toEqual([])
+    expect(result!.canUndo).toBe(false)
+    expect(store.getState().slides.length).toBe(before.slides.length)
+  })
+
+  it('repeated undo walks backward in the exact reverse order entries were added', () => {
+    const store = new EditorStore(null)
+    // setPosition targets 'title' on the seed slide before addSlide makes a
+    // new, blank slide active — 'title' doesn't exist there.
+    store.applyUpdate('agent', 'setPosition', ['title'], { x: 5, y: 5 })
+    store.addSlide('user')
+    const first = store.undo('user')
+    expect(first.steppedEntries[0].description).toBe('Added slide')
+    const second = store.undo('user')
+    expect(second.steppedEntries[0].description).toBe('Moved 1 object')
+  })
+
+  it('redo reapplies the most recently undone entry', () => {
+    const store = new EditorStore(null)
+    const { slideId: newSlideId } = store.addSlide('user')
+    store.undo('user')
+    expect(store.getState().slides.length).toBe(1)
+
+    const result = store.redo('user')
+    expect(result.steppedEntries[0].description).toBe('Added slide')
+    const state = store.getState()
+    expect(state.slides.length).toBe(2)
+    expect(state.activeSlideId).toBe(newSlideId)
+  })
+
+  it('redo with nothing to redo is a no-op that does not throw', () => {
+    const store = new EditorStore(null)
+    store.addSlide('user')
+    let result: ReturnType<typeof store.redo> | undefined
+    expect(() => {
+      result = store.redo('user')
+    }).not.toThrow()
+    expect(result!.steppedEntries).toEqual([])
+    expect(result!.canRedo).toBe(false)
+  })
+
+  it('a new edit after undo discards the redo tail', () => {
+    const store = new EditorStore(null)
+    store.addSlide('user')
+    store.undo('user')
+    expect(store.getHistory().canRedo).toBe(true)
+
+    store.addSlide('user')
+    expect(store.getHistory().canRedo).toBe(false)
+    expect(store.redo('user').steppedEntries).toEqual([])
+  })
+
+  it('undo/redo with a count larger than available entries stops at the bottom and reports how many were stepped', () => {
+    const store = new EditorStore(null)
+    store.addSlide('user')
+    store.addSlide('user')
+
+    const undoResult = store.undo('user', 10)
+    expect(undoResult.steppedEntries.length).toBe(2)
+    expect(undoResult.canUndo).toBe(false)
+
+    const redoResult = store.redo('user', 10)
+    expect(redoResult.steppedEntries.length).toBe(2)
+    expect(redoResult.canRedo).toBe(false)
+  })
+
+  it('caps history at ~100 entries, evicting the oldest first', () => {
+    const store = new EditorStore(null)
+    for (let i = 0; i < 105; i++) store.addSlide('user')
+    expect(store.getState().slides.length).toBe(106) // 1 seed slide + 105 added
+    expect(store.getHistory().entries.length).toBe(100)
+
+    // The oldest 5 entries were evicted, so only the most recent 100 of the
+    // 105 additions are undoable — undoing all of them lands back at the
+    // state right after the (now-irreversible) 5th addition.
+    const result = store.undo('user', 200)
+    expect(result.steppedEntries.length).toBe(100)
+    expect(store.getHistory().canUndo).toBe(false)
+    expect(store.getState().slides.length).toBe(6)
+  })
+
+  it('entries record the actor that made the change', () => {
+    const store = new EditorStore(null)
+    store.addSlide('user')
+    store.addSlide('agent')
+    const entries = store.getHistory().entries
+    expect(entries[0].actor).toBe('agent')
+    expect(entries[1].actor).toBe('user')
+  })
+
+  it('a fully-failed applyUpdate call does not push a history entry', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.applyUpdate('user', 'setText', ['does-not-exist'], { text: 'hi' })
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(store.getHistory()).toEqual(before)
+  })
+
+  it('getHistory returns entries most-recent-first with canUndo/canRedo reflecting each stack state', () => {
+    const store = new EditorStore(null)
+    expect(store.getHistory()).toEqual({ entries: [], canUndo: false, canRedo: false })
+
+    // setPosition targets 'title' on the seed slide before addSlide makes a
+    // new, blank slide active — 'title' doesn't exist there.
+    store.applyUpdate('agent', 'setPosition', ['title'], { x: 5, y: 5 })
+    let history = store.getHistory()
+    expect(history.entries.map((e) => e.description)).toEqual(['Moved 1 object'])
+    expect(history.canUndo).toBe(true)
+    expect(history.canRedo).toBe(false)
+
+    store.addSlide('user')
+    history = store.getHistory()
+    expect(history.entries.map((e) => e.description)).toEqual(['Added slide', 'Moved 1 object'])
+    expect(history.entries[0].actor).toBe('user')
+
+    store.undo('user')
+    history = store.getHistory()
+    expect(history.canUndo).toBe(true)
+    expect(history.canRedo).toBe(true)
+
+    store.undo('user')
+    history = store.getHistory()
+    expect(history.canUndo).toBe(false)
+    expect(history.canRedo).toBe(true)
+  })
+
+  it('getHistory respects an optional limit while still reporting canUndo/canRedo over the full stack', () => {
+    const store = new EditorStore(null)
+    store.addSlide('user')
+    store.addSlide('user')
+    store.addSlide('user')
+    const limited = store.getHistory(2)
+    expect(limited.entries.length).toBe(2)
+    expect(limited.canUndo).toBe(true)
+    expect(store.getHistory().entries.length).toBe(3)
   })
 })

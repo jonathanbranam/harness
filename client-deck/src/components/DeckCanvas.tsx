@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { DeckObject, DeckState, TextBlock, UpdateActionCall } from '../hooks/useDeckSocket'
 import { genId } from '../id'
 import {
@@ -39,6 +39,8 @@ interface DeckCanvasProps {
   deckState: DeckState
   onSelectionChange: (ids: string[]) => void
   onObjectUpdate: (actions: UpdateActionCall[]) => void
+  onUndo: () => void
+  onRedo: () => void
   /** Read-only render for preview mode: no toolbar, no selection highlight, no click/drag/edit interactions. */
   readOnly?: boolean
 }
@@ -50,32 +52,26 @@ const CORNER_CLASSES: Record<Corner, string> = {
   se: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize',
 }
 
-function TextObjectBox({
-  obj,
-  selected,
-  editing,
-  onPointerDownMove,
-  onPointerDownResize,
-  onClick,
-  onDoubleClick,
-  onStartEditingCommit,
-  liveRect,
-  onObjectUpdate,
-}: {
-  obj: DeckObject
-  selected: boolean
-  editing: boolean
-  onPointerDownMove: (e: React.PointerEvent) => void
-  onPointerDownResize: (e: React.PointerEvent, corner: Corner) => void
-  onClick: (e: React.MouseEvent) => void
-  onDoubleClick: (e: React.MouseEvent) => void
-  onStartEditingCommit: () => void
-  liveRect: Rect | undefined
-  onObjectUpdate: (actions: UpdateActionCall[]) => void
-}) {
+interface TextObjectBoxHandle {
+  applyMark: (mark: 'bold' | 'italic') => void
+  applyListType: (listType: 'bulleted' | 'numbered' | null) => void
+}
+
+const TextObjectBox = forwardRef<
+  TextObjectBoxHandle,
+  {
+    obj: DeckObject
+    editing: boolean
+    rect: Rect
+    onPointerDownMove: (e: React.PointerEvent) => void
+    onClick: (e: React.MouseEvent) => void
+    onDoubleClick: (e: React.MouseEvent) => void
+    onStartEditingCommit: () => void
+    onObjectUpdate: (actions: UpdateActionCall[]) => void
+  }
+>(function TextObjectBox({ obj, editing, rect, onPointerDownMove, onClick, onDoubleClick, onStartEditingCommit, onObjectUpdate }, ref) {
   const editableRef = useRef<HTMLDivElement | null>(null)
   const lastKnownTextRef = useRef<string>('')
-  const rect = liveRect ?? obj
 
   // commitText fires on blur, immediately followed by onStartEditingCommit
   // switching this box out of the contenteditable view into the static
@@ -155,9 +151,11 @@ function TextObjectBox({
     [obj.id, onObjectUpdate],
   )
 
+  useImperativeHandle(ref, () => ({ applyMark, applyListType }), [applyMark, applyListType])
+
   return (
     <div
-      className={`absolute rounded-md border-2 transition-colors ${selected ? 'border-indigo-400 ring-2 ring-indigo-400/40' : 'border-transparent'}`}
+      className="absolute rounded-md border-2 border-transparent"
       style={{
         left: rect.x,
         top: rect.y,
@@ -174,32 +172,6 @@ function TextObjectBox({
     >
       {editing ? (
         <>
-          <div
-            className="absolute -top-9 left-0 flex gap-1 bg-gray-800 border border-gray-700 rounded px-1 py-1 z-10"
-            // mousedown (not click) is what the browser uses to move focus /
-            // collapse the current selection by default; preventing it here
-            // keeps the contenteditable's selection intact so applyMark/
-            // applyListType read the range the user actually made, not an
-            // empty one collapsed by clicking the toolbar itself.
-            onMouseDown={(e) => e.preventDefault()}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <button type="button" className="px-2 text-xs font-bold text-white hover:bg-gray-700 rounded" onClick={() => applyMark('bold')}>
-              B
-            </button>
-            <button type="button" className="px-2 text-xs italic text-white hover:bg-gray-700 rounded" onClick={() => applyMark('italic')}>
-              I
-            </button>
-            <button type="button" className="px-2 text-xs text-white hover:bg-gray-700 rounded" onClick={() => applyListType('bulleted')}>
-              • List
-            </button>
-            <button type="button" className="px-2 text-xs text-white hover:bg-gray-700 rounded" onClick={() => applyListType('numbered')}>
-              1. List
-            </button>
-            <button type="button" className="px-2 text-xs text-gray-300 hover:bg-gray-700 rounded" onClick={() => applyListType(null)}>
-              Clear list
-            </button>
-          </div>
           <div
             ref={editableRef}
             contentEditable
@@ -237,29 +209,19 @@ function TextObjectBox({
           ))}
         </div>
       )}
-      {selected && !editing && (
-        <>
-          {RESIZE_CORNERS.map((corner) => (
-            <div
-              key={corner}
-              className={`absolute w-3 h-3 rounded-full bg-indigo-400 border border-white/70 ${CORNER_CLASSES[corner]}`}
-              onPointerDown={(e) => onPointerDownResize(e, corner)}
-            />
-          ))}
-        </>
-      )}
     </div>
   )
-}
+})
 
 export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function DeckCanvas(
-  { deckState, onSelectionChange, onObjectUpdate, readOnly = false },
+  { deckState, onSelectionChange, onObjectUpdate, onUndo, onRedo, readOnly = false },
   canvasRef,
 ) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [liveRects, setLiveRects] = useState<Record<string, Rect>>({})
   const didDragRef = useRef(false)
   const pendingEditIdRef = useRef<string | null>(null)
+  const editingBoxRef = useRef<TextObjectBoxHandle | null>(null)
 
   // Scale-to-fit: the slide keeps its fixed 960x540 logical size (so object
   // coordinates and slide_view's screenshot capture are unaffected — see
@@ -440,25 +402,42 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     if (editingId && deckState.selection.includes(editingId)) setEditingId(null)
   }, [deckState.selection, onObjectUpdate, editingId])
 
-  // Delete/Backspace deletes the selection, but only when not actively
-  // editing text (where those keys must edit the text itself).
+  // Delete/Backspace deletes the selection, and Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z
+  // undo/redo — both only when not actively editing text in place (where
+  // those keys must edit the text itself / trigger the browser's native
+  // in-field undo, per deck-undo-redo spec's "Keyboard shortcut suppressed
+  // during text editing" scenario).
   useEffect(() => {
     if (readOnly) return
     function onKeyDown(e: KeyboardEvent) {
       if (editingId) return
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       if ((e.key === 'Delete' || e.key === 'Backspace') && deckState.selection.length > 0) {
-        const target = e.target as HTMLElement | null
-        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
         e.preventDefault()
         deleteSelection()
+        return
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) onRedo()
+        else onUndo()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [readOnly, editingId, deckState.selection, deleteSelection])
+  }, [readOnly, editingId, deckState.selection, deleteSelection, onUndo, onRedo])
 
   const selectedObjects = deckState.objects.filter((o) => deckState.selection.includes(o.id))
   const firstSelected = selectedObjects[0]
+
+  // Resolved once per render and shared by both each object's own box (its
+  // layout) and the selection/editing overlay below (chrome placement), so
+  // the liveRect-during-drag fallback isn't duplicated in two places.
+  const resolvedRects: Record<string, Rect> = {}
+  for (const obj of deckState.objects) {
+    resolvedRects[obj.id] = liveRects[obj.id] ?? obj
+  }
 
   const setStyleOnSelection = (action: UpdateActionCall['action'], args: Record<string, unknown>) => {
     if (deckState.selection.length === 0) return
@@ -488,6 +467,25 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             onClick={deleteSelection}
           >
             Delete
+          </button>
+
+          <button
+            type="button"
+            className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
+            disabled={!deckState.canUndo}
+            onClick={onUndo}
+            title="Undo (Ctrl/Cmd+Z)"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
+            disabled={!deckState.canRedo}
+            onClick={onRedo}
+            title="Redo (Ctrl/Cmd+Shift+Z)"
+          >
+            Redo
           </button>
 
           <div className="w-px h-5 bg-gray-700 mx-1" />
@@ -589,12 +587,10 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                   <TextObjectBox
                     key={obj.id}
                     obj={obj}
-                    selected={false}
                     editing={false}
-                    liveRect={undefined}
+                    rect={obj}
                     onObjectUpdate={() => {}}
                     onPointerDownMove={() => {}}
-                    onPointerDownResize={() => {}}
                     onClick={() => {}}
                     onDoubleClick={() => {}}
                     onStartEditingCommit={() => {}}
@@ -602,13 +598,12 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                 ) : (
                   <TextObjectBox
                     key={obj.id}
+                    ref={editingId === obj.id ? editingBoxRef : undefined}
                     obj={obj}
-                    selected={deckState.selection.includes(obj.id)}
                     editing={editingId === obj.id}
-                    liveRect={liveRects[obj.id]}
+                    rect={resolvedRects[obj.id]}
                     onObjectUpdate={onObjectUpdate}
                     onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
-                    onPointerDownResize={(e, corner) => handlePointerDownResize(e, obj, corner)}
                     onClick={(e) => {
                       e.stopPropagation()
                       if (didDragRef.current) {
@@ -625,6 +620,99 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                     onStartEditingCommit={() => setEditingId(null)}
                   />
                 ),
+              )}
+
+              {/* Selection outline, resize handles, and the floating format
+                  toolbar are painted here — after every object in DOM order —
+                  instead of inline within each object's own box, so they
+                  stay visible above every slide object regardless of the
+                  selected/edited object's z-order (see design.md). */}
+              {!readOnly && (
+                <div className="absolute inset-0 pointer-events-none">
+                  {selectedObjects.map((obj) => {
+                    const rect = resolvedRects[obj.id]
+                    return (
+                      <div
+                        key={obj.id}
+                        className="absolute rounded-md border-2 border-indigo-400 ring-2 ring-indigo-400/40 pointer-events-none"
+                        style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+                      />
+                    )
+                  })}
+
+                  {selectedObjects
+                    .filter((obj) => obj.id !== editingId)
+                    .map((obj) => {
+                      const rect = resolvedRects[obj.id]
+                      return (
+                        <div key={obj.id} className="absolute" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
+                          {RESIZE_CORNERS.map((corner) => (
+                            <div
+                              key={corner}
+                              className={`absolute w-3 h-3 rounded-full bg-indigo-400 border border-white/70 pointer-events-auto ${CORNER_CLASSES[corner]}`}
+                              onPointerDown={(e) => handlePointerDownResize(e, obj, corner)}
+                            />
+                          ))}
+                        </div>
+                      )
+                    })}
+
+                  {editingId &&
+                    resolvedRects[editingId] &&
+                    (() => {
+                      const rect = resolvedRects[editingId]
+                      return (
+                        <div className="absolute" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
+                          <div
+                            className="absolute -top-9 left-0 flex gap-1 bg-gray-800 border border-gray-700 rounded px-1 py-1 pointer-events-auto"
+                            // mousedown (not click) is what the browser uses to move focus /
+                            // collapse the current selection by default; preventing it here
+                            // keeps the contenteditable's selection intact so applyMark/
+                            // applyListType read the range the user actually made, not an
+                            // empty one collapsed by clicking the toolbar itself.
+                            onMouseDown={(e) => e.preventDefault()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className="px-2 text-xs font-bold text-white hover:bg-gray-700 rounded"
+                              onClick={() => editingBoxRef.current?.applyMark('bold')}
+                            >
+                              B
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 text-xs italic text-white hover:bg-gray-700 rounded"
+                              onClick={() => editingBoxRef.current?.applyMark('italic')}
+                            >
+                              I
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 text-xs text-white hover:bg-gray-700 rounded"
+                              onClick={() => editingBoxRef.current?.applyListType('bulleted')}
+                            >
+                              • List
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 text-xs text-white hover:bg-gray-700 rounded"
+                              onClick={() => editingBoxRef.current?.applyListType('numbered')}
+                            >
+                              1. List
+                            </button>
+                            <button
+                              type="button"
+                              className="px-2 text-xs text-gray-300 hover:bg-gray-700 rounded"
+                              onClick={() => editingBoxRef.current?.applyListType(null)}
+                            >
+                              Clear list
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                </div>
               )}
             </div>
           </div>

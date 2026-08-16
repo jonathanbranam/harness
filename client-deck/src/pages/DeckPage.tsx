@@ -27,6 +27,8 @@ export function DeckPage() {
     addSlide,
     removeSlide,
     selectSlide,
+    undo,
+    redo,
   } = useDeckSocket()
   const [isPreviewing, setIsPreviewing] = useState(false)
 
@@ -78,7 +80,7 @@ export function DeckPage() {
       <SlideSwitcher slides={deckState.slides} activeSlideId={deckState.activeSlideId} onSelect={selectSlide} onAdd={addSlide} onRemove={removeSlide} />
 
       <div className="flex-1 grid grid-cols-[1fr_380px] min-h-0">
-        <DeckCanvas ref={canvasRef} deckState={deckState} onSelectionChange={sendSelection} onObjectUpdate={sendObjectUpdate} />
+        <DeckCanvas ref={canvasRef} deckState={deckState} onSelectionChange={sendSelection} onObjectUpdate={sendObjectUpdate} onUndo={undo} onRedo={redo} />
         <div className="border-l border-gray-800 min-h-0">
           <ChatPanel transcript={transcript} connected={connected} onSend={sendPrompt} />
         </div>

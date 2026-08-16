@@ -106,9 +106,9 @@ describe('startAutoSave', () => {
     const path = join(dir, 'decks.json')
     const stop = startAutoSave(store, path)
 
-    store.createDeck('First')
+    store.createDeck('user', 'First')
     vi.advanceTimersByTime(200)
-    store.createDeck('Second')
+    store.createDeck('user', 'Second')
     vi.advanceTimersByTime(200)
     expect(existsSync(path)).toBe(false)
 
@@ -125,7 +125,7 @@ describe('startAutoSave', () => {
     const path = join(dir, 'decks.json')
     const stop = startAutoSave(store, path)
 
-    store.createDeck('Now')
+    store.createDeck('user', 'Now')
     expect(existsSync(path)).toBe(false)
     flushPendingSave()
     expect(existsSync(path)).toBe(true)

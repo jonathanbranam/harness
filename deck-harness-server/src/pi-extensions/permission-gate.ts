@@ -30,6 +30,7 @@ const READ_ONLY_TOOLS = new Set([
   'ls',
   'presentation_get_state',
   'presentation_select_by_text',
+  'presentation_history',
 ])
 
 /** Tools that touch the filesystem or a shell and require explicit approval. */

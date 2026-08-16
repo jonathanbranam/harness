@@ -32,6 +32,8 @@ type ClientMessage =
   | { type: 'add_slide' }
   | { type: 'remove_slide'; slideId: string }
   | { type: 'select_slide'; slideId: string }
+  | { type: 'undo' }
+  | { type: 'redo' }
   | { type: 'render_response'; requestId: string; image?: string; error?: string }
 
 type ServerMessage =
@@ -136,7 +138,7 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
         // setText immediately before an applyTextStyle addressed against it.
         case 'object_update': {
           for (const call of msg.actions) {
-            const result = editorStore.applyUpdate(call.action, call.targetIds, call.args ?? {})
+            const result = editorStore.applyUpdate('user', call.action, call.targetIds, call.args ?? {})
             if (result.errors.length > 0) safeSend(socket, { type: 'error', message: result.errors.join('; ') })
           }
           return
@@ -162,11 +164,11 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
         }
 
         case 'create_deck':
-          editorStore.createDeck(msg.name)
+          editorStore.createDeck('user', msg.name)
           return
 
         case 'delete_deck': {
-          const result = editorStore.deleteDeck(msg.deckId)
+          const result = editorStore.deleteDeck('user', msg.deckId)
           if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
           return
         }
@@ -178,11 +180,11 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
         }
 
         case 'add_slide':
-          editorStore.addSlide()
+          editorStore.addSlide('user')
           return
 
         case 'remove_slide': {
-          const result = editorStore.removeSlide(msg.slideId)
+          const result = editorStore.removeSlide('user', msg.slideId)
           if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
           return
         }
@@ -192,6 +194,14 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
           if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
           return
         }
+
+        case 'undo':
+          editorStore.undo('user')
+          return
+
+        case 'redo':
+          editorStore.redo('user')
+          return
 
         case 'prompt': {
           try {

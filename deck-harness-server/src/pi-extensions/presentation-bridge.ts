@@ -73,7 +73,7 @@ Always prefer the most specific action. If multiple objects are selected and the
       args: Type.Record(Type.String(), Type.Unknown(), { description: 'Action-specific parameters; see the tool description.' }),
     }),
     execute: async (_id, params) => {
-      const result = editorStore.applyUpdate(params.action as UpdateAction, params.targetIds, params.args as Record<string, unknown>)
+      const result = editorStore.applyUpdate('agent', params.action as UpdateAction, params.targetIds, params.args as Record<string, unknown>)
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         details: result,
@@ -95,6 +95,51 @@ Always prefer the most specific action. If multiple objects are selected and the
     execute: async (_id, params) => {
       const ids = editorStore.selectByText(params.query, params.caseSensitive ?? false)
       return { content: [{ type: 'text' as const, text: `Matched IDs: ${ids.join(', ') || '(none)'}` }], details: { ids } }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_history',
+    label: 'Presentation History',
+    description:
+      'List recent entries in the shared undo/redo history, most-recent-first, each with who made the change ("user" or "agent"), when (a timestamp), and a short human-readable description. Also reports canUndo/canRedo. Call this before presentation_undo to work out how many of your own recent edits to step back through — e.g. for "undo your last 5 minutes of changes," count consecutive most-recent entries with actor "agent" within that window.',
+    promptSnippet: 'List recent undo/redo history entries with actor, timestamp, and description',
+    parameters: Type.Object({
+      limit: Type.Optional(Type.Number({ description: 'Maximum number of entries to return, most-recent-first. Omit for the full history.' })),
+    }),
+    execute: async (_id, params) => {
+      const result = editorStore.getHistory(params.limit)
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_undo',
+    label: 'Undo',
+    description:
+      "Undo the most recent entries in the shared undo/redo history (shared with the user's own keyboard/toolbar undo), optionally stepping more than one at a time via count. Stops early if the history is exhausted before count is reached — no error is raised. Because this is a strict LIFO stack, you cannot skip over an intervening user edit to reach an older edit of your own underneath it.",
+    promptSnippet: 'Undo the most recent edit(s) in the shared history',
+    parameters: Type.Object({
+      count: Type.Optional(Type.Number({ description: 'How many entries to undo. Defaults to 1.' })),
+    }),
+    execute: async (_id, params) => {
+      const result = editorStore.undo('agent', params.count ?? 1)
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_redo',
+    label: 'Redo',
+    description:
+      'Redo the most recently undone entries in the shared undo/redo history, optionally stepping more than one at a time via count. Stops early if there is nothing left to redo before count is reached — no error is raised.',
+    promptSnippet: 'Redo the most recently undone edit(s) in the shared history',
+    parameters: Type.Object({
+      count: Type.Optional(Type.Number({ description: 'How many entries to redo. Defaults to 1.' })),
+    }),
+    execute: async (_id, params) => {
+      const result = editorStore.redo('agent', params.count ?? 1)
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result }
     },
   })
 

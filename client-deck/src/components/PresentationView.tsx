@@ -102,7 +102,15 @@ export function PresentationView({ deckState, canvasRef, slides, initialSlideId,
 
   return (
     <div ref={containerRef} className={isOverlayFallback ? 'fixed inset-0 z-50 bg-black' : 'w-full h-full bg-black'}>
-      <DeckCanvas ref={canvasRef} deckState={deckState} readOnly onSelectionChange={() => {}} onObjectUpdate={() => {}} />
+      <DeckCanvas
+        ref={canvasRef}
+        deckState={deckState}
+        readOnly
+        onSelectionChange={() => {}}
+        onObjectUpdate={() => {}}
+        onUndo={() => {}}
+        onRedo={() => {}}
+      />
     </div>
   )
 }

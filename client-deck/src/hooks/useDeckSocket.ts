@@ -65,6 +65,8 @@ export interface DeckState {
   activeSlideId: string
   objects: DeckObject[]
   selection: string[]
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export interface ApprovalRequest {
@@ -121,6 +123,8 @@ export function useDeckSocket() {
     activeSlideId: '',
     objects: [],
     selection: [],
+    canUndo: false,
+    canRedo: false,
   })
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
@@ -306,6 +310,14 @@ export function useDeckSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'select_slide', slideId }))
   }, [])
 
+  const undo = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'undo' }))
+  }, [])
+
+  const redo = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'redo' }))
+  }, [])
+
   return {
     connected,
     deckState,
@@ -323,5 +335,7 @@ export function useDeckSocket() {
     addSlide,
     removeSlide,
     selectSlide,
+    undo,
+    redo,
   }
 }
