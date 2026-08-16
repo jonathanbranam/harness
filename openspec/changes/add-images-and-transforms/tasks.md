@@ -65,3 +65,21 @@
 - [x] 9.1 Run `npm run typecheck` and `npm test` from the repo root; fix any fallout.
 - [x] 9.2 Using `playwright-cli` against the already-running dev client (per CLAUDE.md — do not start a second instance), manually verify: inserting an image, resizing its destination box (stays proportional), zooming/panning its crop independently, rotating a box/ellipse/textBox/image via the rotate handle, setting opacity on each object type, an oversized image clamping without distortion at the slide edge, and that undo/redo correctly steps through each of these as individual entries.
 - [x] 9.3 Verify pi's tool surface end-to-end via a chat prompt exercising `presentation_add_image`, `setCrop` (pan-only and zoom-only calls), `setRotation` (including the expected rejection on a `line`/`arrow` target), and `setOpacity`.
+
+## 10. Decouple crop rectangle and destination box aspect ratios
+
+Follow-up from manual review: the first implementation aspect-locked the
+crop rectangle and destination box together, which made the crop-mode
+popup's resize handles unable to actually reshape the crop. See
+design.md's "Crop and destination are independent rectangles" (supersedes
+the removed "Aspect-locked resize and clamping" section).
+
+- [x] 10.1 Remove `deriveImageSize`/`deriveCropSize` from `editor-state.ts`; `setSize`/`setCrop`/`setImageSource` set whichever fields are given independently (no derivation, no field "winning" over another), matching every other type's generic field-assignment.
+- [x] 10.2 Remove `clampToSlide`'s `image`-only branch; `image` clamps destination width/height independently to `SLIDE_WIDTH`/`SLIDE_HEIGHT`, same as `box`/`ellipse`.
+- [x] 10.3 `ImageObjectBox`'s render switches to contain-fit letterboxing: `scale = Math.min(rect.width/cropWidth, rect.height/cropHeight)`, the scaled crop centered within the destination box (transparent on any leftover axis).
+- [x] 10.4 Remove `handlePointerDownResize`'s `isImage` branch — image destination corner-drag becomes the same independent per-axis resize `box`/`ellipse` already use.
+- [x] 10.5 Change `handleCropResize` from a single shift-locked scale factor to independent per-axis dragging (mirrors the destination resize math, in source-pixel space, clamped to the source's natural bounds) — so the crop rectangle's aspect ratio is freely adjustable in the popup.
+- [x] 10.6 Update `presentation-bridge.ts`'s tool descriptions (`presentation_update`'s setSize/setCrop/setImageSource docs, `presentation_add_image`, `presentation_get_state`, `before_agent_start` context message) to describe crop and destination as independent rectangles reconciled via uniform-scale letterboxing, removing the "one field wins" language.
+- [x] 10.7 Update the `deriveImageSize`/`deriveCropSize` unit tests and the affected `setSize`/`setCrop`/`setImageSource`/clamp tests in `editor-state.test.ts` to assert independent field-setting and independent-axis clamping instead of aspect-locked derivation.
+- [x] 10.8 Update `deck-image-elements`/`deck-object-bounds` delta specs to match (drop the aspect-lock requirements/scenarios, add the independent-rectangles + uniform-scale-letterbox requirement).
+- [x] 10.9 Run `npm run typecheck` and `npm test`; manually verify via `playwright-cli` against the running dev client — reshape a crop to a new aspect ratio in the popup, resize an image's destination box independently per axis, and confirm the mismatched-aspect render letterboxes instead of stretching or silently over-cropping.

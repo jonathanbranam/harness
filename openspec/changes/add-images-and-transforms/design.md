@@ -53,9 +53,12 @@ See proposal.md for motivation. Current state this design builds on (see
 - Resolve where uploaded image bytes live, without bloating the
   per-turn/per-`get_state` JSON payload every object field currently rides
   in.
-- Make it structurally impossible to stretch/squish an image: every write
-  path (creation, `setSize`, `setCrop`, `setImageSource`, corner-drag,
-  slide-bounds clamping) preserves the crop rectangle's aspect ratio.
+- Make it structurally impossible to stretch/squish an image's *pixels*:
+  the crop rectangle and the destination box are independent rectangles,
+  each freely resizable to any aspect ratio, but every write path
+  (rendering only — there is no longer a shared invariant to enforce on
+  write) scales the cropped source content by a single uniform factor into
+  the destination box, never independent X/Y scale.
 
 **Non-Goals:**
 - Rotation on `line`/`arrow` (see `deck-shape-elements`'s "Lines and
@@ -93,20 +96,21 @@ interface ImageObject extends BaseDeckObject {
 }
 ```
 `x/y/width/height` are the destination box, so `image` participates in
-`boundsOf`/`translateObject` exactly like `box`/`ellipse` — no
-special-casing needed in either helper (`clampToSlide` *does* need an
-`image`-specific branch — see "Aspect-locked resize and clamping" below).
-The crop rectangle is deliberately a sibling, not nested (`crop:
-{x,y,width,height}`), matching this codebase's existing flat-field style
-for every other object type (no object ever carries a nested geometry
-sub-object) and letting `presentation_update`'s existing "flat args bag"
-pattern set it directly.
+`boundsOf`/`translateObject`/`clampToSlide` exactly like `box`/`ellipse` —
+no special-casing needed in any of the three (see "Crop and destination are
+independent rectangles" below for why `clampToSlide` no longer needs an
+`image`-specific branch). The crop rectangle is deliberately a sibling, not
+nested (`crop: {x,y,width,height}`), matching this codebase's existing
+flat-field style for every other object type (no object ever carries a
+nested geometry sub-object) and letting `presentation_update`'s existing
+"flat args bag" pattern set it directly.
 
 `width/height` and `cropWidth/cropHeight` are stored as four independent
-fields, but every write path is required to keep `width/height`'s ratio
-equal to `cropWidth/cropHeight`'s ratio — see "Aspect-locked resize and
-clamping" below for how that's enforced structurally rather than trusted
-to each caller.
+fields, and **no relationship between the two pairs' aspect ratios is
+enforced or assumed**: a caller may freely resize either rectangle to any
+aspect ratio, independently of the other. See "Crop and destination are
+independent rectangles" below for how rendering reconciles a mismatch
+without ever stretching the image's pixels non-uniformly.
 
 **Alternative considered**: store the crop as a fraction (0–1) of the
 source image's dimensions instead of source pixels. Rejected — the canvas
@@ -144,12 +148,13 @@ success" shape). Setting an image's `src`/crop/destination fields after
 creation reuses `presentation_update`: `setImageSource` (also resets crop
 to the new source's full extent, per `deck-image-elements`'s "Agent
 changes an image's source" scenario), `setCrop` ({cropX?, cropY?,
-cropWidth?, cropHeight?} — see "Aspect-locked resize and clamping" below
-for how a partial call derives the omitted size field).
-`setPosition`/`setSize` already work on `image` for free once it has
-`x/y/width/height` — no new action needed for moving/resizing the
-destination box, though `setSize` gets the same aspect-derivation
-treatment as `setCrop`.
+cropWidth?, cropHeight?} — each field given is set exactly as requested,
+independently of the others; see "Crop and destination are independent
+rectangles" below). `setPosition`/`setSize` already work on `image` for
+free once it has `x/y/width/height` — no new action needed for
+moving/resizing the destination box, and `setSize` needs no special
+treatment for `image` either: a single field changes just that field, same
+as `box`/`ellipse`.
 
 ### Rotation rendering: CSS `transform: rotate()`, not manual geometry
 Each rotatable object's wrapper element gets `transform: rotate(${obj.rotation}deg)` with `transformOrigin: 'center'`, applied *inside* the
@@ -189,45 +194,100 @@ the server's `clampToSlide` both keep operating on the final unrotated
 `x/y/width/height`, per the `deck-object-bounds` decision — clamping is
 untouched by any of this.
 
-### Aspect-locked resize and clamping: one derivation helper, reused by every write path
-Per the updated Goals, an image can never end up with a destination size
-whose aspect ratio doesn't match its crop's. Rather than re-deriving this
-in each of `setSize`, `setCrop`, `setImageSource`, `createImage`, the
-corner-drag handler, and `clampToSlide`, all six route through one helper,
-`deriveImageSize(current: ImageObject, requested: { width?: number;
-height?: number })`: if only one of `width`/`height` is given, the other
-is computed from the current crop's aspect ratio (`cropWidth/cropHeight`);
-if both are given and their ratio doesn't match, `width` wins and `height`
-is recomputed — documented in `presentation_update`'s tool description so
-pi isn't surprised by a `setSize` call with both fields silently
-overriding its `height`. A mirror helper, `deriveCropSize`, does the same
-for `cropWidth`/`cropHeight` when `setCrop` is called with only one of
-them.
+### Crop and destination are independent rectangles; rendering reconciles a mismatch by uniform-scale letterboxing
 
-**Corner-drag resize** (`handlePointerDownResize`) gets an `image`-only
-branch: instead of computing `width`/`height` independently per corner
-(today's box/ellipse behavior), it takes the larger-magnitude of the two
-local-frame axis deltas (per the rotated-resize local-frame transform
-above — this composes with that unchanged) to derive a single scale
-factor, then applies that factor to both `width` and `height` from the
-anchored opposite corner. This is the same "shift-locked" resize familiar
-from other editors, just applied unconditionally for `image` rather than
-behind a modifier key.
+**Revision history**: the first implementation of this change aspect-locked
+the crop rectangle and the destination box together — every write path
+forced `width/height`'s ratio to equal `cropWidth/cropHeight`'s, via a
+shared `deriveImageSize`/`deriveCropSize` derivation. Manual review during
+implementation surfaced two problems with that: (1) it made the crop-mode
+popup's resize handles unable to actually reshape the crop (every drag
+just zoomed the existing rectangle, since its aspect ratio could never
+change), and (2) it conflated two genuinely independent ideas — "the crop
+rectangle can have any shape" and "the rendered pixels must never be
+stretched non-uniformly." This revision decouples them: **the crop
+rectangle and the destination box are both freely resizable to any aspect
+ratio, independently of each other**; the "never stretched" guarantee is
+now purely a rendering-time property (one uniform scale factor, applied at
+render, not a stored-data invariant enforced on write).
 
-**`clampToSlide`** gets the same `image`-only branch: instead of clamping
-`width` to `SLIDE_WIDTH` and `height` to `SLIDE_HEIGHT` independently
-(today's behavior for every other bounding-box type, per
-`deck-object-bounds`'s existing requirements), an oversized image's
-`width`/`height` are scaled down together by whichever factor is needed
-to fit both within bounds, then repositioned by the existing translate
-step — satisfying `deck-object-bounds`'s new "Slide-bounds clamping
-preserves an image's aspect ratio" requirement.
+**Write paths get simpler, not more complex.** `deriveImageSize`/
+`deriveCropSize` are deleted outright. `setSize`, `setCrop`, and
+`createImage` treat `image` exactly like `box`/`ellipse` treats its own
+`width`/`height`: each field given is set to exactly that value; a field
+left out is left unchanged. No field ever "wins" over another, and no
+field is ever silently recomputed out from under a caller's request —
+simpler to document (`presentation_update`'s tool description no longer
+needs the "passing both silently overrides" caveat) and simpler to reason
+about (one fewer cross-field invariant to keep in mind when adding a
+future write path). `setImageSource` still resets the crop to the new
+source's full extent (per `deck-image-elements`'s "Agent changes an
+image's source" scenario), but no longer touches destination
+`width`/`height` at all — swapping an image's source keeps its on-slide
+footprint exactly where it was, letterboxed/covered against the new
+source's crop like any other mismatch.
 
-**Why centralize instead of trusting each call site**: this is exactly
-the kind of invariant that's trivial to enforce in one place and easy to
-silently violate by adding a seventh write path later (e.g. a future
-"fit to frame" tool) that sets `width`/`height` directly without going
-through `deriveImageSize` — see the corresponding entry in Risks below.
+**Corner-drag resize** (`handlePointerDownResize`) loses its `image`-only
+branch entirely: `image` now falls through to the same independent
+per-corner `width`/`height` math `box`/`ellipse` already use (still
+composed with the rotation local-frame transform above, which is
+orthogonal to this and unaffected). **Crop-mode's own resize handles**
+(`handleCropResize`) get the mirror change: instead of deriving a single
+locked scale factor from the larger-magnitude axis delta, each corner drag
+adjusts `cropWidth`/`cropHeight` independently per axis (the same
+corner-anchored math as the destination resize, just operating in
+source-pixel space and clamped to `[0, naturalWidth]`/`[0, naturalHeight]`
+instead of the slide's bounds) — so a user can freely reshape the crop
+rectangle, which was the entire point of this revision.
+
+**`clampToSlide`** loses its `image`-only branch too: an oversized image's
+destination `width`/`height` clamp to `SLIDE_WIDTH`/`SLIDE_HEIGHT`
+independently, exactly like every other bounding-box type. There is no
+longer an aspect ratio shared with the crop rectangle to preserve, so the
+special-case that existed solely to protect that invariant is gone (see
+`deck-object-bounds`'s spec delta, which drops its "Slide-bounds clamping
+preserves an image's aspect ratio" requirement entirely rather than
+reword it — `image` no longer needs a bespoke bounds-clamping requirement
+at all).
+
+**Rendering** (`ImageObjectBox`) is the one place a single scale factor
+now gets computed: `scale = Math.min(rect.width / obj.cropWidth,
+rect.height / obj.cropHeight)` — a *contain* fit, matching CSS
+`object-fit: contain` — then the scaled crop is centered within the
+destination box (`offsetX = (rect.width - obj.cropWidth * scale) / 2`,
+`offsetY` likewise), leaving transparent space on whichever axis has slack
+rather than ever cropping past what the crop rectangle actually selected.
+The `<img>`'s transform becomes `scale(${scale})
+translate(${offsetX / scale - obj.cropX}px, ${offsetY / scale -
+obj.cropY}px)`; the container keeps `overflow: hidden` as cheap insurance
+against float rounding, though contain-fit should never actually need it
+to clip anything.
+
+**Alternative considered — *cover* fit** (scale by the *larger* of the two
+ratios, filling the destination box completely and clipping whichever
+crop edge overflows): rejected. It would silently discard part of
+whatever region the user (or pi) explicitly selected as the crop — the
+crop rectangle drawn in the popup would stop being a reliable preview of
+what actually renders, which undermines the entire point of a crop UI as
+a "what you select is what you get" tool. Contain-fit's transparent
+letterbox bars are a visible, honest reflection of an aspect mismatch;
+cover-fit's silent over-crop is not.
+
+**Alternative considered — auto-resizing the destination box whenever a
+crop dimension changes** (e.g. keep each axis's `destWidth/cropWidth` or
+`destHeight/cropHeight` ratio pinned to whatever it was, growing/shrinking
+the corresponding destination dimension in lockstep with an edited crop
+dimension): rejected. It only avoids letterboxing in the narrow case where
+destination and crop already share an aspect ratio going into the edit —
+once a destination box has been freely resized independently of its crop
+(routine now that corner-drag resize is unlocked, per above), the two
+axes' remembered ratios generally differ, so a single-axis crop edit under
+this scheme would still leave the box's aspect mismatched with the new
+crop and none the wiser about which axis's ratio should be treated as
+authoritative. It also directly contradicts `deck-image-elements`'s
+existing "Resizing the destination does not change the crop" precedent by
+introducing the reverse coupling (crop → destination); keeping both
+directions independent is the one design with no ambiguity to resolve.
 
 ### Selection chrome rotates with its object; the rotate handle is a new element in that same overlay
 The per-object selection outline and resize-handle wrapper (currently an
@@ -324,16 +384,14 @@ current on-screen appearance.
   rendering/rotate-handle work, and hand-test all four corners at several
   rotation angles (0°, 45°, 90°, 170°) before wiring up the rotate handle
   itself.
-- **[Risk]** The aspect-lock invariant is only as good as every write path
-  actually routing through `deriveImageSize`/`deriveCropSize` — a future
-  addition (a new tool, a canvas shortcut) that sets `width`/`height` or
-  `cropWidth`/`cropHeight` directly would silently reintroduce stretching
-  → Mitigation: `deriveImageSize` is the only place `ImageObject.width`/
-  `.height` are computed from a caller's request across `createImage`,
-  `setSize`, `setImageSource`, and `clampToSlide`'s image branch — a code
-  reviewer checking "does this touch `width`/`height` on an `image`
-  without going through the helper" is a cheap, mechanical check for any
-  future change touching this file.
+- **[Risk]** A destination box and crop rectangle with wildly different
+  aspect ratios can letterbox down to a sliver of visible image (e.g. a
+  very wide destination box paired with a near-square crop) → Mitigation:
+  none needed functionally — this is the correct, honest rendering of that
+  input, not a bug — but worth a quick manual check that the transparent
+  letterbox bars read clearly as "empty" rather than looking like a
+  rendering glitch (e.g. the slide background should show through them,
+  not some stray color).
 - **[Risk]** A rotated object's corners can render outside the visible
   slide bounds (accepted trade-off from the `deck-object-bounds` decision)
   → Mitigation: none needed functionally, but worth a quick manual check

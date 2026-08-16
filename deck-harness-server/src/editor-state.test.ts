@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deriveCropSize, deriveImageSize, EditorStore, editorStore, plainTextOf, type DeckObject, type ImageObject, type TextBlock, type TextBoxObject } from './editor-state'
+import { EditorStore, editorStore, plainTextOf, type DeckObject, type ImageObject, type TextBlock, type TextBoxObject } from './editor-state'
 
 /** Test-only narrowing helper: most existing tests operate on textBox objects (the seed deck / addObject), so this keeps assertions terse instead of re-deriving a type guard at every call site. */
 function tb(o: DeckObject | undefined): TextBoxObject {
@@ -1122,62 +1122,15 @@ describe('editorStore addImage', () => {
     expect(store.getHistory()).toEqual(before)
   })
 
-  it('clamps an oversized image by scaling width/height down together, preserving aspect ratio', () => {
+  it('clamps an oversized image by clamping width/height independently, like box/ellipse', () => {
     const store = new EditorStore(null)
-    const result = store.addImage('user', { src: 'a.png', x: 0, y: 0, width: 1920, height: 1080, cropWidth: 1920, cropHeight: 1080 })
+    // A very wide, short crop/destination — an aspect-preserving-together
+    // clamp would shrink height too even though it already fits; the
+    // independent clamp (matching box/ellipse) must leave height untouched.
+    const result = store.addImage('user', { src: 'a.png', x: 0, y: 0, width: 2000, height: 100, cropWidth: 2000, cropHeight: 100 })
     const obj = img(store.getState().objects.find((o) => o.id === result.changed[0]))
-    expect(obj.width).toBeLessThanOrEqual(960)
-    expect(obj.height).toBeLessThanOrEqual(540)
-    // 1920x1080 is 16:9 — clamped by the height limit (540/1080 = 0.5), so width should be exactly half too.
-    expect(obj.width).toBeCloseTo(960, 5)
-    expect(obj.height).toBeCloseTo(540, 5)
-  })
-})
-
-describe('deriveImageSize / deriveCropSize', () => {
-  const current: ImageObject = {
-    id: 'i1',
-    type: 'image',
-    zIndex: 0,
-    opacity: 1,
-    rotation: 0,
-    src: 'a.png',
-    x: 0,
-    y: 0,
-    width: 200,
-    height: 100,
-    cropX: 0,
-    cropY: 0,
-    cropWidth: 400,
-    cropHeight: 200,
-  }
-
-  it('derives height from width alone, preserving the crop aspect ratio', () => {
-    expect(deriveImageSize(current, { width: 100 })).toEqual({ width: 100, height: 50 })
-  })
-
-  it('derives width from height alone, preserving the crop aspect ratio', () => {
-    expect(deriveImageSize(current, { height: 25 })).toEqual({ width: 50, height: 25 })
-  })
-
-  it('when both width and height are given with a mismatched ratio, width wins and height is recomputed', () => {
-    expect(deriveImageSize(current, { width: 100, height: 999 })).toEqual({ width: 100, height: 50 })
-  })
-
-  it('returns the current size unchanged when neither field is given', () => {
-    expect(deriveImageSize(current, {})).toEqual({ width: 200, height: 100 })
-  })
-
-  it('derives cropHeight from cropWidth alone', () => {
-    expect(deriveCropSize(current, { cropWidth: 200 })).toEqual({ cropWidth: 200, cropHeight: 100 })
-  })
-
-  it('derives cropWidth from cropHeight alone', () => {
-    expect(deriveCropSize(current, { cropHeight: 50 })).toEqual({ cropWidth: 100, cropHeight: 50 })
-  })
-
-  it('when both cropWidth and cropHeight are given with a mismatched ratio, cropWidth wins', () => {
-    expect(deriveCropSize(current, { cropWidth: 200, cropHeight: 999 })).toEqual({ cropWidth: 200, cropHeight: 100 })
+    expect(obj.width).toBe(960)
+    expect(obj.height).toBe(100)
   })
 })
 
@@ -1188,16 +1141,19 @@ describe('editorStore image-specific update actions', () => {
     return { store, id }
   }
 
-  it('setSize on an image derives the omitted dimension and captures history', () => {
+  it('setSize on an image sets whichever dimension is given, independently, and captures history', () => {
     const { store, id } = withImage()
     const before = store.getHistory()
     const result = store.applyUpdate('user', 'setSize', [id], { width: 100 })
     expect(result.errors).toEqual([])
-    expect(img(store.getState().objects.find((o) => o.id === id)).height).toBe(50)
+    const obj = img(store.getState().objects.find((o) => o.id === id))
+    expect(obj.width).toBe(100)
+    // height is untouched — crop and destination are independent now.
+    expect(obj.height).toBe(100)
     expect(store.getHistory().entries.length).toBe(before.entries.length + 1)
   })
 
-  it('setCrop pans without changing size, and zooms without changing position', () => {
+  it('setCrop pans and resizes width/height independently of each other', () => {
     const { store, id } = withImage()
     store.applyUpdate('user', 'setCrop', [id], { cropX: 20, cropY: 30 })
     let obj = img(store.getState().objects.find((o) => o.id === id))
@@ -1205,9 +1161,18 @@ describe('editorStore image-specific update actions', () => {
     // Destination is unaffected by a pan.
     expect(obj).toMatchObject({ width: 200, height: 100 })
 
-    store.applyUpdate('user', 'setCrop', [id], { cropWidth: 200 })
+    store.applyUpdate('user', 'setCrop', [id], { cropWidth: 250 })
     obj = img(store.getState().objects.find((o) => o.id === id))
-    expect(obj).toMatchObject({ cropX: 20, cropY: 30, cropWidth: 200, cropHeight: 100 })
+    // cropHeight is untouched — a single-field setCrop no longer derives the
+    // other dimension to preserve an aspect ratio.
+    expect(obj).toMatchObject({ cropX: 20, cropY: 30, cropWidth: 250, cropHeight: 200 })
+  })
+
+  it('setCrop applies both cropWidth and cropHeight exactly as given, at any aspect ratio', () => {
+    const { store, id } = withImage()
+    store.applyUpdate('user', 'setCrop', [id], { cropWidth: 300, cropHeight: 500 })
+    const obj = img(store.getState().objects.find((o) => o.id === id))
+    expect(obj).toMatchObject({ cropWidth: 300, cropHeight: 500 })
   })
 
   it('setCrop does not apply to non-image types', () => {
@@ -1217,15 +1182,17 @@ describe('editorStore image-specific update actions', () => {
     expect(result.errors[0]).toContain('does not apply to type')
   })
 
-  it('setImageSource resets the crop to the new source full extent and rederives height from the existing width', () => {
+  it('setImageSource resets the crop to the new source full extent and leaves the destination box untouched', () => {
     const { store, id } = withImage()
     const result = store.applyUpdate('user', 'setImageSource', [id], { src: 'https://example.com/b.png', naturalWidth: 800, naturalHeight: 800 })
     expect(result.errors).toEqual([])
     const obj = img(store.getState().objects.find((o) => o.id === id))
     expect(obj.src).toBe('https://example.com/b.png')
     expect(obj).toMatchObject({ cropX: 0, cropY: 0, cropWidth: 800, cropHeight: 800 })
+    // Destination is unchanged even though the new crop's aspect ratio (1:1)
+    // no longer matches it (2:1) — rendering letterboxes the mismatch.
     expect(obj.width).toBe(200)
-    expect(obj.height).toBe(200)
+    expect(obj.height).toBe(100)
   })
 
   it('setImageSource requires naturalWidth/naturalHeight since the server cannot inspect image bytes', () => {

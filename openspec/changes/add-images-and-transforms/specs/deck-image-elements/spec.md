@@ -31,52 +31,64 @@ An image object SHALL carry a `src` field, readable via `presentation_get_state`
 
 #### Scenario: Agent changes an image's source
 - **WHEN** pi calls the set-source action with a new source reference for an existing image object
-- **THEN** that image's `src` updates in shared deck state, its crop rectangle resets to the new source's full extents, its destination position and width are unchanged, and its destination height is recalculated from that width and the new crop's aspect ratio (per "Image edits never change the rendered aspect ratio" below)
+- **THEN** that image's `src` updates in shared deck state, its crop rectangle resets to the new source's full extents, and its destination position, width, and height are all unchanged — a source change never touches the destination box, whatever the new crop's aspect ratio turns out to be (per "Cropped image content is always rendered at a single uniform scale" below)
 
-### Requirement: Independent crop rectangle position and zoom
-An image object SHALL carry a crop rectangle expressed in the source image's own coordinates. The crop's position (`cropX`/`cropY` — which region of the source is shown) SHALL be settable independently of its size (`cropWidth`/`cropHeight` — how much of the source is captured, i.e. zoom), and both SHALL be independent of the object's on-slide destination position, so a user can pan and zoom into a source image without affecting where it appears on the slide.
+### Requirement: Independent crop rectangle position and size
+An image object SHALL carry a crop rectangle expressed in the source image's own coordinates. The crop's position (`cropX`/`cropY` — which region of the source is shown) and its size (`cropWidth`/`cropHeight` — how much of the source is captured) SHALL each be settable independently of one another, of the crop rectangle's own aspect ratio, and of the object's on-slide destination geometry, so a user can pan, resize, and reshape a crop selection without affecting where or how large the image appears on the slide.
 
 #### Scenario: Agent sets a crop rectangle
 - **WHEN** pi calls the set-crop action with a rectangle in source-image coordinates for an image object
-- **THEN** the canvas renders only that cropped region of the source image, scaled to fit the object's current destination width/height
+- **THEN** the canvas renders that cropped region of the source image, fit uniformly within the object's current destination width/height per "Cropped image content is always rendered at a single uniform scale" below
 
-#### Scenario: Agent pans the crop without changing zoom
+#### Scenario: Agent pans the crop without changing its size
 - **WHEN** pi calls the set-crop action with only `cropX` and/or `cropY` for an image object
-- **THEN** the crop rectangle's position changes to show a different region of the source image, and its `cropWidth`/`cropHeight` (and so the destination width/height, per the aspect-ratio requirement below) are unchanged
+- **THEN** the crop rectangle's position changes to show a different region of the source image, and its `cropWidth`/`cropHeight` are unchanged
 
-#### Scenario: Agent zooms without changing pan position
+#### Scenario: Agent resizes one crop dimension independently of the other
 - **WHEN** pi calls the set-crop action with only `cropWidth` or only `cropHeight` for an image object
-- **THEN** the crop rectangle's size changes (a smaller crop zooms in, a larger crop zooms out, up to the full source image), its `cropX`/`cropY` are unchanged, and the other crop dimension is recalculated to preserve the crop rectangle's aspect ratio
+- **THEN** only that dimension changes; the other crop dimension and `cropX`/`cropY` are unchanged — the crop rectangle's aspect ratio is free to change as a result
+
+#### Scenario: Agent sets both crop dimensions to an arbitrary aspect ratio
+- **WHEN** pi calls the set-crop action with both `cropWidth` and `cropHeight` for an image object, in any ratio
+- **THEN** both dimensions are set to exactly the requested values — neither is recalculated or overridden to match the other
 
 #### Scenario: User crops interactively
 - **WHEN** the user drags the crop handles on a selected image in the canvas
-- **THEN** the image object's crop rectangle in shared deck state matches the dragged region, and the canvas immediately shows the newly cropped result
+- **THEN** the image object's crop rectangle in shared deck state matches the dragged region — including its aspect ratio, which the drag is free to change — and the canvas immediately shows the newly cropped result
 
 #### Scenario: Crop defaults to the full source image
 - **WHEN** an image is added without an explicit crop rectangle
 - **THEN** its crop rectangle covers the entire source image
 
-### Requirement: Destination size independent of crop position
-An image object's destination width/height (its on-slide bounding box) SHALL be settable independently of the crop rectangle's position and size; the cropped region SHALL be scaled uniformly to fill the destination width/height.
+### Requirement: Destination size independent of crop position and size
+An image object's destination width/height (its on-slide bounding box) SHALL be settable independently of the crop rectangle's position, size, and aspect ratio; the cropped region SHALL be scaled uniformly to fit within the destination width/height (per "Cropped image content is always rendered at a single uniform scale" below), whether or not the two rectangles share an aspect ratio.
 
 #### Scenario: Resizing the destination does not change the crop
 - **WHEN** pi or the user resizes an image object on the canvas
-- **THEN** its crop rectangle in shared deck state is unchanged, and the canvas scales the same cropped region to the new size
+- **THEN** its crop rectangle in shared deck state is unchanged, and the canvas re-fits the same cropped region into the new destination size
 
-### Requirement: Image edits never change the rendered aspect ratio
-An image object's destination width/height SHALL always be proportional to its crop rectangle's `cropWidth`/`cropHeight` (the same aspect ratio), so the image is always scaled uniformly and never appears stretched or squished. No pi tool call or canvas interaction SHALL be able to produce a destination size or crop size that breaks this proportionality — the system, not the caller, is responsible for maintaining it.
-
-#### Scenario: Setting only a destination width scales height to match
-- **WHEN** `presentation_update`'s `setSize` is called with only `width` for an image object
-- **THEN** the object's height is recalculated to preserve the current crop's aspect ratio, and its width matches the requested value
-
-#### Scenario: Setting both destination width and height derives height from width
-- **WHEN** `setSize` is called with both `width` and `height` for an image object, and the two values don't share the crop's aspect ratio
-- **THEN** the object's width is set to the requested value and its height is recalculated from the crop's aspect ratio, ignoring the requested height
+#### Scenario: Setting a destination dimension leaves the other unchanged
+- **WHEN** `presentation_update`'s `setSize` is called with only `width` (or only `height`) for an image object
+- **THEN** only that dimension changes; the other destination dimension is left exactly as it was — it is never recalculated from the crop's aspect ratio
 
 #### Scenario: User drags a corner resize handle
 - **WHEN** the user drags a selected image's corner resize handle
-- **THEN** the image's destination width and height both change proportionally from the anchored opposite corner, so the image is never visibly stretched or squished during the drag
+- **THEN** the image's destination width and height change independently per axis from the anchored opposite corner, the same as a `box`/`ellipse` resize — the destination box is free to end up with any aspect ratio
+
+### Requirement: Cropped image content is always rendered at a single uniform scale
+Regardless of whether an image object's crop rectangle and destination box share an aspect ratio, the cropped source content SHALL always be scaled by one factor applied equally to both axes when rendered — never stretched or squished by different amounts horizontally and vertically. When the two rectangles' aspect ratios don't match, the rendered content SHALL be fit to the *larger* size that entirely fits within the destination box (matching CSS `object-fit: contain`), centered, with the leftover space on whichever axis has slack left transparent — the render never discards any part of the selected crop to avoid that leftover space.
+
+#### Scenario: Crop and destination share an aspect ratio
+- **WHEN** an image object's crop rectangle and destination box have the same aspect ratio
+- **THEN** the cropped content fills the destination box exactly, with no transparent space on either axis
+
+#### Scenario: Crop is relatively wider than the destination box
+- **WHEN** an image object's crop rectangle is wider (relative to its height) than the destination box's own aspect ratio
+- **THEN** the cropped content is scaled so its full width fits the destination box's width, and transparent space appears above and below it, centered vertically
+
+#### Scenario: Crop is relatively taller than the destination box
+- **WHEN** an image object's crop rectangle is taller (relative to its width) than the destination box's own aspect ratio
+- **THEN** the cropped content is scaled so its full height fits the destination box's height, and transparent space appears to either side of it, centered horizontally
 
 ### Requirement: Remove an image
 Both pi and the user SHALL be able to remove an image object from the current slide by id, using the same removal mechanism as text boxes and shapes.
@@ -90,7 +102,7 @@ Both pi and the user SHALL be able to remove an image object from the current sl
 - **THEN** that image is removed from shared deck state and disappears from every connected view
 
 ### Requirement: Images are draggable, resizable, and selectable like other objects
-Image objects SHALL support the same canvas selection and drag-to-move interactions already available for text boxes and shapes. Resizing acts on the image's destination width/height, not its crop rectangle, and is proportionally constrained per "Image edits never change the rendered aspect ratio" above rather than the free independent-axis resize `box`/`ellipse` use.
+Image objects SHALL support the same canvas selection, drag-to-move, and independent-axis corner-resize interactions already available for text boxes and shapes. Resizing acts on the image's destination width/height, not its crop rectangle.
 
 #### Scenario: User drags an image
 - **WHEN** the user presses down on an image and drags it to a new location

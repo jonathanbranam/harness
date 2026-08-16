@@ -447,10 +447,14 @@ function ImageObjectBox({
   onDoubleClick?: (e: React.MouseEvent) => void
 }) {
   const rect = liveRect ?? { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
-  // Source-pixel-to-destination-pixel scale factor — always uniform since
-  // width/height stays proportional to cropWidth/cropHeight (server-enforced
-  // via deriveImageSize/deriveCropSize).
-  const scale = obj.cropWidth > 0 ? rect.width / obj.cropWidth : 1
+  // Contain-fit (matches CSS object-fit: contain): the crop rectangle and
+  // destination box are independent aspect ratios (design.md's "Crop and
+  // destination are independent rectangles"), so pick the single uniform
+  // scale that fits the whole crop inside the destination box, then center
+  // it — never a separate X/Y scale, and never crop past what was selected.
+  const scale = obj.cropWidth > 0 && obj.cropHeight > 0 ? Math.min(rect.width / obj.cropWidth, rect.height / obj.cropHeight) : 1
+  const offsetX = (rect.width - obj.cropWidth * scale) / 2
+  const offsetY = (rect.height - obj.cropHeight * scale) / 2
   return (
     <div
       className="absolute"
@@ -471,15 +475,15 @@ function ImageObjectBox({
       onDoubleClick={onDoubleClick}
     >
       {/* Rendered at its own natural size, then scaled+translated so the crop
-          rectangle's top-left lands at this container's origin and its
-          width/height fills it exactly — this needs no knowledge of the
-          source's natural pixel dimensions to render (only the crop UI needs
-          those, via image-size.ts's loadNaturalImageSize). maxWidth: 'none'
-          overrides Tailwind Preflight's `img { max-width: 100% }`, which
-          otherwise shrinks this img's pre-transform layout box to the
-          container's width instead of the source's natural size, throwing
-          off the scale/translate math above (visible as a too-small or
-          off-position crop, worst for a small container/large source). */}
+          rectangle lands centered in this container at the contain-fit scale
+          computed above — this needs no knowledge of the source's natural
+          pixel dimensions to render (only the crop UI needs those, via
+          image-size.ts's loadNaturalImageSize). maxWidth: 'none' overrides
+          Tailwind Preflight's `img { max-width: 100% }`, which otherwise
+          shrinks this img's pre-transform layout box to the container's
+          width instead of the source's natural size, throwing off the
+          scale/translate math (visible as a too-small or off-position crop,
+          worst for a small container/large source). */}
       <img
         src={obj.src}
         alt=""
@@ -490,7 +494,7 @@ function ImageObjectBox({
           left: 0,
           maxWidth: 'none',
           transformOrigin: '0 0',
-          transform: `scale(${scale}) translate(${-obj.cropX}px, ${-obj.cropY}px)`,
+          transform: `scale(${scale}) translate(${offsetX / scale - obj.cropX}px, ${offsetY / scale - obj.cropY}px)`,
         }}
       />
     </div>
@@ -722,7 +726,6 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       const originWidth = obj.width
       const originHeight = obj.height
       const rotation = obj.rotation
-      const isImage = obj.type === 'image'
       let latest: Rect = { x: originX, y: originY, width: originWidth, height: originHeight }
 
       function onMove(ev: PointerEvent) {
@@ -736,29 +739,16 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         // awareness; resize does").
         const [dx, dy] = rotateVector(rawDx, rawDy, -rotation)
 
+        // image resizes its destination box independently per axis too, same
+        // as box/ellipse — the crop rectangle's own aspect ratio is unrelated
+        // to the destination's (design.md's "Crop and destination are
+        // independent rectangles"), so there's no shared ratio to preserve.
         let width = originWidth
         let height = originHeight
-        if (isImage) {
-          // image gets a uniform-scale resize instead of independent
-          // per-axis resize: the larger-magnitude local-frame axis delta
-          // drives a single scale factor applied to both dimensions from the
-          // anchored opposite corner (design.md's "Aspect-locked resize and
-          // clamping" — corner-drag resize).
-          const widthGrow = corner.includes('e') ? dx : -dx
-          const heightGrow = corner.includes('s') ? dy : -dy
-          if (Math.abs(widthGrow) >= Math.abs(heightGrow)) {
-            width = Math.max(MIN_SIZE, originWidth + widthGrow)
-            height = Math.max(MIN_SIZE, (originHeight * width) / originWidth)
-          } else {
-            height = Math.max(MIN_SIZE, originHeight + heightGrow)
-            width = Math.max(MIN_SIZE, (originWidth * height) / originHeight)
-          }
-        } else {
-          if (corner.includes('e')) width = Math.max(MIN_SIZE, originWidth + dx)
-          if (corner.includes('w')) width = Math.max(MIN_SIZE, originWidth - dx)
-          if (corner.includes('s')) height = Math.max(MIN_SIZE, originHeight + dy)
-          if (corner.includes('n')) height = Math.max(MIN_SIZE, originHeight - dy)
-        }
+        if (corner.includes('e')) width = Math.max(MIN_SIZE, originWidth + dx)
+        if (corner.includes('w')) width = Math.max(MIN_SIZE, originWidth - dx)
+        if (corner.includes('s')) height = Math.max(MIN_SIZE, originHeight + dy)
+        if (corner.includes('n')) height = Math.max(MIN_SIZE, originHeight - dy)
         let x = originX
         let y = originY
         if (corner.includes('w')) x = originX + (originWidth - width)
@@ -975,11 +965,12 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     [cropNaturalSize, cropDraft, cropDisplayScale],
   )
 
-  // Corner-handle drag zooms (mirrors the server's/image destination's
-  // uniform-scale resize, task 7.2): the larger-magnitude axis delta drives
-  // a single scale factor applied to both cropWidth/cropHeight from the
-  // anchored opposite corner, so a drag can never produce a crop rectangle
-  // with a different aspect ratio than it started with.
+  // Corner-handle drag reshapes the crop rectangle independently per axis —
+  // same math as the destination resize (handlePointerDownResize) above,
+  // just operating in source-pixel space and clamped to the source's own
+  // natural bounds instead of the slide's. The crop rectangle's aspect
+  // ratio is free to change; nothing keeps it matched to the destination
+  // box's (design.md's "Crop and destination are independent rectangles").
   const handleCropResize = useCallback(
     (e: React.PointerEvent, corner: Corner) => {
       e.stopPropagation()
@@ -995,17 +986,12 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       function onMove(ev: PointerEvent) {
         const dx = (ev.clientX - startClientX) / scale
         const dy = (ev.clientY - startClientY) / scale
-        const widthGrow = corner.includes('e') ? dx : -dx
-        const heightGrow = corner.includes('s') ? dy : -dy
         let cropWidth = originCropWidth
         let cropHeight = originCropHeight
-        if (Math.abs(widthGrow) >= Math.abs(heightGrow)) {
-          cropWidth = Math.max(MIN_CROP_SIZE, originCropWidth + widthGrow)
-          cropHeight = (originCropHeight * cropWidth) / originCropWidth
-        } else {
-          cropHeight = Math.max(MIN_CROP_SIZE, originCropHeight + heightGrow)
-          cropWidth = (originCropWidth * cropHeight) / originCropHeight
-        }
+        if (corner.includes('e')) cropWidth = Math.max(MIN_CROP_SIZE, originCropWidth + dx)
+        if (corner.includes('w')) cropWidth = Math.max(MIN_CROP_SIZE, originCropWidth - dx)
+        if (corner.includes('s')) cropHeight = Math.max(MIN_CROP_SIZE, originCropHeight + dy)
+        if (corner.includes('n')) cropHeight = Math.max(MIN_CROP_SIZE, originCropHeight - dy)
         cropWidth = Math.min(cropWidth, natWidth)
         cropHeight = Math.min(cropHeight, natHeight)
         let cropX = originCropX

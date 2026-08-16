@@ -21,18 +21,3 @@ rotated object's visually rendered corners MAY extend beyond the slide's
 - **THEN** its stored x, y, width, and height are unchanged, even if the
   resulting rotated footprint extends beyond the slide's bounds
 
-### Requirement: Slide-bounds clamping preserves an image's aspect ratio
-Clamping an `image` object's destination width/height to the slide's
-bounds SHALL scale both dimensions down together by the same factor when
-either exceeds the slide's bounds, rather than clamping width and height
-independently — an independent clamp could produce a destination size
-whose aspect ratio no longer matches the crop rectangle's, which
-`deck-image-elements`'s "Image edits never change the rendered aspect
-ratio" requirement never allows.
-
-#### Scenario: An oversized image is clamped without distorting it
-- **WHEN** an image is added, moved, or resized such that its destination
-  width or height would exceed the slide's bounds
-- **THEN** both destination width and height are scaled down together by
-  whatever factor is needed to fit within the slide's bounds, preserving
-  the crop rectangle's aspect ratio exactly

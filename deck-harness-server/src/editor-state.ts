@@ -108,9 +108,11 @@ export interface ArrowObject extends BaseDeckObject {
  * slide (participates in boundsOf/translateObject like box/ellipse), while
  * `cropX/cropY/cropWidth/cropHeight` is an independent rectangle in the
  * *source* image's own pixel coordinates (design.md's "image joins the
- * DeckObject union with its own geometry shape"). Every write path must keep
- * width/height's aspect ratio equal to cropWidth/cropHeight's — see
- * deriveImageSize/deriveCropSize below.
+ * DeckObject union with its own geometry shape"). The two rectangles' aspect
+ * ratios are independent — nothing here enforces or assumes they match; the
+ * renderer reconciles a mismatch by fitting the crop into the destination
+ * box at a single uniform scale (design.md's "Crop and destination are
+ * independent rectangles").
  */
 export interface ImageObject extends BaseDeckObject {
   type: 'image'
@@ -451,20 +453,7 @@ function nextZIndex(slide: Slide): number {
  * field, so their bounding box is clamped by translating the whole object.
  */
 function clampToSlide(obj: DeckObject): void {
-  if (isImage(obj)) {
-    // Unlike box/ellipse (clamped independently below), an image's
-    // width/height must stay proportional to its crop rect — scale both
-    // dimensions down together by whichever factor is needed to fit within
-    // the slide (deck-object-bounds' "Slide-bounds clamping preserves an
-    // image's aspect ratio").
-    const widthFactor = obj.width > SLIDE_WIDTH ? SLIDE_WIDTH / obj.width : 1
-    const heightFactor = obj.height > SLIDE_HEIGHT ? SLIDE_HEIGHT / obj.height : 1
-    const factor = Math.min(widthFactor, heightFactor)
-    if (factor < 1) {
-      obj.width = Math.max(1, obj.width * factor)
-      obj.height = Math.max(1, obj.height * factor)
-    }
-  } else if (!isLineLike(obj)) {
+  if (!isLineLike(obj)) {
     obj.width = Math.min(Math.max(1, obj.width), SLIDE_WIDTH)
     obj.height = Math.min(Math.max(1, obj.height), SLIDE_HEIGHT)
   }
@@ -474,43 +463,6 @@ function clampToSlide(obj: DeckObject): void {
   const dx = Math.min(Math.max(0, bounds.x), maxX) - bounds.x
   const dy = Math.min(Math.max(0, bounds.y), maxY) - bounds.y
   translateObject(obj, dx, dy)
-}
-
-/**
- * The one place ImageObject.width/.height are computed from a caller's
- * request (design.md's "Aspect-locked resize and clamping"): a single field
- * derives the other from the current crop's aspect ratio; both fields with a
- * mismatched ratio → width wins and height is recomputed. Reused by
- * createImage, setSize, setImageSource, and the corner-drag resize branch
- * client-side documents against.
- */
-export function deriveImageSize(current: ImageObject, requested: { width?: number; height?: number }): { width: number; height: number } {
-  const aspect = current.cropWidth / current.cropHeight
-  if (typeof requested.width === 'number' && typeof requested.height !== 'number') {
-    return { width: requested.width, height: requested.width / aspect }
-  }
-  if (typeof requested.height === 'number' && typeof requested.width !== 'number') {
-    return { width: requested.height * aspect, height: requested.height }
-  }
-  if (typeof requested.width === 'number' && typeof requested.height === 'number') {
-    return { width: requested.width, height: requested.width / aspect }
-  }
-  return { width: current.width, height: current.height }
-}
-
-/** Mirror of deriveImageSize for the crop rectangle's own cropWidth/cropHeight — used by setCrop. */
-export function deriveCropSize(current: ImageObject, requested: { cropWidth?: number; cropHeight?: number }): { cropWidth: number; cropHeight: number } {
-  const aspect = current.cropWidth / current.cropHeight
-  if (typeof requested.cropWidth === 'number' && typeof requested.cropHeight !== 'number') {
-    return { cropWidth: requested.cropWidth, cropHeight: requested.cropWidth / aspect }
-  }
-  if (typeof requested.cropHeight === 'number' && typeof requested.cropWidth !== 'number') {
-    return { cropWidth: requested.cropHeight * aspect, cropHeight: requested.cropHeight }
-  }
-  if (typeof requested.cropWidth === 'number' && typeof requested.cropHeight === 'number') {
-    return { cropWidth: requested.cropWidth, cropHeight: requested.cropWidth / aspect }
-  }
-  return { cropWidth: current.cropWidth, cropHeight: current.cropHeight }
 }
 
 // Shared by getState()/exportSnapshot() (both need an isolated copy so a
@@ -687,18 +639,8 @@ function applyActionToTarget(obj: DeckObject, action: UpdateAction, args: Record
     }
     case 'setSize':
       if (isLineLike(obj)) return `setSize does not apply to type "${obj.type}"`
-      if (isImage(obj)) {
-        const requested = {
-          width: typeof args.width === 'number' ? args.width : undefined,
-          height: typeof args.height === 'number' ? args.height : undefined,
-        }
-        const { width, height } = deriveImageSize(obj, requested)
-        obj.width = width
-        obj.height = height
-      } else {
-        if (typeof args.width === 'number') obj.width = args.width
-        if (typeof args.height === 'number') obj.height = args.height
-      }
+      if (typeof args.width === 'number') obj.width = args.width
+      if (typeof args.height === 'number') obj.height = args.height
       clampToSlide(obj)
       return undefined
     case 'setEndpoint': {
@@ -790,30 +732,21 @@ function applyActionToTarget(obj: DeckObject, action: UpdateAction, args: Record
       }
       obj.src = args.src
       // Crop resets to the new source's full extent (deck-image-elements'
-      // "Agent changes an image's source" scenario) before deriving the new
-      // destination height from the existing width and that crop's aspect ratio.
+      // "Agent changes an image's source" scenario); destination
+      // x/y/width/height are left untouched — crop and destination are
+      // independent rectangles, reconciled only at render time.
       obj.cropX = 0
       obj.cropY = 0
       obj.cropWidth = args.naturalWidth
       obj.cropHeight = args.naturalHeight
-      const { width, height } = deriveImageSize(obj, { width: obj.width })
-      obj.width = width
-      obj.height = height
-      clampToSlide(obj)
       return undefined
     }
     case 'setCrop': {
       if (!isImage(obj)) return `setCrop does not apply to type "${obj.type}"`
       if (typeof args.cropX === 'number') obj.cropX = args.cropX
       if (typeof args.cropY === 'number') obj.cropY = args.cropY
-      if (typeof args.cropWidth === 'number' || typeof args.cropHeight === 'number') {
-        const { cropWidth, cropHeight } = deriveCropSize(obj, {
-          cropWidth: typeof args.cropWidth === 'number' ? args.cropWidth : undefined,
-          cropHeight: typeof args.cropHeight === 'number' ? args.cropHeight : undefined,
-        })
-        obj.cropWidth = cropWidth
-        obj.cropHeight = cropHeight
-      }
+      if (typeof args.cropWidth === 'number') obj.cropWidth = args.cropWidth
+      if (typeof args.cropHeight === 'number') obj.cropHeight = args.cropHeight
       return undefined
     }
     case 'setZIndex':
