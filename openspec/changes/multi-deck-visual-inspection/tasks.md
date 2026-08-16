@@ -55,6 +55,6 @@
 ## 9. Verification
 
 - [x] 9.1 `npm run typecheck`, `npm test`, `npm run build` all pass
-- [ ] 9.2 Manual smoke test: create a second deck, add/remove slides, switch between decks/slides, confirm edits stay scoped to the correct slide and selection resets on slide switch
+- [X] 9.2 Manual smoke test: create a second deck, add/remove slides, switch between decks/slides, confirm edits stay scoped to the correct slide and selection resets on slide switch
 - [ ] 9.3 Manual smoke test: prompt pi to use the slide-view tool after making a layout change (e.g. text overflowing a box) and confirm the returned image actually shows the issue
 - [ ] 9.4 Manual smoke test: disconnect the browser tab mid-render-request (or mid-approval) and confirm the pending request fails cleanly instead of hanging the agent turn

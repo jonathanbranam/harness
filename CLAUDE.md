@@ -151,3 +151,8 @@ env vars, `pi login`) — see the "API Keys and OAuth" section of the installed
 `@earendil-works/pi-coding-agent` package's `docs/sdk.md`. Nothing
 harness-specific is required beyond having a working `pi` login on whatever
 box runs a harness server.
+
+See [`docs/pi-setup.md`](docs/pi-setup.md) for adding custom models via
+`~/.pi/agent/models.json`, the `input: ["text", "image"]` declaration a
+model needs before an image tool result (e.g. deck-harness's `slide_view`)
+will actually reach it, and a restart gotcha specific to editing that file.

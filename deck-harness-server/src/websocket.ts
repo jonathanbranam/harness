@@ -172,7 +172,11 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
 
         case 'prompt': {
           try {
-            const session = await getOrCreateSession(token, { requestApproval, requestRender })
+            // rebind: this connection is about to originate a new agent
+            // turn, so any tool calls during it (approvals, slide_view
+            // renders) must route here — see session-store.ts's
+            // getOrCreateSession doc comment.
+            const session = await getOrCreateSession(token, { requestApproval, requestRender }, { rebind: true })
             await session.prompt(msg.text, session.isStreaming ? { streamingBehavior: 'steer' } : undefined)
           } catch (err) {
             safeSend(socket, { type: 'error', message: err instanceof Error ? err.message : 'Prompt failed' })
