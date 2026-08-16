@@ -17,3 +17,14 @@ While a text box is being edited, its floating format toolbar SHALL be visually 
 #### Scenario: Edited object is behind an overlapping object
 - **WHEN** a text box that is behind another, overlapping object in z-order is double-clicked into edit mode
 - **THEN** the floating format toolbar is fully visible and clickable, not obscured by the overlapping object
+
+### Requirement: Edited object itself renders above all other slide objects while being edited
+While a text box is being edited, the object SHALL render above every other object on the slide — not just its selection chrome, but the object's own content (background fill and text) — regardless of its position in the slide's stored z-order, so its content stays visible while the user edits it. The slide's stored z-order SHALL remain unchanged throughout; when editing ends, the object SHALL return to its stored z-order position.
+
+#### Scenario: Editing an object that is behind another, overlapping object
+- **WHEN** a text box that is behind another, overlapping object in z-order is double-clicked into edit mode
+- **THEN** the edited text box, including its background fill and text content, renders above the overlapping object for the duration of editing
+
+#### Scenario: Ending edit mode restores the object's original z-order
+- **WHEN** the user finishes editing a text box that was temporarily brought to the front
+- **THEN** the object returns to its stored position in the slide's z-order, and the slide's stored object order was never changed

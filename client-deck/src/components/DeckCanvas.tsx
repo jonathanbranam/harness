@@ -449,6 +449,15 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     resolvedRects[obj.id] = liveRects[obj.id] ?? obj
   }
 
+  // Paint order only — never mutates deckState.objects (the stored,
+  // server-synced z-order). While editing, the edited object's own content
+  // (fill/text) needs to be visible even if it's normally behind another
+  // object, so it's moved last (frontmost) purely for this render; it
+  // reverts to its stored position the moment editingId clears.
+  const objectsInPaintOrder = editingId
+    ? [...deckState.objects.filter((o) => o.id !== editingId), ...deckState.objects.filter((o) => o.id === editingId)]
+    : deckState.objects
+
   const setStyleOnSelection = (action: UpdateActionCall['action'], args: Record<string, unknown>) => {
     if (deckState.selection.length === 0) return
     onObjectUpdate([{ action, targetIds: deckState.selection, args }])
@@ -597,7 +606,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
               className="relative bg-white border border-gray-300"
               style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})`, transformOrigin: 'top left' }}
             >
-              {deckState.objects.map((obj) =>
+              {(readOnly ? deckState.objects : objectsInPaintOrder).map((obj) =>
                 readOnly ? (
                   <TextObjectBox
                     key={obj.id}

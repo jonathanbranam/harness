@@ -8,12 +8,13 @@
 
 **Goals:**
 - Selection outline, resize handles, and the floating format toolbar always paint above every slide object, regardless of the selected/edited object's z-order.
+- The object currently being edited paints above every other object for the duration of editing, so its content (fill + text) is visible while typing, and reverts to its stored z-order the moment editing ends.
 - Preserve existing interaction behavior exactly: drag-to-move, drag-to-resize, multi-select (outline+handles on every selected object), double-click-to-edit, bold/italic/list toggling, click-outside-to-clear-selection.
-- No change to slide objects' own z-order or paint order.
+- No change to slide objects' *stored* z-order (what's in `deckState.objects` / persisted to the server) — only to what's painted on top at any given moment.
 
 **Non-Goals:**
-- No change to how z-order itself is assigned or reordered (no bring-to-front/send-to-back feature).
-- No change to the read-only/preview render path (it already renders no chrome at all).
+- No change to how z-order itself is assigned or reordered as stored data (no persisted bring-to-front/send-to-back feature).
+- No change to the read-only/preview render path (it already renders no chrome, and has no `editingId` concept at all).
 
 ## Decisions
 
@@ -32,6 +33,11 @@ The overlay container itself uses `pointer-events-none` (so it never intercepts 
 
 Alternative considered: move `editableRef`/`applyMark`/`applyListType`/`commitText` entirely up into `DeckCanvas`, keyed by object id. Rejected as a larger, riskier diff — it would also relocate the DOM-seeding effects (lines 87–117 today) that are tightly coupled to a single object's mount/edit lifecycle, for no behavioral benefit over exposing an imperative handle.
 
+### Bring the editing object to front via render order only, never by mutating stored z-order
+`DeckCanvas` already maps `deckState.objects` directly, in stored z-order, to build the list of `TextObjectBox` elements. Add a render-order pass ahead of that `.map(...)`: when `editingId` is set, produce a reordered array with that one object moved to the end (so it's last in DOM order and paints frontmost among objects); otherwise use `deckState.objects` unchanged. `deckState.objects` itself — the source of truth for z-order, synced to the server and other connected views — is never mutated or reassigned; this is a per-render, client-local presentation detail, consistent with `editingId` already being local-only React state that isn't synced through the deck's shared websocket state at all. Each `TextObjectBox` stays keyed by `obj.id`, so React repositions the existing DOM node (preserving the live `contentEditable` and its focus/caret) instead of unmounting and remounting it.
+
+Alternative considered: actually reorder `deckState.objects` server-side (e.g. a `moveToFront` action fired on entering edit mode, mirroring `setPosition`/`setSize`). Rejected: it would persist a z-order change as a side effect of merely opening an object for editing, which nobody asked for and which every other connected view would see change even outside of that editing session — a bigger, more surprising behavior change than the visibility problem calls for, and it would need new server-side action support the proposal doesn't call for.
+
 ### Rect math is computed once per render and shared
 The overlay needs the same `rect = liveRect ?? obj` computation `TextObjectBox` already does per object, for every selected/editing object. Compute it in `DeckCanvas` (which already holds `liveRects` and `deckState.objects`) and pass the resolved rects down to both `TextObjectBox` (for its own layout) and the overlay (for chrome placement), rather than duplicating the `liveRect ?? obj` fallback in two places.
 
@@ -40,3 +46,4 @@ The overlay needs the same `rect = liveRect ?? obj` computation `TextObjectBox` 
 - [Overlay outline duplicates styling that today lives on the object's own div (border/ring classes)] → Keep the visual style identical (same Tailwind classes, just moved to the overlay element) so there's no visible difference, only a stacking-order fix.
 - [Multi-select with several selected objects overlapping each other means overlay handles can visually overlap too] → Out of scope: this matches current behavior when multiple selected objects overlap (their handles already competed for the same screen space); this change only fixes chrome being hidden *behind unselected objects*, not handle-vs-handle overlap between two selected objects.
 - [Imperative handle adds a small amount of ref-plumbing complexity to `TextObjectBox`] → Scoped to exactly the two functions the toolbar needs; no other behavior of `TextObjectBox` changes.
+- [Reordering DOM position of the editing object mid-render could, in principle, disturb its `contentEditable` focus/selection] → Mitigated by keeping the `key={obj.id}` stable across the reorder, so React moves the existing DOM node rather than remounting it; this is exercised by the existing double-click-to-edit flow either way since `editing` and the reorder both flip in the same render.
