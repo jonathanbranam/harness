@@ -26,12 +26,13 @@ elements, and to control which elements draw on top of which (z-order).
 - `deck-canvas-display`: Canvas rendering must draw the slide's background color and paint all objects (existing text boxes and new shapes) in z-order rather than array order.
 - `presentation-editing`: `presentation_get_state` must report `zIndex` (and slide `backgroundColor`) so pi's context reflects stacking order and background; the shared-state/live-sync requirements extend to the new shape object types.
 - `deck-management`: deck/slide state now includes a per-slide `backgroundColor`, and slide creation must define its default value.
+- `deck-undo-redo`: shape creation/removal, z-order changes, shape styling, and slide background color changes are content mutations and must be captured in the shared undo/redo history like every other edit (this capability didn't exist yet when this change was first proposed — see design.md's "Undo/redo integration" decision).
 
 ## Impact
 
-- `deck-harness-server/src/editor-state.ts`: extend `DeckObject`/`Slide` types, `applyUpdate` actions, and default object construction.
+- `deck-harness-server/src/editor-state.ts`: extend `DeckObject`/`Slide` types, `applyUpdate` actions, and default object construction; extend `UPDATE_DESCRIPTIONS`/`MERGEABLE_UPDATE_ACTIONS` for the new actions and give `withHistory` an optional merge key so `setSlideBackgroundColor` gets the same history capture as the rest (see design.md's "Undo/redo integration" decision).
 - `deck-harness-server/src/pi-extensions/presentation-bridge.ts`: new/extended tool definitions for shape creation, shape-specific styling, and z-order changes.
 - `deck-harness-server/src/deck-persistence.ts`: snapshot schema gains the new fields (background color, shape fields, zIndex) — needs a compatible read path for existing saved decks that predate this change.
-- `client-deck/src/components/DeckCanvas.tsx`: render slide background color; render shape types; sort objects by `zIndex` before painting; add UI affordance(s) for creating each shape type.
+- `client-deck/src/components/DeckCanvas.tsx`: render slide background color; render shape types; sort objects by `zIndex` before painting; add UI affordance(s) for creating each shape type; give `fix-selection-tools-zorder`'s selection/editing overlay an explicit `z-index` so it keeps outranking objects once they carry their own (see design.md's "Interaction with `fix-selection-tools-zorder`'s overlay" decision).
 - `client-deck` toolbar UI: add move-forward/move-backward (and front/back) controls for the current selection.
 - `client-deck/src/hooks/useDeckSocket.ts`: wire any new WS message fields through to state updates if the existing `object_update`/state broadcast shape needs new fields.

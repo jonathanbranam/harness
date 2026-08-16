@@ -106,6 +106,21 @@ CSS `z-index` style, and the browser's normal stacking-context rules do the
 rest. This means array order (and thus object-lookup logic elsewhere)
 never has to track paint order at all.
 
+**Interaction with `fix-selection-tools-zorder`'s overlay**: that change
+(implemented in `DeckCanvas.tsx` ahead of this one, not yet archived) added
+a selection-outline/resize-handle/format-toolbar overlay `<div>` that relies
+purely on DOM order — it's rendered last, after `deckState.objects.map(...)`,
+with no CSS `z-index` of its own — to guarantee it paints above every
+object. Once this change gives each object wrapper an explicit CSS
+`z-index` (per the decision above), that guarantee breaks: any object whose
+`zIndex` resolves to a browser stacking level above the overlay's implicit
+`auto` (which is every object with `zIndex >= 1` — the default for a
+newly-added object) will paint over the overlay regardless of DOM position,
+since explicit `z-index` on a sibling wins over `auto` independent of
+source order. The overlay must be given its own explicit `z-index` set well
+above any value objects can reach (e.g. a fixed constant like `9999`) so it
+keeps outranking every object once per-object `z-index` styling lands.
+
 **Toolbar scope**: the canvas toolbar ships forward/backward buttons only
 (matching `presentation-editing` spec's toolbar scenarios exactly).
 Front/back stay pi-tool-only for this change — four more buttons in an
@@ -164,6 +179,69 @@ restores with its current visual stacking preserved. `Slide.backgroundColor`
 defaults to `#ffffff` when absent, matching the canvas's current hardcoded
 white — so existing decks render identically until someone changes it.
 
+### Undo/redo integration (`deck-undo-redo`, implemented after this design was first written)
+`add-undo-redo-support` landed after this change's specs/design were first
+drafted, so nothing above accounted for it. Its history mechanism
+(`editor-state.ts`) is generic but has two hazards this change must handle
+explicitly:
+
+- **New `UpdateAction`s are covered "for free," but need description/merge
+  entries.** `setZIndex`/`bringForward`/`sendBackward`/`bringToFront`/
+  `sendToBack`/`setEndpoint` and the shape-style fields (`strokeWidth`,
+  `borderWidth`, `cornerRadius`, `arrowStart`/`arrowEnd`) all extend
+  `presentation_update`'s existing `ACTIONS` union, so `applyUpdate`'s
+  existing before/after `commitHistory` call captures them automatically —
+  no new call site needed. What *is* needed: `UPDATE_DESCRIPTIONS` is a
+  `Record<UpdateAction, ...>`, so TypeScript will refuse to compile until
+  each new action gets a human-readable description (surfaced by the
+  history-inspection tool); and a deliberate mergeability call for each one.
+  `setEndpoint` (dragging a line/arrow endpoint) and stroke/border-width/
+  corner-radius (stepper or slider controls) join
+  `MERGEABLE_UPDATE_ACTIONS`, matching `setPosition`/`setSize`/`setFontSize`'s
+  precedent (continuous same-target edits collapse into one undo step). The
+  z-order actions do **not** join it — each is a single discrete
+  forward/backward/front/back step (like `addObject`/`removeObject`), so
+  every click is its own undo step.
+- **`presentation_add_shape`'s `addShape` must follow `applyUpdate`'s
+  pattern, not `withHistory`.** `withHistory` (used by `createDeck`/
+  `addSlide`/etc.) commits unconditionally, which is correct for callers
+  that already validate upfront and always succeed. Shape creation can fail
+  validation (missing/invalid geometry, as `addObject` already handles) —
+  per `deck-undo-redo`'s "Content mutations are captured in history"
+  requirement, a no-op call must not push a history entry. `addShape`
+  captures before/after itself and only calls `commitHistory` when creation
+  actually succeeded, mirroring `applyUpdate`'s own comment on exactly this
+  hazard.
+- **`presentation_set_slide_background` needs a history entry, and needs it
+  to be drag-friendly.** Background color is a content mutation (directly
+  analogous to `setFillColor`), so it must be captured — but it isn't
+  object-scoped, so it can't ride `applyUpdate`'s `mergeKey` path, and a
+  native `<input type="color">` swatch fires many `onChange` events while
+  dragging, same as the existing fill/border color pickers. Rather than
+  inventing a second history-capture path, `withHistory` gains an optional
+  `mergeKey` parameter (defaulting to unset, so every existing caller is
+  unaffected) and `setSlideBackgroundColor` passes one keyed on the active
+  slide id — giving it the same burst-coalescing behavior as
+  `setFillColor`/`setBorderColor` without duplicating `commitHistory`'s
+  merge logic.
+
+### Slide background color is deck content, not themed UI chrome
+`add-light-dark-mode` landed after this design was first written too. Its
+`deck-theme-toggle` capability already states deck/slide content "SHALL NOT"
+follow the editor's light/dark theme — it renders exactly as authored in
+both the canvas and the chrome-free presentation view. The active slide's
+`backgroundColor` (and every shape's fill/border/stroke color) is deck
+content under that rule: it must render as the literal stored color with no
+`dark:` Tailwind variant or theme-aware CSS variable, the same way the
+canvas's existing slide `<div>` already renders a literal `bg-white` today
+(see `deck-canvas-display`'s new "Slide background color is rendered"
+requirement). The *toolbar* controls this change adds — z-order buttons,
+the background-color swatch, stroke/border-width and corner-radius inputs —
+are editor chrome, not deck content, so they follow the opposite rule: they
+should reuse the existing `dark:`-variant classes already on every other
+toolbar control in `DeckCanvas.tsx`, not the literal-color styling used for
+slide content.
+
 ## Risks / Trade-offs
 
 - **Broad refactor surface**: moving `DeckObject` from one flat interface
@@ -201,6 +279,8 @@ client rendering/interaction, then the toolbar z-order controls last (they
 depend on the z-order actions already existing). Verify interactively via
 `playwright-cli` against the already-running dev client per `CLAUDE.md`,
 covering: creating each shape type, corner radius, transparent fill/border,
-z-order via both the agent tools and the toolbar, and slide background
-color. Rollback is a plain revert — there is no persisted-format migration
-to unwind.
+z-order via both the agent tools and the toolbar, slide background color,
+and undoing/redoing each of the above (including that a dragged background
+color or endpoint change collapses into one undo step, and that a failed
+shape-creation call pushes no history entry). Rollback is a plain revert —
+there is no persisted-format migration to unwind.
