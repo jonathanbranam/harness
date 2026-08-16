@@ -2,7 +2,7 @@
 
 ## Status
 
-not started
+not started — but a substantial slice of the "Security review: path jail ... sandbox isolation" scope item is already done ahead of schedule, landed in `2026-08-16-sandbox-introspect-harness` (archived) as `openspec/specs/introspect/tool-permission-gate/spec.md` + `introspect-harness-server/src/pi-extensions/permission-gate.ts` (60 passing tests in `permission-gate.test.ts`). See "Already implemented" note below before scoping this phase's tasks.
 
 ## Goal
 
@@ -55,3 +55,16 @@ Create a new OpenSpec change named `introspect-harness-phase-06` using the defau
 - This phase should not add new user-facing features unless required for reliability.
 - Focus on making the Phase 1–5 features trustworthy on stage.
 - Consider whether the harness needs a "kiosk" or "presentation" mode that hides dev controls.
+
+## Already implemented (jailbreak / sandbox hardening)
+
+The `2026-08-16-sandbox-introspect-harness` change (archived) implemented the tool-permission-gate portion of this phase's "Security review" item before this phase formally started:
+
+- **Path jail** for `read`/`write`/`edit`/`ls`/`find`/`grep`, including `realpath`-based symlink-escape detection (both pre-existing symlinks and ones the agent tries to create mid-command).
+- **`bash` confinement** to the workspace root: blocks `cd`/absolute paths/`..` traversal/`~` expansion outside the workspace, a static destructive-command blocklist (`rm -rf`, `mkfs`, `dd` to a device, `curl|sh`-style pipes, etc.), and outright blocking of `ln`/`cp -s` link creation (checked before execution, so compound "create symlink then read through it" commands are blocked as a whole).
+- **No approval-prompt fallback** — blocked calls fail immediately with a reason, since introspect-harness-server has no interactive approval channel (unlike deck-harness-server's permission-gate).
+- **System prompt** states the workspace boundary explicitly.
+
+Spec: `openspec/specs/introspect/tool-permission-gate/spec.md`. Implementation: `introspect-harness-server/src/pi-extensions/permission-gate.ts`, tested by `permission-gate.test.ts` (60 tests, passing as of 2026-08-16).
+
+Remaining for this phase's security-review scope item: this hardening is pattern-based (documented residual risk in design.md), not a kernel-level sandbox — worth a fresh look before a public demo. Session timeouts/idle cleanup, rate limiting, recording import/export, replay determinism, and the deployment runbook are all still not started.
