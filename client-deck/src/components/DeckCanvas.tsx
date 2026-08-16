@@ -171,30 +171,40 @@ const TextObjectBox = forwardRef<
       onDoubleClick={onDoubleClick}
     >
       {editing ? (
-        <>
-          <div
-            ref={editableRef}
-            contentEditable
-            suppressContentEditableWarning
-            className="w-full h-full p-2 outline-none [&_div]:min-h-[1em]"
-            onBlur={() => {
-              commitText()
-              onStartEditingCommit()
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                e.currentTarget.blur()
-              }
-            }}
-          />
-        </>
+        // key="editing" (vs. key="display" below): both branches render a
+        // plain <div> at this same position, so without distinct keys React
+        // reuses one DOM node across the transition and just patches its
+        // props/children — but this div's content is set via direct
+        // node.innerHTML mutation (outside React's tracked children, by
+        // design, per the doc comment above). React then thinks it's going
+        // from 0 tracked children to N (the display branch's blockMarkers
+        // output) and *appends* them next to the untracked raw markup
+        // instead of replacing it, leaving stale seeded HTML behind as a
+        // permanent orphaned sibling — visible as duplicated text. Distinct
+        // keys force a real unmount/mount instead of an in-place patch.
+        <div
+          key="editing"
+          ref={editableRef}
+          contentEditable
+          suppressContentEditableWarning
+          className="w-full h-full p-2 outline-none [&_div]:min-h-[1em]"
+          onBlur={() => {
+            commitText()
+            onStartEditingCommit()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.currentTarget.blur()
+            }
+          }}
+        />
       ) : (
         // select-none/cursor-default: this text is plain DOM content, not
         // the contenteditable — without these the browser treats it as
         // ordinary selectable text (I-beam cursor, native double-click word
         // selection) which misleadingly suggests a single click edits it,
         // when only double-click actually enters edit mode.
-        <div className="w-full h-full p-2 overflow-hidden select-none cursor-default">
+        <div key="display" className="w-full h-full p-2 overflow-hidden select-none cursor-default">
           {blockMarkers(displayText).map(({ block, marker }, i) => (
             <div key={i} className="flex gap-1.5">
               {marker && <span className="shrink-0">{marker}</span>}
