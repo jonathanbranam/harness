@@ -9,6 +9,7 @@ import {
   listAllRecordings,
   replayJumpToCheckpoint,
   replayStepTo,
+  resetSession,
   startRecording,
   stopRecording,
   type HarnessSession,
@@ -27,6 +28,7 @@ type ClientMessage =
   | { type: 'replay_play' }
   | { type: 'replay_pause' }
   | { type: 'replay_exit' }
+  | { type: 'new_session' }
 
 type ServerMessage = { type: 'error'; message: string } | Record<string, unknown>
 
@@ -235,6 +237,25 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
         lastEmittedEvents = undefined
         exitReplayMode(token)
         safeSend(socket, { type: 'mode', mode: 'live' })
+        return
+      }
+
+      if (msg.type === 'new_session') {
+        try {
+          stopPlayback()
+          lastEmittedEvents = undefined
+          unsubscribe?.()
+          unsubscribe = undefined
+          const hs = await resetSession(token)
+          harnessSession = hs
+          attachListener(hs)
+          safeSend(socket, { type: 'session_reset' })
+          safeSend(socket, { type: 'mode', mode: getMode(token) })
+          safeSend(socket, { type: 'recording_status', ...getRecordingStatus(token) })
+        } catch (err) {
+          console.error('[ws] new session failed', err)
+          safeSend(socket, { type: 'error', message: err instanceof Error ? err.message : 'Failed to start new session' })
+        }
         return
       }
     },

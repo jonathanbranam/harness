@@ -284,6 +284,19 @@ export function useIntrospectSocket() {
       return
     }
 
+    // A brand-new session's sandbox/context replaces the previous one
+    // entirely — clear accumulated UI state the same way a replay reset
+    // does, plus any leftover replay-panel state from before the reset.
+    if (type === 'session_reset') {
+      setBlocks([])
+      setFoundation({ systemPrompt: '', skills: [], guides: [], sensors: [] })
+      setUsage({ tokens: null, contextWindow: 0, percent: null, estimatedCost: 0 })
+      setReplayHeader(undefined)
+      setReplayPosition(undefined)
+      streamingIdRef.current = null
+      return
+    }
+
     if (type === 'recording_status') {
       setRecording(Boolean(event.recording))
       setRecordingId(event.recordingId as string | undefined)
@@ -368,6 +381,11 @@ export function useIntrospectSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'replay_exit' }))
   }, [])
 
+  const newSession = useCallback(() => {
+    setReplayPlaying(false)
+    wsRef.current?.send(JSON.stringify({ type: 'new_session' }))
+  }, [])
+
   return {
     connected,
     blocks,
@@ -391,5 +409,6 @@ export function useIntrospectSocket() {
     replayPlay,
     replayPause,
     exitReplay,
+    newSession,
   }
 }

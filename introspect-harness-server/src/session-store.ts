@@ -95,6 +95,23 @@ export function disposeSession(sessionId: string) {
   console.log(`[session] disposed ${sessionId}`)
 }
 
+/**
+ * Tears down the current live session (if any) for `sessionId` and creates a
+ * fresh one under the same auth token, without requiring the user to log out
+ * — same reset-to-seed + re-ensure-template path `getOrCreateSession` takes
+ * for a brand-new token, just triggerable on demand for testing/iteration.
+ */
+export async function resetSession(sessionId: string): Promise<HarnessSession> {
+  const existing = sessions.get(sessionId)
+  if (existing) {
+    if (existing.recordingWriter.isRecording()) await existing.recordingWriter.stop()
+    existing.session.dispose()
+    sessions.delete(sessionId)
+    console.log(`[session] reset ${sessionId}`)
+  }
+  return getOrCreateSession(sessionId)
+}
+
 export interface RecordingStatus {
   recording: boolean
   recordingId?: string

@@ -29,6 +29,7 @@ export function IntrospectPage() {
     replayPlay,
     replayPause,
     exitReplay,
+    newSession,
   } = useIntrospectSocket()
   const { theme, toggleTheme } = useTheme()
 
@@ -37,6 +38,14 @@ export function IntrospectPage() {
       <header className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-800">
         <span className="font-semibold">Introspect Harness</span>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={newSession}
+            title="Reset the sandbox workspace and agent context, starting a fresh session without logging out"
+            className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+          >
+            New session
+          </button>
           <button
             type="button"
             onClick={toggleTheme}
