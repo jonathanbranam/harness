@@ -25,15 +25,23 @@ const ACTIONS = [
   'addObject',
   'removeObject',
   'applyTextStyle',
+  'setEndpoint',
+  'setZIndex',
+  'bringForward',
+  'sendBackward',
+  'bringToFront',
+  'sendToBack',
 ] as const
+
+const SHAPE_TYPES = ['line', 'box', 'ellipse', 'arrow'] as const
 
 export function presentationBridge(pi: ExtensionAPI) {
   pi.registerTool({
     name: 'presentation_get_state',
     label: 'Get Presentation State',
     description:
-      'Get the current presentation state: the active deck and slide identity, every object on the active slide (id, bounds, structured rich-text `text`, and styling: fillColor, borderColor, fontColor, fontSize), and the current selection. `text` is an array of blocks (paragraph or listItem), each with inline runs carrying optional bold/italic flags. `fillColor`/`borderColor` may be a color value or the literal "transparent". Call this before making changes so you are reasoning about the live deck, not a stale copy.',
-    promptSnippet: 'Read the live deck: active deck/slide identity, all objects on the active slide, and the current selection',
+      'Get the current presentation state: the active deck and slide identity, the active slide\'s backgroundColor, every object on the active slide, and the current selection. Every object has a `type` ("textBox", "line", "box", "ellipse", or "arrow") and a `zIndex` (paint order — higher paints on top; not necessarily contiguous). `textBox` objects carry bounds (x/y/width/height), structured rich-text `text`, fillColor, borderColor, fontColor, fontSize. `box`/`ellipse` carry bounds, fillColor, borderColor, borderWidth (`box` also cornerRadius). `line`/`arrow` carry endpoints (x1/y1/x2/y2), strokeColor, strokeWidth (`arrow` also arrowStart/arrowEnd booleans). `text` is an array of blocks (paragraph or listItem), each with inline runs carrying optional bold/italic flags. Color fields may be a color value or the literal "transparent" (fillColor/borderColor only — stroke/font colors are always a real color). Call this before making changes so you are reasoning about the live deck, not a stale copy.',
+    promptSnippet: "Read the live deck: active deck/slide identity, the slide's background color, all objects on the active slide, and the current selection",
     parameters: Type.Object({}),
     execute: async () => {
       const state = editorStore.getState()
@@ -44,22 +52,26 @@ export function presentationBridge(pi: ExtensionAPI) {
   pi.registerTool({
     name: 'presentation_update',
     label: 'Update Presentation',
-    description: `Modify objects in the live presentation editor. Use when the user asks to change layout, styling, or content of slides.
+    description: `Modify objects in the live presentation editor. Use when the user asks to change layout, styling, content, or stacking order of slides.
 
 Available actions:
-- setPosition: { x?: number, y?: number, dx?: number, dy?: number }
-- setSize: { width?: number, height?: number }
-- setText: { text: string | TextBlock[] } — a plain string is wrapped as a single unstyled paragraph; pass TextBlock[] directly for rich content. TextBlock is { kind: "paragraph", runs: TextRun[] } | { kind: "listItem", listType: "bulleted" | "numbered", runs: TextRun[] }. TextRun is { text: string, bold?: boolean, italic?: boolean }.
-- setFillColor: { color: string } (hex, e.g. "#ff0000", or "transparent" for no fill)
-- setFontColor: { color: string } (hex)
-- setBorderColor: { color: string } (hex, or "transparent" for no border)
-- setFontSize: { fontSize: number } (points)
-- applyGridLayout: { direction: "horizontal" | "vertical", gap?: number }
-- addObject: { x: number, y: number, width: number, height: number, text?: string | TextBlock[], fillColor?: string, borderColor?: string, fontColor?: string, fontSize?: number } — targetIds is ignored; x/y/width/height are required since only you (not the editor) know where the new box should go. Returns the new object's id in the result's "changed" list.
-- removeObject: {} — removes each object in targetIds from the active slide.
-- applyTextStyle: { start: number, end: number, mark?: "bold" | "italic", value?: boolean } or { start: number, end: number, listType: "bulleted" | "numbered" | null } — start/end are character offsets into the target's plain-text content (the same string presentation_select_by_text matches against, with blocks joined by "\\n"); mark+value toggles bold/italic on that range; listType converts the blocks the range touches into that list type, or back to a plain paragraph when null.
+- setPosition: { x?: number, y?: number, dx?: number, dy?: number } — works on every object type (line/arrow move as a unit).
+- setSize: { width?: number, height?: number } — textBox/box/ellipse only; use setEndpoint for line/arrow.
+- setText: { text: string | TextBlock[] } — textBox only. A plain string is wrapped as a single unstyled paragraph; pass TextBlock[] directly for rich content. TextBlock is { kind: "paragraph", runs: TextRun[] } | { kind: "listItem", listType: "bulleted" | "numbered", runs: TextRun[] }. TextRun is { text: string, bold?: boolean, italic?: boolean }.
+- setFillColor: { color: string } (hex, e.g. "#ff0000", or "transparent" for no fill) — textBox/box/ellipse only.
+- setFontColor: { color: string } (hex) — textBox only.
+- setBorderColor: { color: string } (hex, or "transparent" for no border) — every type: sets the border color for textBox/box/ellipse, or the stroke color for line/arrow.
+- setFontSize: { fontSize: number } (points) — textBox only.
+- setEndpoint: { which: "start" | "end", x: number, y: number } — line/arrow only; moves one endpoint, the other is unaffected.
+- setZIndex: { zIndex: number } — sets an object's explicit stacking-order value.
+- bringForward / sendBackward: {} — swaps an object with the next object above/below it in stacking order.
+- bringToFront / sendToBack: {} — moves an object above/below every other object on the slide.
+- applyGridLayout: { direction: "horizontal" | "vertical", gap?: number } — works on any mix of object types.
+- addObject: { x: number, y: number, width: number, height: number, text?: string | TextBlock[], fillColor?: string, borderColor?: string, fontColor?: string, fontSize?: number } — adds a textBox; targetIds is ignored. For line/box/ellipse/arrow use presentation_add_shape instead. Returns the new object's id in the result's "changed" list.
+- removeObject: {} — removes each object in targetIds from the active slide (any type).
+- applyTextStyle: { start: number, end: number, mark?: "bold" | "italic", value?: boolean } or { start: number, end: number, listType: "bulleted" | "numbered" | null } — textBox only; start/end are character offsets into the target's plain-text content (the same string presentation_select_by_text matches against, with blocks joined by "\\n"); mark+value toggles bold/italic on that range; listType converts the blocks the range touches into that list type, or back to a plain paragraph when null.
 
-Always prefer the most specific action. If multiple objects are selected and the user asks to lay them out, use applyGridLayout.`,
+Setting an action's field(s) on a target whose type doesn't support them is reported in the result's "errors" instead of applied. Always prefer the most specific action. If multiple objects are selected and the user asks to lay them out, use applyGridLayout. For shape-specific styling (stroke/border width, corner radius, arrowheads) use presentation_style_shape.`,
     promptSnippet: 'Move, resize, restyle, or lay out objects in the live deck',
     promptGuidelines: [
       'Use presentation_update on the current selection unless the user names other objects by text or id.',
@@ -79,6 +91,97 @@ Always prefer the most specific action. If multiple objects are selected and the
         details: result,
         isError: result.errors.length > 0 && result.changed.length === 0,
       }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_add_shape',
+    label: 'Add Shape',
+    description: `Add a new shape object to the active slide. "type" selects the shape and determines which other args apply:
+- "box": rectangle. Args: x, y, width, height (required, bounding box), fillColor?, borderColor?, borderWidth?, cornerRadius?.
+- "ellipse": ellipse, or a circle when width === height. Args: x, y, width, height (required, bounding box), fillColor?, borderColor?, borderWidth?.
+- "line": straight line segment. Args: x1, y1, x2, y2 (required, slide-coordinate endpoints), strokeColor?, strokeWidth?.
+- "arrow": straight line with an arrowhead. Args: x1, y1, x2, y2 (required), strokeColor?, strokeWidth?, arrowStart? (boolean, default false), arrowEnd? (boolean, default true).
+
+fillColor/borderColor accept a hex color or "transparent"; strokeColor must be a real color. The new object is placed above every existing object on the slide (highest zIndex). Returns the new object's id in the result's "changed" list; a validation failure (e.g. missing geometry) is reported in "errors" and creates nothing.`,
+    promptSnippet: 'Add a line, box, ellipse, or arrow shape to the live deck',
+    parameters: Type.Object({
+      type: Type.Union(SHAPE_TYPES.map((t) => Type.Literal(t))),
+      id: Type.Optional(Type.String()),
+      x: Type.Optional(Type.Number()),
+      y: Type.Optional(Type.Number()),
+      width: Type.Optional(Type.Number()),
+      height: Type.Optional(Type.Number()),
+      x1: Type.Optional(Type.Number()),
+      y1: Type.Optional(Type.Number()),
+      x2: Type.Optional(Type.Number()),
+      y2: Type.Optional(Type.Number()),
+      fillColor: Type.Optional(Type.String()),
+      borderColor: Type.Optional(Type.String()),
+      borderWidth: Type.Optional(Type.Number()),
+      cornerRadius: Type.Optional(Type.Number()),
+      strokeColor: Type.Optional(Type.String()),
+      strokeWidth: Type.Optional(Type.Number()),
+      arrowStart: Type.Optional(Type.Boolean()),
+      arrowEnd: Type.Optional(Type.Boolean()),
+    }),
+    execute: async (_id, params) => {
+      const result = editorStore.addShape('agent', params as Record<string, unknown>)
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        details: result,
+        isError: result.errors.length > 0 && result.changed.length === 0,
+      }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_style_shape',
+    label: 'Style Shape',
+    description:
+      'Set shape-specific styling on target objects — fields presentation_update\'s generic actions can\'t express: strokeWidth (line/arrow), borderWidth (box/ellipse), cornerRadius (box only), arrowStart/arrowEnd (arrow only — whether an arrowhead is drawn at that end). For fill/border/stroke color, use presentation_update\'s setFillColor/setBorderColor instead (setBorderColor already applies to a line/arrow\'s stroke color). Setting a field on a target whose type doesn\'t support it is reported in the result\'s "errors" rather than applied.',
+    promptSnippet: 'Set stroke/border width, corner radius, or arrowheads on shape objects',
+    parameters: Type.Object({
+      targetIds: Type.Array(Type.String(), { description: 'IDs of the shape objects to style.' }),
+      strokeWidth: Type.Optional(Type.Number()),
+      borderWidth: Type.Optional(Type.Number()),
+      cornerRadius: Type.Optional(Type.Number()),
+      arrowStart: Type.Optional(Type.Boolean()),
+      arrowEnd: Type.Optional(Type.Boolean()),
+    }),
+    execute: async (_id, params) => {
+      const changed = new Set<string>()
+      const errors: string[] = []
+      const apply = (action: UpdateAction, args: Record<string, unknown>) => {
+        const result = editorStore.applyUpdate('agent', action, params.targetIds, args)
+        for (const id of result.changed) changed.add(id)
+        errors.push(...result.errors)
+      }
+      if (typeof params.strokeWidth === 'number') apply('setStrokeWidth', { strokeWidth: params.strokeWidth })
+      if (typeof params.borderWidth === 'number') apply('setBorderWidth', { borderWidth: params.borderWidth })
+      if (typeof params.cornerRadius === 'number') apply('setCornerRadius', { cornerRadius: params.cornerRadius })
+      if (typeof params.arrowStart === 'boolean' || typeof params.arrowEnd === 'boolean') {
+        apply('setArrowHeads', { arrowStart: params.arrowStart, arrowEnd: params.arrowEnd })
+      }
+      const result = { changed: [...changed], errors }
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        details: result,
+        isError: errors.length > 0 && changed.size === 0,
+      }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_set_slide_background',
+    label: 'Set Slide Background',
+    description:
+      "Set the active slide's background color. Applies to the whole slide, not a specific object — there is no targetIds parameter. Color must be a real value (hex, e.g. \"#ffffff\"), not \"transparent\".",
+    promptSnippet: "Set the active slide's background color",
+    parameters: Type.Object({ color: Type.String() }),
+    execute: async (_id, params) => {
+      const result = editorStore.setSlideBackgroundColor('agent', params.color)
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
     },
   })
 
@@ -153,7 +256,7 @@ Always prefer the most specific action. If multiple objects are selected and the
       message: {
         customType: 'editor_context',
         role: 'user' as const,
-        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, selected: ${state.selection.join(', ') || '(none)'}). Each object's "text" is structured rich text (an array of paragraph/listItem blocks of runs with optional bold/italic), and objects carry fillColor, borderColor, and fontColor, each of which may be a color value or "transparent" (for fillColor/borderColor):\n${JSON.stringify(state, null, 2)}`,
+        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, slide backgroundColor: ${state.backgroundColor}, selected: ${state.selection.join(', ') || '(none)'}). Every object has a "type" ("textBox", "line", "box", "ellipse", or "arrow") and a "zIndex" (paint order, higher on top). "textBox" objects' "text" is structured rich text (an array of paragraph/listItem blocks of runs with optional bold/italic); "textBox"/"box"/"ellipse" carry fillColor/borderColor (color value or "transparent"), "textBox" also fontColor; "line"/"arrow" carry strokeColor/strokeWidth instead:\n${JSON.stringify(state, null, 2)}`,
         display: false,
       },
     }

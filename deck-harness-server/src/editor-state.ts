@@ -23,8 +23,26 @@ export type TextBlock =
   | { kind: 'paragraph'; runs: TextRun[] }
   | { kind: 'listItem'; listType: 'bulleted' | 'numbered'; runs: TextRun[] }
 
-export interface DeckObject {
+// --- Object model ---
+//
+// DeckObject is a discriminated union on `type` (see
+// openspec/changes/add-deck-styling-elements/design.md's "DeckObject becomes
+// a discriminated union" decision). `textBox` keeps the original flat shape.
+// `box`/`ellipse` keep a bounding-box (`x/y/width/height`) plus a
+// stroke/fill; `box` additionally has `cornerRadius`. `line`/`arrow` drop
+// the bounding box in favor of explicit endpoints (`x1/y1/x2/y2`), since a
+// bounding box can't disambiguate a rising diagonal from a falling one;
+// `arrow` additionally carries `arrowStart`/`arrowEnd`. Every object carries
+// an explicit `zIndex` that determines paint order (see boundsOf/
+// translateObject below and DeckCanvas.tsx's per-object CSS z-index).
+
+interface BaseDeckObject {
   id: string
+  zIndex: number
+}
+
+export interface TextBoxObject extends BaseDeckObject {
+  type: 'textBox'
   x: number
   y: number
   width: number
@@ -36,9 +54,59 @@ export interface DeckObject {
   fontSize: number
 }
 
+export interface BoxObject extends BaseDeckObject {
+  type: 'box'
+  x: number
+  y: number
+  width: number
+  height: number
+  fillColor: string
+  borderColor: string
+  borderWidth: number
+  cornerRadius: number
+}
+
+export interface EllipseObject extends BaseDeckObject {
+  type: 'ellipse'
+  x: number
+  y: number
+  width: number
+  height: number
+  fillColor: string
+  borderColor: string
+  borderWidth: number
+}
+
+export interface LineObject extends BaseDeckObject {
+  type: 'line'
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  strokeColor: string
+  strokeWidth: number
+}
+
+export interface ArrowObject extends BaseDeckObject {
+  type: 'arrow'
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  strokeColor: string
+  strokeWidth: number
+  arrowStart: boolean
+  arrowEnd: boolean
+}
+
+export type ShapeType = 'line' | 'box' | 'ellipse' | 'arrow'
+export type ShapeObject = BoxObject | EllipseObject | LineObject | ArrowObject
+export type DeckObject = TextBoxObject | ShapeObject
+
 export interface Slide {
   id: string
   objects: DeckObject[]
+  backgroundColor: string
 }
 
 export interface Deck {
@@ -65,6 +133,7 @@ export interface DeckState {
   slides: SlideSummary[]
   activeSlideId: string
   objects: DeckObject[]
+  backgroundColor: string
   selection: string[]
   canUndo: boolean
   canRedo: boolean
@@ -134,6 +203,16 @@ export type UpdateAction =
   | 'addObject'
   | 'removeObject'
   | 'applyTextStyle'
+  | 'setEndpoint'
+  | 'setZIndex'
+  | 'bringForward'
+  | 'sendBackward'
+  | 'bringToFront'
+  | 'sendToBack'
+  | 'setStrokeWidth'
+  | 'setBorderWidth'
+  | 'setCornerRadius'
+  | 'setArrowHeads'
 
 export interface UpdateResult {
   changed: string[]
@@ -260,19 +339,88 @@ function applyListTypeToBlocks(blocks: TextBlock[], start: number, end: number, 
 const SLIDE_WIDTH = 960
 const SLIDE_HEIGHT = 540
 
+const DEFAULT_STROKE_COLOR = '#374151'
+const DEFAULT_STROKE_WIDTH = 2
+const DEFAULT_BORDER_WIDTH = 2
+const DEFAULT_CORNER_RADIUS = 0
+export const DEFAULT_SLIDE_BACKGROUND_COLOR = '#ffffff'
+
+export interface Bounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export function isLineLike(obj: DeckObject): obj is LineObject | ArrowObject {
+  return obj.type === 'line' || obj.type === 'arrow'
+}
+
+export function isTextBox(obj: DeckObject): obj is TextBoxObject {
+  return obj.type === 'textBox'
+}
+
+function hasFillStyle(obj: DeckObject): obj is TextBoxObject | BoxObject | EllipseObject {
+  return obj.type === 'textBox' || obj.type === 'box' || obj.type === 'ellipse'
+}
+
 /**
- * Clamps an object's x/y/width/height to the slide's 0,0-960,540 bounds —
- * the single source of truth for both UI-driven updates and presentation-bridge
- * tool calls (see openspec/changes/constrain-content-to-slide-bounds/design.md).
- * Size is clamped first, then position is clamped against the (possibly
- * just-clamped) size, so a resize that grows past an edge still lands fully
- * on-slide and a plain move never alters width/height.
+ * Bounding box for any object type — literal x/y/width/height for box-like
+ * types, min/max of the two endpoints for line/arrow. Unifies slide-bounds
+ * clamping, grid layout, and drag-translate across all five types (see
+ * design.md's "A boundsOf(object) helper unifies bounding-box logic across
+ * types" decision).
  */
-function clampToSlide(obj: { x: number; y: number; width: number; height: number }): void {
-  obj.width = Math.min(Math.max(1, obj.width), SLIDE_WIDTH)
-  obj.height = Math.min(Math.max(1, obj.height), SLIDE_HEIGHT)
-  obj.x = Math.min(Math.max(0, obj.x), SLIDE_WIDTH - obj.width)
-  obj.y = Math.min(Math.max(0, obj.y), SLIDE_HEIGHT - obj.height)
+export function boundsOf(obj: DeckObject): Bounds {
+  if (isLineLike(obj)) {
+    return {
+      x: Math.min(obj.x1, obj.x2),
+      y: Math.min(obj.y1, obj.y2),
+      width: Math.abs(obj.x2 - obj.x1),
+      height: Math.abs(obj.y2 - obj.y1),
+    }
+  }
+  return { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
+}
+
+/** Moves whichever fields the object's type actually has by (dx, dy) — the "translate" half of the boundsOf pairing. */
+function translateObject(obj: DeckObject, dx: number, dy: number): void {
+  if (isLineLike(obj)) {
+    obj.x1 += dx
+    obj.y1 += dy
+    obj.x2 += dx
+    obj.y2 += dy
+  } else {
+    obj.x += dx
+    obj.y += dy
+  }
+}
+
+function nextZIndex(slide: Slide): number {
+  return slide.objects.length === 0 ? 0 : Math.max(...slide.objects.map((o) => o.zIndex)) + 1
+}
+
+/**
+ * Clamps an object to the slide's 0,0-960,540 bounds via boundsOf/
+ * translateObject, the single source of truth for both UI-driven updates and
+ * presentation-bridge tool calls (see openspec/changes/
+ * constrain-content-to-slide-bounds/design.md, generalized across object
+ * types by add-deck-styling-elements/design.md). Box-like types clamp their
+ * own width/height first (size before position, so a resize that grows past
+ * an edge still lands fully on-slide); line/arrow have no independent size
+ * field, so their bounding box is clamped by translating the whole object.
+ */
+function clampToSlide(obj: DeckObject): void {
+  if (!isLineLike(obj)) {
+    obj.width = Math.min(Math.max(1, obj.width), SLIDE_WIDTH)
+    obj.height = Math.min(Math.max(1, obj.height), SLIDE_HEIGHT)
+  }
+  const bounds = boundsOf(obj)
+  const maxX = Math.max(0, SLIDE_WIDTH - bounds.width)
+  const maxY = Math.max(0, SLIDE_HEIGHT - bounds.height)
+  const dx = Math.min(Math.max(0, bounds.x), maxX) - bounds.x
+  const dy = Math.min(Math.max(0, bounds.y), maxY) - bounds.y
+  translateObject(obj, dx, dy)
 }
 
 // Shared by getState()/exportSnapshot() (both need an isolated copy so a
@@ -280,7 +428,8 @@ function clampToSlide(obj: { x: number; y: number; width: number; height: number
 // undo/redo history snapshots below (which need every entry's before/after
 // state to stay independent of subsequent live mutations).
 function cloneObject(o: DeckObject): DeckObject {
-  return { ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) }
+  if (o.type === 'textBox') return { ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) }
+  return { ...o }
 }
 
 function cloneSlide(s: Slide): Slide {
@@ -311,6 +460,16 @@ const UPDATE_DESCRIPTIONS: Record<UpdateAction, (targetCount: number) => string>
   addObject: () => 'Added object',
   removeObject: (n) => `Removed ${n} object${n === 1 ? '' : 's'}`,
   applyTextStyle: (n) => `Changed text style on ${n} object${n === 1 ? '' : 's'}`,
+  setEndpoint: (n) => `Adjusted endpoint on ${n} object${n === 1 ? '' : 's'}`,
+  setZIndex: (n) => `Changed stacking order of ${n} object${n === 1 ? '' : 's'}`,
+  bringForward: (n) => `Brought ${n} object${n === 1 ? '' : 's'} forward`,
+  sendBackward: (n) => `Sent ${n} object${n === 1 ? '' : 's'} backward`,
+  bringToFront: (n) => `Brought ${n} object${n === 1 ? '' : 's'} to front`,
+  sendToBack: (n) => `Sent ${n} object${n === 1 ? '' : 's'} to back`,
+  setStrokeWidth: (n) => `Changed stroke width on ${n} object${n === 1 ? '' : 's'}`,
+  setBorderWidth: (n) => `Changed border width on ${n} object${n === 1 ? '' : 's'}`,
+  setCornerRadius: (n) => `Changed corner radius on ${n} object${n === 1 ? '' : 's'}`,
+  setArrowHeads: (n) => `Changed arrowheads on ${n} object${n === 1 ? '' : 's'}`,
 }
 
 function describeUpdate(action: UpdateAction, targetIds: string[]): string {
@@ -323,8 +482,9 @@ function describeUpdate(action: UpdateAction, targetIds: string[]): string {
 // collapse into a single undo step rather than one entry per intermediate
 // value — see commitHistory's mergeKey handling below. Structural/discrete
 // actions (setText, applyTextStyle, addObject, removeObject,
-// applyGridLayout) are deliberately excluded: each one is a distinct,
-// intentional edit even when several happen in quick succession.
+// applyGridLayout, the z-order actions, setArrowHeads) are deliberately
+// excluded: each one is a distinct, intentional edit even when several
+// happen in quick succession.
 //
 // Two limits, not one: HISTORY_MERGE_WINDOW_MS is a sliding gap check (each
 // new edit must land within this long of the *previous* edit to extend the
@@ -334,7 +494,18 @@ function describeUpdate(action: UpdateAction, targetIds: string[]): string {
 // into a few undo steps instead of collapsing into one giant one.
 const HISTORY_MERGE_WINDOW_MS = 600
 const HISTORY_MERGE_MAX_BURST_MS = 2000
-const MERGEABLE_UPDATE_ACTIONS = new Set<UpdateAction>(['setPosition', 'setSize', 'setFillColor', 'setFontColor', 'setBorderColor', 'setFontSize'])
+const MERGEABLE_UPDATE_ACTIONS = new Set<UpdateAction>([
+  'setPosition',
+  'setSize',
+  'setFillColor',
+  'setFontColor',
+  'setBorderColor',
+  'setFontSize',
+  'setEndpoint',
+  'setStrokeWidth',
+  'setBorderWidth',
+  'setCornerRadius',
+])
 
 function mergeKeyFor(action: UpdateAction, targetIds: string[]): string {
   return `${action}:${[...targetIds].sort().join(',')}`
@@ -344,6 +515,8 @@ function seedObjects(): DeckObject[] {
   return [
     {
       id: 'title',
+      type: 'textBox',
+      zIndex: 0,
       x: 40,
       y: 40,
       width: 400,
@@ -356,6 +529,8 @@ function seedObjects(): DeckObject[] {
     },
     {
       id: 'box-1',
+      type: 'textBox',
+      zIndex: 1,
       x: 40,
       y: 160,
       width: 200,
@@ -368,6 +543,8 @@ function seedObjects(): DeckObject[] {
     },
     {
       id: 'box-2',
+      type: 'textBox',
+      zIndex: 2,
       x: 260,
       y: 160,
       width: 200,
@@ -379,6 +556,137 @@ function seedObjects(): DeckObject[] {
       fontSize: 16,
     },
   ]
+}
+
+/**
+ * Applies one UpdateAction to a single target object, validated against its
+ * actual `type` (mismatched field/type reported as an error string, same
+ * pattern as an unknown target id — see design.md's "Lenient but
+ * type-checked args"). Returns undefined on success. Only ever called for
+ * actions that are per-target (applyGridLayout/addObject/removeObject are
+ * handled earlier in runUpdate, before the per-id loop that calls this).
+ */
+function applyActionToTarget(obj: DeckObject, action: UpdateAction, args: Record<string, unknown>, slide: Slide): string | undefined {
+  switch (action) {
+    case 'setPosition': {
+      const bounds = boundsOf(obj)
+      let dx = typeof args.x === 'number' ? args.x - bounds.x : 0
+      let dy = typeof args.y === 'number' ? args.y - bounds.y : 0
+      if (typeof args.dx === 'number') dx += args.dx
+      if (typeof args.dy === 'number') dy += args.dy
+      translateObject(obj, dx, dy)
+      clampToSlide(obj)
+      return undefined
+    }
+    case 'setSize':
+      if (isLineLike(obj)) return `setSize does not apply to type "${obj.type}"`
+      if (typeof args.width === 'number') obj.width = args.width
+      if (typeof args.height === 'number') obj.height = args.height
+      clampToSlide(obj)
+      return undefined
+    case 'setEndpoint': {
+      if (!isLineLike(obj)) return `setEndpoint does not apply to type "${obj.type}"`
+      if ((args.which !== 'start' && args.which !== 'end') || typeof args.x !== 'number' || typeof args.y !== 'number') {
+        return 'setEndpoint requires "which" ("start" or "end") and numeric x/y'
+      }
+      const x = Math.min(Math.max(0, args.x), SLIDE_WIDTH)
+      const y = Math.min(Math.max(0, args.y), SLIDE_HEIGHT)
+      if (args.which === 'start') {
+        obj.x1 = x
+        obj.y1 = y
+      } else {
+        obj.x2 = x
+        obj.y2 = y
+      }
+      return undefined
+    }
+    case 'setText':
+      if (!isTextBox(obj)) return `setText does not apply to type "${obj.type}"`
+      if (typeof args.text === 'string' || Array.isArray(args.text)) obj.text = normalizeText(args.text)
+      return undefined
+    case 'setFillColor':
+      if (!hasFillStyle(obj)) return `setFillColor does not apply to type "${obj.type}"`
+      if (typeof args.color === 'string') obj.fillColor = args.color
+      return undefined
+    case 'setBorderColor':
+      // Generic across every type: sets borderColor for text/box/ellipse,
+      // or strokeColor for line/arrow (design.md's "New pi tools vs.
+      // extending presentation_update" decision).
+      if (typeof args.color === 'string') {
+        if (isLineLike(obj)) obj.strokeColor = args.color
+        else obj.borderColor = args.color
+      }
+      return undefined
+    case 'setFontColor':
+      if (!isTextBox(obj)) return `setFontColor does not apply to type "${obj.type}"`
+      if (typeof args.color === 'string') obj.fontColor = args.color
+      return undefined
+    case 'setFontSize':
+      if (!isTextBox(obj)) return `setFontSize does not apply to type "${obj.type}"`
+      if (typeof args.fontSize === 'number') obj.fontSize = Math.max(1, args.fontSize)
+      return undefined
+    case 'applyTextStyle': {
+      if (!isTextBox(obj)) return `applyTextStyle does not apply to type "${obj.type}"`
+      const start = typeof args.start === 'number' ? args.start : 0
+      const end = typeof args.end === 'number' ? args.end : start
+      if (args.mark === 'bold' || args.mark === 'italic') {
+        obj.text = applyMarkToBlocks(obj.text, start, end, args.mark, args.value === true)
+      } else if ('listType' in args) {
+        const listType = args.listType === 'bulleted' || args.listType === 'numbered' ? args.listType : null
+        obj.text = applyListTypeToBlocks(obj.text, start, end, listType)
+      }
+      return undefined
+    }
+    case 'setStrokeWidth':
+      if (!isLineLike(obj)) return `setStrokeWidth does not apply to type "${obj.type}"`
+      if (typeof args.strokeWidth === 'number') obj.strokeWidth = Math.max(1, args.strokeWidth)
+      return undefined
+    case 'setBorderWidth':
+      if (obj.type !== 'box' && obj.type !== 'ellipse') return `setBorderWidth does not apply to type "${obj.type}"`
+      if (typeof args.borderWidth === 'number') obj.borderWidth = Math.max(0, args.borderWidth)
+      return undefined
+    case 'setCornerRadius':
+      if (obj.type !== 'box') return `setCornerRadius does not apply to type "${obj.type}"`
+      if (typeof args.cornerRadius === 'number') obj.cornerRadius = Math.max(0, args.cornerRadius)
+      return undefined
+    case 'setArrowHeads':
+      if (obj.type !== 'arrow') return `setArrowHeads does not apply to type "${obj.type}"`
+      if (typeof args.arrowStart === 'boolean') obj.arrowStart = args.arrowStart
+      if (typeof args.arrowEnd === 'boolean') obj.arrowEnd = args.arrowEnd
+      return undefined
+    case 'setZIndex':
+      if (typeof args.zIndex !== 'number') return 'setZIndex requires numeric "zIndex"'
+      obj.zIndex = args.zIndex
+      return undefined
+    case 'bringForward': {
+      const higher = slide.objects.filter((o) => o.zIndex > obj.zIndex).sort((a, b) => a.zIndex - b.zIndex)[0]
+      if (higher) {
+        const tmp = obj.zIndex
+        obj.zIndex = higher.zIndex
+        higher.zIndex = tmp
+      }
+      return undefined
+    }
+    case 'sendBackward': {
+      const lower = slide.objects.filter((o) => o.zIndex < obj.zIndex).sort((a, b) => b.zIndex - a.zIndex)[0]
+      if (lower) {
+        const tmp = obj.zIndex
+        obj.zIndex = lower.zIndex
+        lower.zIndex = tmp
+      }
+      return undefined
+    }
+    case 'bringToFront':
+      obj.zIndex = Math.max(...slide.objects.map((o) => o.zIndex)) + 1
+      return undefined
+    case 'sendToBack':
+      obj.zIndex = Math.min(...slide.objects.map((o) => o.zIndex)) - 1
+      return undefined
+    default:
+      // applyGridLayout/addObject/removeObject never reach here — runUpdate
+      // handles them before the per-id loop that calls this function.
+      return undefined
+  }
 }
 
 const HISTORY_CAP = 100
@@ -397,7 +705,7 @@ export class EditorStore {
       for (const deck of initial.decks) this.decks.set(deck.id, deck)
       this.activeDeckId = initial.activeDeckId
     } else {
-      const slide: Slide = { id: randomUUID(), objects: seedObjects() }
+      const slide: Slide = { id: randomUUID(), objects: seedObjects(), backgroundColor: DEFAULT_SLIDE_BACKGROUND_COLOR }
       const deck: Deck = { id: randomUUID(), name: 'Deck 1', slides: [slide], activeSlideId: slide.id }
       this.decks.set(deck.id, deck)
       this.activeDeckId = deck.id
@@ -463,12 +771,12 @@ export class EditorStore {
     this.emit()
   }
 
-  /** Snapshots before/after around `mutate`, unconditionally committing a history entry — for methods (createDeck, deleteDeck, addSlide, removeSlide) whose callers already guard against no-op calls before invoking them. applyUpdate captures its own before/after instead, since it must skip the commit when every target id failed (see its comment). */
-  private withHistory<T>(actor: Actor, description: string, mutate: () => T): T {
+  /** Snapshots before/after around `mutate`, unconditionally committing a history entry — for methods (createDeck, deleteDeck, addSlide, removeSlide, setSlideBackgroundColor) whose callers already guard against no-op calls before invoking them. applyUpdate/addShape capture their own before/after instead, since they must skip the commit when nothing actually changed (see their own comments). `mergeKey` lets a caller opt into the same burst-coalescing behavior commitHistory gives applyUpdate (see setSlideBackgroundColor). */
+  private withHistory<T>(actor: Actor, description: string, mutate: () => T, mergeKey?: string): T {
     const before = this.snapshotState()
     const result = mutate()
     const after = this.snapshotState()
-    this.commitHistory(actor, description, before, after)
+    this.commitHistory(actor, description, before, after, mergeKey)
     return result
   }
 
@@ -492,6 +800,7 @@ export class EditorStore {
       slides: deck.slides.map((s) => ({ id: s.id })),
       activeSlideId: deck.activeSlideId,
       objects: slide.objects.map(cloneObject),
+      backgroundColor: slide.backgroundColor,
       selection: [...this.selection],
       canUndo: this.history.length > 0,
       canRedo: this.redoStack.length > 0,
@@ -502,7 +811,7 @@ export class EditorStore {
 
   createDeck(actor: Actor, name: string): { deckId: string } {
     return this.withHistory(actor, `Created deck "${name}"`, () => {
-      const slide: Slide = { id: randomUUID(), objects: [] }
+      const slide: Slide = { id: randomUUID(), objects: [], backgroundColor: DEFAULT_SLIDE_BACKGROUND_COLOR }
       const deck: Deck = { id: randomUUID(), name, slides: [slide], activeSlideId: slide.id }
       this.decks.set(deck.id, deck)
       this.activeDeckId = deck.id
@@ -552,7 +861,7 @@ export class EditorStore {
   addSlide(actor: Actor): { slideId: string } {
     return this.withHistory(actor, 'Added slide', () => {
       const deck = this.activeDeck()
-      const slide: Slide = { id: randomUUID(), objects: [] }
+      const slide: Slide = { id: randomUUID(), objects: [], backgroundColor: DEFAULT_SLIDE_BACKGROUND_COLOR }
       deck.slides.push(slide)
       deck.activeSlideId = slide.id
       this.selection = []
@@ -587,6 +896,21 @@ export class EditorStore {
     return { ok: true }
   }
 
+  /** Sets the active slide's background color. Content mutation, so it goes through withHistory; keyed by slide id so a dragged color-picker change coalesces into one undo step, same as setFillColor (see design.md's "Undo/redo integration" decision). */
+  setSlideBackgroundColor(actor: Actor, color: string): OpResult {
+    if (typeof color !== 'string' || !color.trim()) return { ok: false, error: 'setSlideBackgroundColor requires a non-empty "color"' }
+    const slide = this.activeSlide()
+    return this.withHistory(
+      actor,
+      'Changed slide background color',
+      () => {
+        slide.backgroundColor = color
+        return { ok: true }
+      },
+      `setSlideBackgroundColor:${slide.id}`,
+    )
+  }
+
   // --- Object editing (active deck's active slide) ---
 
   setSelection(ids: string[]) {
@@ -600,6 +924,7 @@ export class EditorStore {
     const slide = this.activeSlide()
     const needle = caseSensitive ? query : query.toLowerCase()
     return slide.objects
+      .filter((o): o is TextBoxObject => o.type === 'textBox')
       .filter((o) => {
         const text = plainTextOf(o)
         return (caseSensitive ? text : text.toLowerCase()).includes(needle)
@@ -626,6 +951,85 @@ export class EditorStore {
     return result
   }
 
+  /**
+   * Creates a new shape object (`line`/`box`/`ellipse`/`arrow`) on the
+   * active slide, mirroring `applyUpdate`'s own comment on exactly the same
+   * hazard: shape creation can fail validation (missing/invalid geometry),
+   * so this captures its own before/after and only commits history when
+   * creation actually succeeded — a no-op call must not push a history
+   * entry (see design.md's "presentation_add_shape's addShape must follow
+   * applyUpdate's pattern, not withHistory").
+   */
+  addShape(actor: Actor, args: Record<string, unknown>): UpdateResult {
+    const before = this.snapshotState()
+    const result = this.createShape(args)
+    if (result.changed.length > 0) {
+      this.commitHistory(actor, `Added ${typeof args.type === 'string' ? args.type : 'shape'}`, before, this.snapshotState())
+    }
+    return result
+  }
+
+  private createShape(args: Record<string, unknown>): UpdateResult {
+    const errors: string[] = []
+    const changed: string[] = []
+    const type = args.type
+    if (type !== 'line' && type !== 'box' && type !== 'ellipse' && type !== 'arrow') {
+      errors.push('addShape requires "type" to be one of "line", "box", "ellipse", "arrow"')
+      return { changed, errors }
+    }
+    const slide = this.activeSlide()
+    const id = typeof args.id === 'string' && args.id.trim() ? args.id : randomUUID()
+    if (slide.objects.some((o) => o.id === id)) {
+      errors.push(`Object with id "${id}" already exists on the active slide`)
+      return { changed, errors }
+    }
+    const zIndex = nextZIndex(slide)
+
+    if (type === 'box' || type === 'ellipse') {
+      for (const key of ['x', 'y', 'width', 'height'] as const) {
+        if (typeof args[key] !== 'number') errors.push(`addShape requires numeric "${key}" for type "${type}"`)
+      }
+      if (errors.length > 0) return { changed, errors }
+      const fillColor = typeof args.fillColor === 'string' ? args.fillColor : 'transparent'
+      const borderColor = typeof args.borderColor === 'string' ? args.borderColor : DEFAULT_STROKE_COLOR
+      const borderWidth = typeof args.borderWidth === 'number' ? Math.max(0, args.borderWidth) : DEFAULT_BORDER_WIDTH
+      const geometry = { x: args.x as number, y: args.y as number, width: args.width as number, height: args.height as number }
+      const obj: DeckObject =
+        type === 'box'
+          ? {
+              id,
+              type,
+              zIndex,
+              ...geometry,
+              fillColor,
+              borderColor,
+              borderWidth,
+              cornerRadius: typeof args.cornerRadius === 'number' ? Math.max(0, args.cornerRadius) : DEFAULT_CORNER_RADIUS,
+            }
+          : { id, type, zIndex, ...geometry, fillColor, borderColor, borderWidth }
+      clampToSlide(obj)
+      slide.objects.push(obj)
+      changed.push(obj.id)
+      return { changed, errors }
+    }
+
+    for (const key of ['x1', 'y1', 'x2', 'y2'] as const) {
+      if (typeof args[key] !== 'number') errors.push(`addShape requires numeric "${key}" for type "${type}"`)
+    }
+    if (errors.length > 0) return { changed, errors }
+    const strokeColor = typeof args.strokeColor === 'string' ? args.strokeColor : DEFAULT_STROKE_COLOR
+    const strokeWidth = typeof args.strokeWidth === 'number' ? Math.max(1, args.strokeWidth) : DEFAULT_STROKE_WIDTH
+    const points = { x1: args.x1 as number, y1: args.y1 as number, x2: args.x2 as number, y2: args.y2 as number }
+    const obj: DeckObject =
+      type === 'arrow'
+        ? { id, type, zIndex, ...points, strokeColor, strokeWidth, arrowStart: args.arrowStart === true, arrowEnd: args.arrowEnd !== false }
+        : { id, type, zIndex, ...points, strokeColor, strokeWidth }
+    clampToSlide(obj)
+    slide.objects.push(obj)
+    changed.push(obj.id)
+    return { changed, errors }
+  }
+
   private runUpdate(action: UpdateAction, targetIds: string[], args: Record<string, unknown>): UpdateResult {
     const slide = this.activeSlide()
     const errors: string[] = []
@@ -636,17 +1040,19 @@ export class EditorStore {
       if (targets.length === 0) errors.push('No matching target objects for applyGridLayout')
       const direction = args.direction === 'vertical' ? 'vertical' : 'horizontal'
       const gap = typeof args.gap === 'number' ? args.gap : 24
-      let cursor = direction === 'horizontal' ? Math.min(...targets.map((t) => t.x)) : Math.min(...targets.map((t) => t.y))
-      for (const t of targets) {
+      const targetBounds = targets.map((t) => boundsOf(t))
+      let cursor = direction === 'horizontal' ? Math.min(...targetBounds.map((b) => b.x)) : Math.min(...targetBounds.map((b) => b.y))
+      targets.forEach((t, i) => {
+        const b = targetBounds[i]
         if (direction === 'horizontal') {
-          t.x = cursor
-          cursor += t.width + gap
+          translateObject(t, cursor - b.x, 0)
+          cursor += b.width + gap
         } else {
-          t.y = cursor
-          cursor += t.height + gap
+          translateObject(t, 0, cursor - b.y)
+          cursor += b.height + gap
         }
         changed.push(t.id)
-      }
+      })
       return { changed, errors }
     }
 
@@ -663,6 +1069,8 @@ export class EditorStore {
       }
       const newObject: DeckObject = {
         id,
+        type: 'textBox',
+        zIndex: nextZIndex(slide),
         x: args.x as number,
         y: args.y as number,
         width: args.width as number,
@@ -702,47 +1110,9 @@ export class EditorStore {
         errors.push(`No object with id "${id}"`)
         continue
       }
-      switch (action) {
-        case 'setPosition':
-          if (typeof args.x === 'number') obj.x = args.x
-          if (typeof args.y === 'number') obj.y = args.y
-          if (typeof args.dx === 'number') obj.x += args.dx
-          if (typeof args.dy === 'number') obj.y += args.dy
-          clampToSlide(obj)
-          break
-        case 'setSize':
-          if (typeof args.width === 'number') obj.width = args.width
-          if (typeof args.height === 'number') obj.height = args.height
-          clampToSlide(obj)
-          break
-        case 'setText':
-          if (typeof args.text === 'string' || Array.isArray(args.text)) obj.text = normalizeText(args.text)
-          break
-        case 'setFillColor':
-          if (typeof args.color === 'string') obj.fillColor = args.color
-          break
-        case 'setBorderColor':
-          if (typeof args.color === 'string') obj.borderColor = args.color
-          break
-        case 'setFontColor':
-          if (typeof args.color === 'string') obj.fontColor = args.color
-          break
-        case 'setFontSize':
-          if (typeof args.fontSize === 'number') obj.fontSize = Math.max(1, args.fontSize)
-          break
-        case 'applyTextStyle': {
-          const start = typeof args.start === 'number' ? args.start : 0
-          const end = typeof args.end === 'number' ? args.end : start
-          if (args.mark === 'bold' || args.mark === 'italic') {
-            obj.text = applyMarkToBlocks(obj.text, start, end, args.mark, args.value === true)
-          } else if ('listType' in args) {
-            const listType = args.listType === 'bulleted' || args.listType === 'numbered' ? args.listType : null
-            obj.text = applyListTypeToBlocks(obj.text, start, end, listType)
-          }
-          break
-        }
-      }
-      changed.push(id)
+      const error = applyActionToTarget(obj, action, args, slide)
+      if (error) errors.push(error)
+      else changed.push(id)
     }
 
     return { changed, errors }

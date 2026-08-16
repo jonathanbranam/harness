@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPendingSave, loadSnapshot, readSnapshotFile, startAutoSave } from './deck-persistence'
-import { EditorStore, type Deck } from './editor-state'
+import { EditorStore, type Deck, type DeckObject, type TextBoxObject } from './editor-state'
+
+function tb(o: DeckObject | undefined): TextBoxObject {
+  if (!o || o.type !== 'textBox') throw new Error(`expected a textBox object, got ${JSON.stringify(o)}`)
+  return o
+}
 
 const validDeck: Deck = {
   id: 'd1',
@@ -12,9 +17,12 @@ const validDeck: Deck = {
   slides: [
     {
       id: 's1',
+      backgroundColor: '#ffffff',
       objects: [
         {
           id: 'o1',
+          type: 'textBox',
+          zIndex: 0,
           x: 1,
           y: 2,
           width: 10,
@@ -46,10 +54,60 @@ describe('loadSnapshot', () => {
   it('falls back to safe defaults for malformed or missing object fields', () => {
     const deck = { id: 'd1', name: 'Deck', activeSlideId: 's1', slides: [{ id: 's1', objects: [{ id: 'o1', width: 'not-a-number', text: 'legacy-string-should-be-dropped' }] }] }
     const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
+    const obj = tb(result?.decks[0].slides[0].objects[0])
+    expect(obj.width).toBe(100)
+    expect(obj.fillColor).toBe('#374151')
+    expect(obj.text).toEqual([{ kind: 'paragraph', runs: [] }])
+  })
+
+  it('defaults a slide backgroundColor and object type/zIndex when absent (legacy snapshot)', () => {
+    const legacyObjects = [
+      { id: 'o1', x: 0, y: 0, width: 10, height: 10, text: 'a', fillColor: '#111', borderColor: '#222', fontColor: '#333', fontSize: 10 },
+      { id: 'o2', x: 20, y: 20, width: 10, height: 10, text: 'b', fillColor: '#111', borderColor: '#222', fontColor: '#333', fontSize: 10 },
+    ]
+    const deck = { id: 'd1', name: 'Deck', activeSlideId: 's1', slides: [{ id: 's1', objects: legacyObjects }] }
+    const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
+    expect(result?.decks[0].slides[0].backgroundColor).toBe('#ffffff')
+    const objects = result!.decks[0].slides[0].objects
+    expect(objects.map((o) => o.type)).toEqual(['textBox', 'textBox'])
+    // zIndex backfills from array position, preserving the pre-existing visual stacking order.
+    expect(objects.map((o) => o.zIndex)).toEqual([0, 1])
+  })
+
+  it('round-trips a box object', () => {
+    const box: DeckObject = { id: 'b1', type: 'box', zIndex: 3, x: 1, y: 2, width: 30, height: 40, fillColor: '#abc123', borderColor: '#654321', borderWidth: 4, cornerRadius: 8 }
+    const deck = { ...validDeck, slides: [{ id: 's1', backgroundColor: '#ffffff', objects: [box] }] }
+    const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
+    expect(result?.decks[0].slides[0].objects[0]).toEqual(box)
+  })
+
+  it('round-trips an ellipse object', () => {
+    const ellipse: DeckObject = { id: 'e1', type: 'ellipse', zIndex: 1, x: 1, y: 2, width: 30, height: 30, fillColor: 'transparent', borderColor: '#654321', borderWidth: 2 }
+    const deck = { ...validDeck, slides: [{ id: 's1', backgroundColor: '#ffffff', objects: [ellipse] }] }
+    const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
+    expect(result?.decks[0].slides[0].objects[0]).toEqual(ellipse)
+  })
+
+  it('round-trips a line object', () => {
+    const line: DeckObject = { id: 'l1', type: 'line', zIndex: 2, x1: 0, y1: 0, x2: 100, y2: 50, strokeColor: '#123456', strokeWidth: 3 }
+    const deck = { ...validDeck, slides: [{ id: 's1', backgroundColor: '#ffffff', objects: [line] }] }
+    const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
+    expect(result?.decks[0].slides[0].objects[0]).toEqual(line)
+  })
+
+  it('round-trips an arrow object', () => {
+    const arrow: DeckObject = { id: 'a1', type: 'arrow', zIndex: 4, x1: 0, y1: 0, x2: 100, y2: 50, strokeColor: '#123456', strokeWidth: 3, arrowStart: true, arrowEnd: false }
+    const deck = { ...validDeck, slides: [{ id: 's1', backgroundColor: '#ffffff', objects: [arrow] }] }
+    const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
+    expect(result?.decks[0].slides[0].objects[0]).toEqual(arrow)
+  })
+
+  it('falls back to safe defaults for malformed shape-specific fields rather than dropping the object', () => {
+    const malformed = { id: 'b1', type: 'box', x: 1, y: 2, width: 30, height: 40, borderWidth: 'not-a-number', cornerRadius: 'not-a-number' }
+    const deck = { ...validDeck, slides: [{ id: 's1', backgroundColor: '#ffffff', objects: [malformed] }] }
+    const result = loadSnapshot({ decks: [deck], activeDeckId: 'd1' })
     const obj = result?.decks[0].slides[0].objects[0]
-    expect(obj?.width).toBe(100)
-    expect(obj?.fillColor).toBe('#374151')
-    expect(obj?.text).toEqual([{ kind: 'paragraph', runs: [] }])
+    expect(obj).toMatchObject({ id: 'b1', type: 'box', borderWidth: 2, cornerRadius: 0 })
   })
 
   it('returns null for a wholly unusable top-level shape', () => {

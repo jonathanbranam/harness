@@ -1,5 +1,17 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
-import type { DeckObject, DeckState, TextBlock, UpdateActionCall } from '../hooks/useDeckSocket'
+import type {
+  ArrowObject,
+  BoxObject,
+  DeckObject,
+  DeckState,
+  EllipseObject,
+  LineObject,
+  ShapeObject,
+  ShapeType,
+  TextBlock,
+  TextBoxObject,
+  UpdateActionCall,
+} from '../hooks/useDeckSocket'
 import { genId } from '../id'
 import {
   blockMarkers,
@@ -15,10 +27,33 @@ const CANVAS_WIDTH = 960
 const CANVAS_HEIGHT = 540
 const MIN_SIZE = 20
 const NEW_BOX_DEFAULT = { x: 40, y: 40, width: 220, height: 100 }
+const NEW_SHAPE_DEFAULTS: Record<ShapeType, Record<string, unknown>> = {
+  box: { x: 60, y: 60, width: 200, height: 120 },
+  ellipse: { x: 60, y: 60, width: 160, height: 160 },
+  line: { x1: 60, y1: 60, x2: 260, y2: 60 },
+  arrow: { x1: 60, y1: 60, x2: 260, y2: 60 },
+}
 const RESIZE_CORNERS = ['nw', 'ne', 'sw', 'se'] as const
 type Corner = (typeof RESIZE_CORNERS)[number]
 
+// Selection outline/resize handles/format toolbar (fix-selection-tools-zorder)
+// paint above every object via a fixed z-index rather than relying on DOM
+// order, since objects now carry their own explicit z-index (design.md's
+// "Interaction with fix-selection-tools-zorder's overlay" decision). The
+// object currently being edited gets a z-index just under the overlay's, for
+// the same reason: DOM-order-based "bring to front while editing" (mirrored
+// below by objectsInPaintOrder, kept for equal-z-index tiebreaking) no
+// longer wins against a sibling with a higher stored z-index once every
+// object has an explicit one.
+const SELECTION_OVERLAY_Z_INDEX = 9999
+const EDITING_Z_INDEX = 9998
+
 type Rect = { x: number; y: number; width: number; height: number }
+interface EndpointOverride {
+  which: 'start' | 'end'
+  x: number
+  y: number
+}
 
 /**
  * Mirrors editor-state.ts's clampToSlide: size first (so an oversized
@@ -35,10 +70,52 @@ function clampRectToSlide(rect: Rect): Rect {
   return { x, y, width, height }
 }
 
+function isLineLike(obj: DeckObject): obj is LineObject | ArrowObject {
+  return obj.type === 'line' || obj.type === 'arrow'
+}
+
+/** Bounding box for any object type — mirrors editor-state.ts's boundsOf, duplicated client-side per CLAUDE.md's "No packages/ tier yet". */
+function boundsOf(obj: DeckObject): Rect {
+  if (isLineLike(obj)) {
+    return { x: Math.min(obj.x1, obj.x2), y: Math.min(obj.y1, obj.y2), width: Math.abs(obj.x2 - obj.x1), height: Math.abs(obj.y2 - obj.y1) }
+  }
+  return { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
+}
+
+/** Resolves a line/arrow's rendered endpoints, applying whichever live override (single-endpoint drag, or whole-object move) is active. */
+function endpointsOf(obj: LineObject | ArrowObject, liveEndpoint?: EndpointOverride, liveRect?: Rect): { x1: number; y1: number; x2: number; y2: number } {
+  if (liveEndpoint) {
+    return liveEndpoint.which === 'start'
+      ? { x1: liveEndpoint.x, y1: liveEndpoint.y, x2: obj.x2, y2: obj.y2 }
+      : { x1: obj.x1, y1: obj.y1, x2: liveEndpoint.x, y2: liveEndpoint.y }
+  }
+  if (liveRect) {
+    const bounds = boundsOf(obj)
+    const dx = liveRect.x - bounds.x
+    const dy = liveRect.y - bounds.y
+    return { x1: obj.x1 + dx, y1: obj.y1 + dy, x2: obj.x2 + dx, y2: obj.y2 + dy }
+  }
+  return { x1: obj.x1, y1: obj.y1, x2: obj.x2, y2: obj.y2 }
+}
+
+/** Bounding rect for rendering/selection purposes, folding in whichever live drag override is active. */
+function liveBoundsOf(obj: DeckObject, liveRect?: Rect, liveEndpoint?: EndpointOverride): Rect {
+  if (isLineLike(obj)) {
+    if (liveRect || liveEndpoint) {
+      const { x1, y1, x2, y2 } = endpointsOf(obj, liveEndpoint, liveRect)
+      return { x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) }
+    }
+    return boundsOf(obj)
+  }
+  return liveRect ?? { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
+}
+
 interface DeckCanvasProps {
   deckState: DeckState
   onSelectionChange: (ids: string[]) => void
   onObjectUpdate: (actions: UpdateActionCall[]) => void
+  onAddShape?: (args: Record<string, unknown>) => void
+  onSetSlideBackground?: (color: string) => void
   onUndo: () => void
   onRedo: () => void
   /** Read-only render for preview mode: no toolbar, no selection highlight, no click/drag/edit interactions. */
@@ -60,16 +137,17 @@ interface TextObjectBoxHandle {
 const TextObjectBox = forwardRef<
   TextObjectBoxHandle,
   {
-    obj: DeckObject
+    obj: TextBoxObject
     editing: boolean
     rect: Rect
+    zIndex: number
     onPointerDownMove: (e: React.PointerEvent) => void
     onClick: (e: React.MouseEvent) => void
     onDoubleClick: (e: React.MouseEvent) => void
     onStartEditingCommit: () => void
     onObjectUpdate: (actions: UpdateActionCall[]) => void
   }
->(function TextObjectBox({ obj, editing, rect, onPointerDownMove, onClick, onDoubleClick, onStartEditingCommit, onObjectUpdate }, ref) {
+>(function TextObjectBox({ obj, editing, rect, zIndex, onPointerDownMove, onClick, onDoubleClick, onStartEditingCommit, onObjectUpdate }, ref) {
   const editableRef = useRef<HTMLDivElement | null>(null)
   const lastKnownTextRef = useRef<string>('')
 
@@ -161,6 +239,7 @@ const TextObjectBox = forwardRef<
         top: rect.y,
         width: rect.width,
         height: rect.height,
+        zIndex,
         backgroundColor: obj.fillColor === 'transparent' ? 'transparent' : obj.fillColor,
         borderColor: obj.borderColor === 'transparent' ? undefined : obj.borderColor,
         fontSize: obj.fontSize,
@@ -223,12 +302,99 @@ const TextObjectBox = forwardRef<
   )
 })
 
+function ShapeObjectBox({
+  obj,
+  liveRect,
+  liveEndpoint,
+  zIndex,
+  onPointerDownMove,
+  onClick,
+}: {
+  obj: ShapeObject
+  liveRect?: Rect
+  liveEndpoint?: EndpointOverride
+  zIndex: number
+  onPointerDownMove: (e: React.PointerEvent) => void
+  onClick: (e: React.MouseEvent) => void
+}) {
+  if (obj.type === 'box' || obj.type === 'ellipse') {
+    const rect = liveRect ?? { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
+    return (
+      <div
+        className="absolute"
+        style={{
+          left: rect.x,
+          top: rect.y,
+          width: rect.width,
+          height: rect.height,
+          zIndex,
+          backgroundColor: obj.fillColor === 'transparent' ? 'transparent' : obj.fillColor,
+          border: `${obj.borderWidth}px solid ${obj.borderColor === 'transparent' ? 'transparent' : obj.borderColor}`,
+          borderRadius: obj.type === 'box' ? obj.cornerRadius : '9999px',
+          boxSizing: 'border-box',
+          cursor: 'move',
+        }}
+        onPointerDown={onPointerDownMove}
+        onClick={onClick}
+      />
+    )
+  }
+
+  const { x1, y1, x2, y2 } = endpointsOf(obj, liveEndpoint, liveRect)
+  const pad = obj.strokeWidth + 6
+  const boundsX = Math.min(x1, x2) - pad
+  const boundsY = Math.min(y1, y2) - pad
+  const boundsW = Math.abs(x2 - x1) + pad * 2
+  const boundsH = Math.abs(y2 - y1) + pad * 2
+  const markerId = `arrowhead-${obj.id}`
+  const isArrow = obj.type === 'arrow'
+  return (
+    <svg
+      className="absolute overflow-visible"
+      style={{ left: boundsX, top: boundsY, width: boundsW, height: boundsH, zIndex }}
+      viewBox={`0 0 ${boundsW} ${boundsH}`}
+    >
+      {isArrow && (
+        <defs>
+          <marker id={markerId} markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L8,4 L0,8 Z" fill={obj.strokeColor} />
+          </marker>
+        </defs>
+      )}
+      {/* Wide invisible hit-area so a thin line is still easy to click/drag. */}
+      <line
+        x1={x1 - boundsX}
+        y1={y1 - boundsY}
+        x2={x2 - boundsX}
+        y2={y2 - boundsY}
+        stroke="transparent"
+        strokeWidth={Math.max(obj.strokeWidth, 14)}
+        style={{ pointerEvents: 'stroke', cursor: 'move' }}
+        onPointerDown={onPointerDownMove}
+        onClick={onClick}
+      />
+      <line
+        x1={x1 - boundsX}
+        y1={y1 - boundsY}
+        x2={x2 - boundsX}
+        y2={y2 - boundsY}
+        stroke={obj.strokeColor}
+        strokeWidth={obj.strokeWidth}
+        markerStart={isArrow && obj.arrowStart ? `url(#${markerId})` : undefined}
+        markerEnd={isArrow && obj.arrowEnd ? `url(#${markerId})` : undefined}
+        style={{ pointerEvents: 'none' }}
+      />
+    </svg>
+  )
+}
+
 export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function DeckCanvas(
-  { deckState, onSelectionChange, onObjectUpdate, onUndo, onRedo, readOnly = false },
+  { deckState, onSelectionChange, onObjectUpdate, onAddShape, onSetSlideBackground, onUndo, onRedo, readOnly = false },
   canvasRef,
 ) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [liveRects, setLiveRects] = useState<Record<string, Rect>>({})
+  const [liveEndpoints, setLiveEndpoints] = useState<Record<string, EndpointOverride>>({})
   const didDragRef = useRef(false)
   const pendingEditIdRef = useRef<string | null>(null)
   const editingBoxRef = useRef<TextObjectBoxHandle | null>(null)
@@ -292,6 +458,10 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     setLiveRects((r) => ({ ...r, [id]: rect }))
   }, [])
 
+  const setLiveEndpoint = useCallback((id: string, endpoint: EndpointOverride) => {
+    setLiveEndpoints((e) => ({ ...e, [id]: endpoint }))
+  }, [])
+
   // Drag/resize release sends the final rect to the server but doesn't
   // clear liveRects itself — deckState.objects still holds the pre-drag
   // position/size until the server's deck_state round trip lands, so
@@ -307,7 +477,27 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       for (const id of Object.keys(prev)) {
         const obj = deckState.objects.find((o) => o.id === id)
         const live = prev[id]
-        if (!obj || (obj.x === live.x && obj.y === live.y && obj.width === live.width && obj.height === live.height)) {
+        const bounds = obj ? boundsOf(obj) : undefined
+        if (!obj || !bounds || (bounds.x === live.x && bounds.y === live.y && bounds.width === live.width && bounds.height === live.height)) {
+          delete next[id]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [deckState.objects])
+
+  // Same reconciliation as liveRects above, for a single dragged line/arrow endpoint.
+  useEffect(() => {
+    setLiveEndpoints((prev) => {
+      if (Object.keys(prev).length === 0) return prev
+      let changed = false
+      const next = { ...prev }
+      for (const id of Object.keys(prev)) {
+        const obj = deckState.objects.find((o) => o.id === id)
+        const live = prev[id]
+        const committed = obj && isLineLike(obj) ? (live.which === 'start' ? { x: obj.x1, y: obj.y1 } : { x: obj.x2, y: obj.y2 }) : undefined
+        if (!obj || !committed || (committed.x === live.x && committed.y === live.y)) {
           delete next[id]
           changed = true
         }
@@ -323,15 +513,14 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       didDragRef.current = false
       const startClientX = e.clientX
       const startClientY = e.clientY
-      const originX = obj.x
-      const originY = obj.y
-      let latest: Rect = { x: originX, y: originY, width: obj.width, height: obj.height }
+      const originBounds = boundsOf(obj)
+      let latest: Rect = originBounds
 
       function onMove(ev: PointerEvent) {
         const dx = (ev.clientX - startClientX) / scaleRef.current
         const dy = (ev.clientY - startClientY) / scaleRef.current
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragRef.current = true
-        latest = clampRectToSlide({ x: originX + dx, y: originY + dy, width: obj.width, height: obj.height })
+        latest = clampRectToSlide({ x: originBounds.x + dx, y: originBounds.y + dy, width: originBounds.width, height: originBounds.height })
         setLiveRect(obj.id, latest)
       }
       function onUp() {
@@ -350,8 +539,12 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     [editingId, onObjectUpdate, setLiveRect],
   )
 
+  // Corner-handle resize applies to textBox/box/ellipse (whichever has an
+  // independent width/height) — line/arrow get endpoint-drag instead (see
+  // handlePointerDownEndpoint), so this is a no-op if somehow invoked on one.
   const handlePointerDownResize = useCallback(
     (e: React.PointerEvent, obj: DeckObject, corner: Corner) => {
+      if (isLineLike(obj)) return
       e.stopPropagation()
       e.preventDefault()
       const startClientX = e.clientX
@@ -393,6 +586,35 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     [onObjectUpdate, setLiveRect],
   )
 
+  const handlePointerDownEndpoint = useCallback(
+    (e: React.PointerEvent, obj: LineObject | ArrowObject, which: 'start' | 'end') => {
+      e.stopPropagation()
+      e.preventDefault()
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+      const originX = which === 'start' ? obj.x1 : obj.x2
+      const originY = which === 'start' ? obj.y1 : obj.y2
+      let latest: EndpointOverride = { which, x: originX, y: originY }
+
+      function onMove(ev: PointerEvent) {
+        const dx = (ev.clientX - startClientX) / scaleRef.current
+        const dy = (ev.clientY - startClientY) / scaleRef.current
+        const x = Math.min(Math.max(0, originX + dx), CANVAS_WIDTH)
+        const y = Math.min(Math.max(0, originY + dy), CANVAS_HEIGHT)
+        latest = { which, x, y }
+        setLiveEndpoint(obj.id, latest)
+      }
+      function onUp() {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        onObjectUpdate([{ action: 'setEndpoint', targetIds: [obj.id], args: { which: latest.which, x: latest.x, y: latest.y } }])
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [onObjectUpdate, setLiveEndpoint],
+  )
+
   const addTextBox = useCallback(() => {
     const id = genId()
     onObjectUpdate([
@@ -405,6 +627,15 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     onSelectionChange([id])
     pendingEditIdRef.current = id
   }, [onObjectUpdate, onSelectionChange])
+
+  const addShape = useCallback(
+    (type: ShapeType) => {
+      const id = genId()
+      onAddShape?.({ id, type, ...NEW_SHAPE_DEFAULTS[type] })
+      onSelectionChange([id])
+    },
+    [onAddShape, onSelectionChange],
+  )
 
   const deleteSelection = useCallback(() => {
     if (deckState.selection.length === 0) return
@@ -446,14 +677,15 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
   // the liveRect-during-drag fallback isn't duplicated in two places.
   const resolvedRects: Record<string, Rect> = {}
   for (const obj of deckState.objects) {
-    resolvedRects[obj.id] = liveRects[obj.id] ?? obj
+    resolvedRects[obj.id] = liveBoundsOf(obj, liveRects[obj.id], liveEndpoints[obj.id])
   }
 
   // Paint order only — never mutates deckState.objects (the stored,
-  // server-synced z-order). While editing, the edited object's own content
-  // (fill/text) needs to be visible even if it's normally behind another
-  // object, so it's moved last (frontmost) purely for this render; it
-  // reverts to its stored position the moment editingId clears.
+  // server-synced z-order). Objects now carry an explicit CSS z-index (see
+  // SELECTION_OVERLAY_Z_INDEX/EDITING_Z_INDEX above), so this DOM reordering
+  // only matters as a tiebreak between objects that happen to share a
+  // z-index; the edited object's visual "on top while editing" behavior is
+  // handled by EDITING_Z_INDEX instead.
   const objectsInPaintOrder = editingId
     ? [...deckState.objects.filter((o) => o.id !== editingId), ...deckState.objects.filter((o) => o.id === editingId)]
     : deckState.objects
@@ -462,6 +694,8 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     if (deckState.selection.length === 0) return
     onObjectUpdate([{ action, targetIds: deckState.selection, args }])
   }
+
+  const zIndexFor = (obj: DeckObject) => (editingId === obj.id ? EDITING_Z_INDEX : obj.zIndex)
 
   return (
     // min-w-0/min-h-0: this is the grid item for DeckPage's `1fr` column and
@@ -475,9 +709,21 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     // protects the container — this protects the item within it).
     <div className="h-full min-w-0 min-h-0 flex flex-col">
       {!readOnly && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-sm">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-sm">
           <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={addTextBox}>
             + Text box
+          </button>
+          <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={() => addShape('box')}>
+            + Box
+          </button>
+          <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={() => addShape('ellipse')}>
+            + Ellipse
+          </button>
+          <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={() => addShape('line')}>
+            + Line
+          </button>
+          <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={() => addShape('arrow')}>
+            + Arrow
           </button>
           <button
             type="button"
@@ -509,13 +755,44 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
 
           <div className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
 
+          <button
+            type="button"
+            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:opacity-40 disabled:hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white dark:disabled:hover:bg-gray-700"
+            disabled={deckState.selection.length === 0}
+            onClick={() => setStyleOnSelection('bringForward', {})}
+            title="Bring forward"
+          >
+            Forward
+          </button>
+          <button
+            type="button"
+            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:opacity-40 disabled:hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white dark:disabled:hover:bg-gray-700"
+            disabled={deckState.selection.length === 0}
+            onClick={() => setStyleOnSelection('sendBackward', {})}
+            title="Send backward"
+          >
+            Backward
+          </button>
+
+          <div className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
+
+          <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
+            Slide BG
+            <input
+              type="color"
+              className="w-6 h-6 bg-transparent"
+              value={deckState.backgroundColor}
+              onChange={(e) => onSetSlideBackground?.(e.target.value)}
+            />
+          </label>
+
           <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Font size
             <input
               type="number"
               className="w-14 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-gray-900 dark:text-white disabled:opacity-40"
-              disabled={!firstSelected}
-              value={firstSelected?.fontSize ?? ''}
+              disabled={!firstSelected || firstSelected.type !== 'textBox'}
+              value={firstSelected && firstSelected.type === 'textBox' ? firstSelected.fontSize : ''}
               onChange={(e) => {
                 const fontSize = Number(e.target.value)
                 if (Number.isFinite(fontSize) && fontSize > 0) setStyleOnSelection('setFontSize', { fontSize })
@@ -528,8 +805,8 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             <input
               type="color"
               className="w-6 h-6 bg-transparent disabled:opacity-40"
-              disabled={!firstSelected}
-              value={firstSelected?.fontColor ?? '#ffffff'}
+              disabled={!firstSelected || firstSelected.type !== 'textBox'}
+              value={firstSelected && firstSelected.type === 'textBox' ? firstSelected.fontColor : '#ffffff'}
               onChange={(e) => setStyleOnSelection('setFontColor', { color: e.target.value })}
             />
           </label>
@@ -539,14 +816,14 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             <input
               type="color"
               className="w-6 h-6 bg-transparent disabled:opacity-40"
-              disabled={!firstSelected}
-              value={firstSelected && firstSelected.fillColor !== 'transparent' ? firstSelected.fillColor : '#374151'}
+              disabled={!firstSelected || isLineLike(firstSelected)}
+              value={firstSelected && 'fillColor' in firstSelected && firstSelected.fillColor !== 'transparent' ? firstSelected.fillColor : '#374151'}
               onChange={(e) => setStyleOnSelection('setFillColor', { color: e.target.value })}
             />
             <button
               type="button"
               className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40"
-              disabled={!firstSelected}
+              disabled={!firstSelected || isLineLike(firstSelected)}
               onClick={() => setStyleOnSelection('setFillColor', { color: 'transparent' })}
             >
               none
@@ -559,18 +836,74 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
               type="color"
               className="w-6 h-6 bg-transparent disabled:opacity-40"
               disabled={!firstSelected}
-              value={firstSelected && firstSelected.borderColor !== 'transparent' ? firstSelected.borderColor : '#ffffff'}
+              value={
+                firstSelected
+                  ? isLineLike(firstSelected)
+                    ? firstSelected.strokeColor
+                    : firstSelected.borderColor !== 'transparent'
+                      ? firstSelected.borderColor
+                      : '#ffffff'
+                  : '#ffffff'
+              }
               onChange={(e) => setStyleOnSelection('setBorderColor', { color: e.target.value })}
             />
             <button
               type="button"
               className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40"
-              disabled={!firstSelected}
+              disabled={!firstSelected || isLineLike(firstSelected)}
               onClick={() => setStyleOnSelection('setBorderColor', { color: 'transparent' })}
             >
               none
             </button>
           </label>
+
+          {firstSelected && isLineLike(firstSelected) && (
+            <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
+              Stroke width
+              <input
+                type="number"
+                min={1}
+                className="w-14 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-gray-900 dark:text-white"
+                value={firstSelected.strokeWidth}
+                onChange={(e) => {
+                  const strokeWidth = Number(e.target.value)
+                  if (Number.isFinite(strokeWidth) && strokeWidth > 0) setStyleOnSelection('setStrokeWidth', { strokeWidth })
+                }}
+              />
+            </label>
+          )}
+
+          {firstSelected && (firstSelected.type === 'box' || firstSelected.type === 'ellipse') && (
+            <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
+              Border width
+              <input
+                type="number"
+                min={0}
+                className="w-14 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-gray-900 dark:text-white"
+                value={firstSelected.borderWidth}
+                onChange={(e) => {
+                  const borderWidth = Number(e.target.value)
+                  if (Number.isFinite(borderWidth) && borderWidth >= 0) setStyleOnSelection('setBorderWidth', { borderWidth })
+                }}
+              />
+            </label>
+          )}
+
+          {firstSelected && firstSelected.type === 'box' && (
+            <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
+              Corner radius
+              <input
+                type="number"
+                min={0}
+                className="w-14 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-gray-900 dark:text-white"
+                value={firstSelected.cornerRadius}
+                onChange={(e) => {
+                  const cornerRadius = Number(e.target.value)
+                  if (Number.isFinite(cornerRadius) && cornerRadius >= 0) setStyleOnSelection('setCornerRadius', { cornerRadius })
+                }}
+              />
+            </label>
+          )}
         </div>
       )}
 
@@ -600,32 +933,48 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                 captures a consistent frame regardless of object count — see
                 design.md's "Screenshot dimensions are fixed" decision. Visual
                 size instead tracks the pane via a CSS transform, which
-                useDeckSocket's toPng capture explicitly neutralizes. */}
+                useDeckSocket's toPng capture explicitly neutralizes.
+                backgroundColor is deck content (see design.md's "Slide
+                background color is deck content" decision) — a literal
+                stored color with no dark: variant, same as every shape's
+                fill/border/stroke color. */}
             <div
               ref={canvasRef}
-              className="relative bg-white border border-gray-300"
-              style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+              className="relative border border-gray-300"
+              style={{
+                width: CANVAS_WIDTH,
+                height: CANVAS_HEIGHT,
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                backgroundColor: deckState.backgroundColor,
+              }}
             >
               {(readOnly ? deckState.objects : objectsInPaintOrder).map((obj) =>
                 readOnly ? (
-                  <TextObjectBox
-                    key={obj.id}
-                    obj={obj}
-                    editing={false}
-                    rect={obj}
-                    onObjectUpdate={() => {}}
-                    onPointerDownMove={() => {}}
-                    onClick={() => {}}
-                    onDoubleClick={() => {}}
-                    onStartEditingCommit={() => {}}
-                  />
-                ) : (
+                  obj.type === 'textBox' ? (
+                    <TextObjectBox
+                      key={obj.id}
+                      obj={obj}
+                      editing={false}
+                      rect={obj}
+                      zIndex={obj.zIndex}
+                      onObjectUpdate={() => {}}
+                      onPointerDownMove={() => {}}
+                      onClick={() => {}}
+                      onDoubleClick={() => {}}
+                      onStartEditingCommit={() => {}}
+                    />
+                  ) : (
+                    <ShapeObjectBox key={obj.id} obj={obj} zIndex={obj.zIndex} onPointerDownMove={() => {}} onClick={() => {}} />
+                  )
+                ) : obj.type === 'textBox' ? (
                   <TextObjectBox
                     key={obj.id}
                     ref={editingId === obj.id ? editingBoxRef : undefined}
                     obj={obj}
                     editing={editingId === obj.id}
                     rect={resolvedRects[obj.id]}
+                    zIndex={zIndexFor(obj)}
                     onObjectUpdate={onObjectUpdate}
                     onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
                     onClick={(e) => {
@@ -643,16 +992,34 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                     }}
                     onStartEditingCommit={() => setEditingId(null)}
                   />
+                ) : (
+                  <ShapeObjectBox
+                    key={obj.id}
+                    obj={obj}
+                    liveRect={liveRects[obj.id]}
+                    liveEndpoint={liveEndpoints[obj.id]}
+                    zIndex={zIndexFor(obj)}
+                    onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (didDragRef.current) {
+                        didDragRef.current = false
+                        return
+                      }
+                      toggle(obj.id, e.shiftKey)
+                    }}
+                  />
                 ),
               )}
 
               {/* Selection outline, resize handles, and the floating format
-                  toolbar are painted here — after every object in DOM order —
-                  instead of inline within each object's own box, so they
-                  stay visible above every slide object regardless of the
-                  selected/edited object's z-order (see design.md). */}
+                  toolbar are painted here — after every object in DOM order,
+                  and above every object's own (now explicit) z-index via
+                  SELECTION_OVERLAY_Z_INDEX — so they stay visible above every
+                  slide object regardless of the selected/edited object's
+                  z-order (see design.md). */}
               {!readOnly && (
-                <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute inset-0 pointer-events-none" style={{ zIndex: SELECTION_OVERLAY_Z_INDEX }}>
                   {selectedObjects.map((obj) => {
                     const rect = resolvedRects[obj.id]
                     return (
@@ -667,6 +1034,25 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                   {selectedObjects
                     .filter((obj) => obj.id !== editingId)
                     .map((obj) => {
+                      if (isLineLike(obj)) {
+                        const { x1, y1, x2, y2 } = endpointsOf(obj, liveEndpoints[obj.id], liveRects[obj.id])
+                        return (
+                          <div key={obj.id}>
+                            {(['start', 'end'] as const).map((which) => {
+                              const x = which === 'start' ? x1 : x2
+                              const y = which === 'start' ? y1 : y2
+                              return (
+                                <div
+                                  key={which}
+                                  className="absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-400 border border-white/70 pointer-events-auto cursor-move"
+                                  style={{ left: x, top: y }}
+                                  onPointerDown={(e) => handlePointerDownEndpoint(e, obj, which)}
+                                />
+                              )
+                            })}
+                          </div>
+                        )
+                      }
                       const rect = resolvedRects[obj.id]
                       return (
                         <div key={obj.id} className="absolute" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>

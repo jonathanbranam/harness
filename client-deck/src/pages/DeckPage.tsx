@@ -20,6 +20,8 @@ export function DeckPage() {
     sendPrompt,
     sendSelection,
     sendObjectUpdate,
+    sendAddShape,
+    sendSetSlideBackground,
     respondApproval,
     selectDeck,
     createDeck,
@@ -94,7 +96,16 @@ export function DeckPage() {
       <SlideSwitcher slides={deckState.slides} activeSlideId={deckState.activeSlideId} onSelect={selectSlide} onAdd={addSlide} onRemove={removeSlide} />
 
       <div className="flex-1 grid grid-cols-[1fr_380px] min-h-0">
-        <DeckCanvas ref={canvasRef} deckState={deckState} onSelectionChange={sendSelection} onObjectUpdate={sendObjectUpdate} onUndo={undo} onRedo={redo} />
+        <DeckCanvas
+          ref={canvasRef}
+          deckState={deckState}
+          onSelectionChange={sendSelection}
+          onObjectUpdate={sendObjectUpdate}
+          onAddShape={sendAddShape}
+          onSetSlideBackground={sendSetSlideBackground}
+          onUndo={undo}
+          onRedo={redo}
+        />
         <div className="border-l border-gray-200 dark:border-gray-800 min-h-0">
           <ChatPanel transcript={transcript} connected={connected} onSend={sendPrompt} />
         </div>

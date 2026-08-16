@@ -16,8 +16,13 @@ export type TextBlock =
   | { kind: 'paragraph'; runs: TextRun[] }
   | { kind: 'listItem'; listType: 'bulleted' | 'numbered'; runs: TextRun[] }
 
-export interface DeckObject {
+interface BaseDeckObject {
   id: string
+  zIndex: number
+}
+
+export interface TextBoxObject extends BaseDeckObject {
+  type: 'textBox'
   x: number
   y: number
   width: number
@@ -28,6 +33,55 @@ export interface DeckObject {
   fontColor: string
   fontSize: number
 }
+
+export interface BoxObject extends BaseDeckObject {
+  type: 'box'
+  x: number
+  y: number
+  width: number
+  height: number
+  fillColor: string
+  borderColor: string
+  borderWidth: number
+  cornerRadius: number
+}
+
+export interface EllipseObject extends BaseDeckObject {
+  type: 'ellipse'
+  x: number
+  y: number
+  width: number
+  height: number
+  fillColor: string
+  borderColor: string
+  borderWidth: number
+}
+
+export interface LineObject extends BaseDeckObject {
+  type: 'line'
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  strokeColor: string
+  strokeWidth: number
+}
+
+export interface ArrowObject extends BaseDeckObject {
+  type: 'arrow'
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  strokeColor: string
+  strokeWidth: number
+  arrowStart: boolean
+  arrowEnd: boolean
+}
+
+export type ShapeType = 'line' | 'box' | 'ellipse' | 'arrow'
+export type ShapeObject = BoxObject | EllipseObject | LineObject | ArrowObject
+export type DeckObject = TextBoxObject | ShapeObject
 
 export type UpdateAction =
   | 'setPosition'
@@ -41,6 +95,16 @@ export type UpdateAction =
   | 'addObject'
   | 'removeObject'
   | 'applyTextStyle'
+  | 'setEndpoint'
+  | 'setZIndex'
+  | 'bringForward'
+  | 'sendBackward'
+  | 'bringToFront'
+  | 'sendToBack'
+  | 'setStrokeWidth'
+  | 'setBorderWidth'
+  | 'setCornerRadius'
+  | 'setArrowHeads'
 
 export interface UpdateActionCall {
   action: UpdateAction
@@ -64,6 +128,7 @@ export interface DeckState {
   slides: SlideSummary[]
   activeSlideId: string
   objects: DeckObject[]
+  backgroundColor: string
   selection: string[]
   canUndo: boolean
   canRedo: boolean
@@ -122,6 +187,7 @@ export function useDeckSocket() {
     slides: [],
     activeSlideId: '',
     objects: [],
+    backgroundColor: '#ffffff',
     selection: [],
     canUndo: false,
     canRedo: false,
@@ -277,6 +343,17 @@ export function useDeckSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'object_update', actions }))
   }, [])
 
+  // Shape creation isn't an UpdateAction (see editor-state.ts's EditorStore.addShape
+  // doc comment on why it captures its own before/after instead of routing through
+  // applyUpdate), so it gets its own WS message type rather than riding object_update.
+  const sendAddShape = useCallback((args: Record<string, unknown>) => {
+    wsRef.current?.send(JSON.stringify({ type: 'add_shape', args }))
+  }, [])
+
+  const sendSetSlideBackground = useCallback((color: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'set_slide_background', color }))
+  }, [])
+
   const respondApproval = useCallback((toolCallId: string, approved: boolean) => {
     wsRef.current?.send(JSON.stringify({ type: 'approval_response', toolCallId, approved }))
     setPendingApproval(null)
@@ -327,6 +404,8 @@ export function useDeckSocket() {
     sendPrompt,
     sendSelection,
     sendObjectUpdate,
+    sendAddShape,
+    sendSetSlideBackground,
     respondApproval,
     selectDeck,
     createDeck,

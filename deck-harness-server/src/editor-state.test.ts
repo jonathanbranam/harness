@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EditorStore, editorStore, plainTextOf, type TextBlock } from './editor-state'
+import { EditorStore, editorStore, plainTextOf, type DeckObject, type TextBlock, type TextBoxObject } from './editor-state'
+
+/** Test-only narrowing helper: most existing tests operate on textBox objects (the seed deck / addObject), so this keeps assertions terse instead of re-deriving a type guard at every call site. */
+function tb(o: DeckObject | undefined): TextBoxObject {
+  if (!o || o.type !== 'textBox') throw new Error(`expected a textBox object, got ${JSON.stringify(o)}`)
+  return o
+}
 
 describe('editorStore', () => {
   it('setSelection drops unknown ids', () => {
@@ -11,7 +17,7 @@ describe('editorStore', () => {
     const result = editorStore.applyUpdate('user', 'setPosition', ['title'], { x: 10, y: 20 })
     expect(result.changed).toEqual(['title'])
     expect(result.errors).toEqual([])
-    const obj = editorStore.getState().objects.find((o) => o.id === 'title')
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'title'))
     expect(obj?.x).toBe(10)
     expect(obj?.y).toBe(20)
   })
@@ -26,8 +32,8 @@ describe('editorStore', () => {
     const result = editorStore.applyUpdate('user', 'applyGridLayout', ['box-1', 'box-2'], { direction: 'horizontal', gap: 10 })
     expect(result.errors).toEqual([])
     const state = editorStore.getState()
-    const box1 = state.objects.find((o) => o.id === 'box-1')!
-    const box2 = state.objects.find((o) => o.id === 'box-2')!
+    const box1 = tb(state.objects.find((o) => o.id === 'box-1'))
+    const box2 = tb(state.objects.find((o) => o.id === 'box-2'))
     expect(box2.x).toBe(box1.x + box1.width + 10)
   })
 
@@ -181,7 +187,7 @@ describe('editorStore object CRUD (addObject / removeObject)', () => {
     expect(result.changed.length).toBe(1)
     const state = editorStore.getState()
     expect(state.objects.length).toBe(before + 1)
-    const created = state.objects.find((o) => o.id === result.changed[0])!
+    const created = tb(state.objects.find((o) => o.id === result.changed[0]))
     expect(created.x).toBe(10)
     expect(created.y).toBe(20)
     expect(created.width).toBe(100)
@@ -229,7 +235,7 @@ describe('editorStore slide-bounds clamping (960x540)', () => {
   it('addObject clamps an object placed beyond the slide edge', () => {
     seedSlide()
     const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 900, y: 500, width: 100, height: 80 })
-    const obj = editorStore.getState().objects.find((o) => o.id === changed[0])!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === changed[0]))
     expect(obj.width).toBe(100)
     expect(obj.height).toBe(80)
     expect(obj.x).toBe(860) // 960 - 100
@@ -269,7 +275,7 @@ describe('editorStore slide-bounds clamping (960x540)', () => {
     const { changed } = editorStore.applyUpdate('user', 'addObject', [], { x: 900, y: 500, width: 10, height: 10 })
     const id = changed[0]
     editorStore.applyUpdate('user', 'setSize', [id], { width: 200, height: 150 })
-    const obj = editorStore.getState().objects.find((o) => o.id === id)!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === id))
     expect(obj.width).toBe(200)
     expect(obj.height).toBe(150)
     expect(obj.x).toBe(760) // 960 - 200
@@ -299,7 +305,7 @@ describe('editorStore font/border/fill color, including transparent', () => {
     seedSlide()
     editorStore.applyUpdate('user', 'setFontColor', ['title'], { color: '#ff0000' })
     editorStore.applyUpdate('user', 'setBorderColor', ['title'], { color: '#00ff00' })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'title')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'title'))
     expect(obj.fontColor).toBe('#ff0000')
     expect(obj.borderColor).toBe('#00ff00')
   })
@@ -308,7 +314,7 @@ describe('editorStore font/border/fill color, including transparent', () => {
     seedSlide()
     editorStore.applyUpdate('user', 'setBorderColor', ['title'], { color: 'transparent' })
     editorStore.applyUpdate('user', 'setFillColor', ['title'], { color: 'transparent' })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'title')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'title'))
     expect(obj.borderColor).toBe('transparent')
     expect(obj.fillColor).toBe('transparent')
   })
@@ -319,7 +325,7 @@ describe('editorStore applyTextStyle', () => {
     seedSlide()
     editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Hello world' })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'box-1'))
     expect(plainTextOf(obj)).toBe('Hello world')
     const runs = obj.text[0].runs
     expect(runs[0]).toEqual({ text: 'Hello', bold: true })
@@ -332,7 +338,7 @@ describe('editorStore applyTextStyle', () => {
     editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Hello world' })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: false })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'box-1'))
     expect(obj.text[0].runs.every((r) => !r.bold)).toBe(true)
   })
 
@@ -341,7 +347,7 @@ describe('editorStore applyTextStyle', () => {
     editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Item one' })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 4, mark: 'bold', value: true })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 8, listType: 'bulleted' })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'box-1'))
     const block = obj.text[0]
     if (block.kind !== 'listItem') throw new Error('expected a listItem block')
     expect(block.listType).toBe('bulleted')
@@ -354,7 +360,7 @@ describe('editorStore applyTextStyle', () => {
     editorStore.applyUpdate('user', 'setText', ['box-1'], { text: 'Item one' })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 8, listType: 'numbered' })
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 0, end: 8, listType: null })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'box-1'))
     expect(obj.text[0].kind).toBe('paragraph')
   })
 
@@ -366,10 +372,10 @@ describe('editorStore applyTextStyle', () => {
         { kind: 'paragraph', runs: [{ text: 'Second' }] },
       ],
     })
-    expect(plainTextOf(editorStore.getState().objects.find((o) => o.id === 'box-1')!)).toBe('First\nSecond')
+    expect(plainTextOf(tb(editorStore.getState().objects.find((o) => o.id === 'box-1')))).toBe('First\nSecond')
     // "Second" starts at offset 6: 5 chars of "First" plus 1 for the "\n" separator.
     editorStore.applyUpdate('user', 'applyTextStyle', ['box-1'], { start: 6, end: 12, mark: 'italic', value: true })
-    const obj = editorStore.getState().objects.find((o) => o.id === 'box-1')!
+    const obj = tb(editorStore.getState().objects.find((o) => o.id === 'box-1'))
     expect(obj.text[0].runs.every((r) => !r.italic)).toBe(true)
     expect(obj.text[1].runs[0]).toEqual({ text: 'Second', italic: true })
   })
@@ -410,9 +416,12 @@ describe('EditorStore construction from a persisted snapshot', () => {
           slides: [
             {
               id: 'slide-a',
+              backgroundColor: '#ffffff',
               objects: [
                 {
                   id: 'obj-a',
+                  type: 'textBox' as const,
+                  zIndex: 0,
                   x: 5,
                   y: 5,
                   width: 50,
@@ -612,6 +621,305 @@ describe('editorStore undo/redo', () => {
   })
 })
 
+describe('editorStore addShape', () => {
+  it('creates a box with type-appropriate defaults and a zIndex above existing objects', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addShape('user', { type: 'box', x: 10, y: 10, width: 50, height: 40 })
+    expect(result.errors).toEqual([])
+    expect(result.changed.length).toBe(1)
+    const obj = store.getState().objects.find((o) => o.id === result.changed[0])
+    expect(obj).toMatchObject({ type: 'box', x: 10, y: 10, width: 50, height: 40, fillColor: 'transparent', borderColor: '#374151', borderWidth: 2, cornerRadius: 0 })
+    const maxExistingZ = Math.max(...store.getState().objects.filter((o) => o.id !== result.changed[0]).map((o) => o.zIndex))
+    expect(obj?.zIndex).toBe(maxExistingZ + 1)
+    expect(store.getHistory().entries.length).toBe(before.entries.length + 1)
+  })
+
+  it('creates an ellipse, line, and arrow with their own defaults', () => {
+    const store = new EditorStore(null)
+    const ellipse = store.addShape('user', { type: 'ellipse', x: 0, y: 0, width: 20, height: 20 })
+    const line = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 50, y2: 50 })
+    const arrow = store.addShape('user', { type: 'arrow', x1: 0, y1: 0, x2: 50, y2: 50 })
+    const state = store.getState()
+    expect(state.objects.find((o) => o.id === ellipse.changed[0])).toMatchObject({ type: 'ellipse', borderWidth: 2 })
+    expect(state.objects.find((o) => o.id === line.changed[0])).toMatchObject({ type: 'line', strokeColor: '#374151', strokeWidth: 2 })
+    expect(state.objects.find((o) => o.id === arrow.changed[0])).toMatchObject({ type: 'arrow', arrowStart: false, arrowEnd: true })
+  })
+
+  it('rejects an unknown type without pushing a history entry', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addShape('user', { type: 'triangle', x: 0, y: 0, width: 10, height: 10 })
+    expect(result.changed).toEqual([])
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(store.getHistory()).toEqual(before)
+  })
+
+  it('rejects missing geometry for a box without pushing a history entry', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addShape('user', { type: 'box', x: 0, y: 0 })
+    expect(result.changed).toEqual([])
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(store.getHistory()).toEqual(before)
+  })
+
+  it('rejects missing geometry for a line without pushing a history entry', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addShape('user', { type: 'line', x1: 0, y1: 0 })
+    expect(result.changed).toEqual([])
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(store.getHistory()).toEqual(before)
+  })
+
+  it('clamps a shape placed beyond the slide edge', () => {
+    const store = new EditorStore(null)
+    const result = store.addShape('user', { type: 'box', x: 900, y: 500, width: 100, height: 80 })
+    const obj = store.getState().objects.find((o) => o.id === result.changed[0])!
+    expect(obj).toMatchObject({ x: 860, y: 460 })
+  })
+})
+
+describe('editorStore z-order', () => {
+  function threeBoxes() {
+    const store = new EditorStore(null)
+    const a = store.addShape('user', { type: 'box', x: 0, y: 0, width: 10, height: 10 }).changed[0]
+    const b = store.addShape('user', { type: 'box', x: 20, y: 0, width: 10, height: 10 }).changed[0]
+    const c = store.addShape('user', { type: 'box', x: 40, y: 0, width: 10, height: 10 }).changed[0]
+    return { store, a, b, c }
+  }
+
+  function zOf(store: EditorStore, id: string): number {
+    return store.getState().objects.find((o) => o.id === id)!.zIndex
+  }
+
+  it('setZIndex sets an explicit value', () => {
+    const { store, a } = threeBoxes()
+    const result = store.applyUpdate('user', 'setZIndex', [a], { zIndex: 42 })
+    expect(result.errors).toEqual([])
+    expect(zOf(store, a)).toBe(42)
+  })
+
+  it('bringForward swaps with the next-higher object', () => {
+    const { store, a, b } = threeBoxes()
+    const zA = zOf(store, a)
+    const zB = zOf(store, b)
+    store.applyUpdate('user', 'bringForward', [a], {})
+    expect(zOf(store, a)).toBe(zB)
+    expect(zOf(store, b)).toBe(zA)
+  })
+
+  it('bringForward on the topmost object is a no-op', () => {
+    const { store, c } = threeBoxes()
+    const zC = zOf(store, c)
+    store.applyUpdate('user', 'bringForward', [c], {})
+    expect(zOf(store, c)).toBe(zC)
+  })
+
+  it('sendBackward swaps with the next-lower object', () => {
+    const { store, b, c } = threeBoxes()
+    const zB = zOf(store, b)
+    const zC = zOf(store, c)
+    store.applyUpdate('user', 'sendBackward', [c], {})
+    expect(zOf(store, c)).toBe(zB)
+    expect(zOf(store, b)).toBe(zC)
+  })
+
+  it('bringToFront moves an object above every other object', () => {
+    const { store, a, b, c } = threeBoxes()
+    store.applyUpdate('user', 'bringToFront', [a], {})
+    const state = store.getState()
+    const maxOther = Math.max(zOf(store, b), zOf(store, c))
+    expect(state.objects.find((o) => o.id === a)!.zIndex).toBeGreaterThan(maxOther)
+  })
+
+  it('sendToBack moves an object below every other object', () => {
+    const { store, a, b, c } = threeBoxes()
+    store.applyUpdate('user', 'sendToBack', [c], {})
+    const minOther = Math.min(zOf(store, a), zOf(store, b))
+    expect(zOf(store, c)).toBeLessThan(minOther)
+  })
+})
+
+describe('editorStore setEndpoint (line/arrow)', () => {
+  it('moves the start endpoint independently of the end endpoint', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'line', x1: 10, y1: 10, x2: 100, y2: 100 })
+    const id = changed[0]
+    const result = store.applyUpdate('user', 'setEndpoint', [id], { which: 'start', x: 50, y: 60 })
+    expect(result.errors).toEqual([])
+    const obj = store.getState().objects.find((o) => o.id === id) as { x1: number; y1: number; x2: number; y2: number }
+    expect(obj).toMatchObject({ x1: 50, y1: 60, x2: 100, y2: 100 })
+  })
+
+  it('clamps an endpoint moved beyond the slide edge', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'arrow', x1: 10, y1: 10, x2: 100, y2: 100 })
+    const id = changed[0]
+    store.applyUpdate('user', 'setEndpoint', [id], { which: 'end', x: 5000, y: -100 })
+    const obj = store.getState().objects.find((o) => o.id === id) as { x2: number; y2: number }
+    expect(obj).toMatchObject({ x2: 960, y2: 0 })
+  })
+
+  it('rejects setEndpoint on a non-line/arrow type', () => {
+    const store = new EditorStore(null)
+    const result = store.applyUpdate('user', 'setEndpoint', ['title'], { which: 'start', x: 0, y: 0 })
+    expect(result.changed).toEqual([])
+    expect(result.errors[0]).toContain('does not apply to type')
+  })
+})
+
+describe('editorStore type-checked action/type mismatches', () => {
+  it('setSize does not apply to line/arrow', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 10, y2: 10 })
+    const result = store.applyUpdate('user', 'setSize', [changed[0]], { width: 100, height: 100 })
+    expect(result.changed).toEqual([])
+    expect(result.errors[0]).toContain('does not apply to type')
+  })
+
+  it('setFontSize/setFontColor/setText/applyTextStyle only apply to textBox', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'box', x: 0, y: 0, width: 10, height: 10 })
+    const id = changed[0]
+    for (const [action, args] of [
+      ['setFontSize', { fontSize: 20 }],
+      ['setFontColor', { color: '#fff' }],
+      ['setText', { text: 'hi' }],
+      ['applyTextStyle', { start: 0, end: 1, mark: 'bold', value: true }],
+    ] as const) {
+      const result = store.applyUpdate('user', action, [id], args)
+      expect(result.changed).toEqual([])
+      expect(result.errors[0]).toContain('does not apply to type')
+    }
+  })
+
+  it('setFillColor does not apply to line/arrow', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'arrow', x1: 0, y1: 0, x2: 10, y2: 10 })
+    const result = store.applyUpdate('user', 'setFillColor', [changed[0]], { color: '#fff' })
+    expect(result.changed).toEqual([])
+    expect(result.errors[0]).toContain('does not apply to type')
+  })
+
+  it('setBorderColor sets strokeColor on line/arrow and borderColor on box/ellipse/textBox', () => {
+    const store = new EditorStore(null)
+    const line = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 10, y2: 10 }).changed[0]
+    store.applyUpdate('user', 'setBorderColor', [line], { color: '#123456' })
+    const lineObj = store.getState().objects.find((o) => o.id === line) as { strokeColor: string }
+    expect(lineObj.strokeColor).toBe('#123456')
+
+    store.applyUpdate('user', 'setBorderColor', ['title'], { color: '#654321' })
+    const titleObj = tb(store.getState().objects.find((o) => o.id === 'title'))
+    expect(titleObj.borderColor).toBe('#654321')
+  })
+
+  it('setStrokeWidth only applies to line/arrow', () => {
+    const store = new EditorStore(null)
+    const result = store.applyUpdate('user', 'setStrokeWidth', ['title'], { strokeWidth: 5 })
+    expect(result.changed).toEqual([])
+    expect(result.errors[0]).toContain('does not apply to type')
+  })
+
+  it('setBorderWidth only applies to box/ellipse', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'box', x: 0, y: 0, width: 10, height: 10 })
+    const result = store.applyUpdate('user', 'setBorderWidth', [changed[0]], { borderWidth: 6 })
+    expect(result.errors).toEqual([])
+    expect((store.getState().objects.find((o) => o.id === changed[0]) as { borderWidth: number }).borderWidth).toBe(6)
+
+    const rejected = store.applyUpdate('user', 'setBorderWidth', ['title'], { borderWidth: 6 })
+    expect(rejected.changed).toEqual([])
+  })
+
+  it('setCornerRadius only applies to box, not ellipse', () => {
+    const store = new EditorStore(null)
+    const box = store.addShape('user', { type: 'box', x: 0, y: 0, width: 10, height: 10 }).changed[0]
+    const ellipse = store.addShape('user', { type: 'ellipse', x: 0, y: 0, width: 10, height: 10 }).changed[0]
+    expect(store.applyUpdate('user', 'setCornerRadius', [box], { cornerRadius: 12 }).errors).toEqual([])
+    const rejected = store.applyUpdate('user', 'setCornerRadius', [ellipse], { cornerRadius: 12 })
+    expect(rejected.changed).toEqual([])
+  })
+
+  it('setArrowHeads only applies to arrow', () => {
+    const store = new EditorStore(null)
+    const arrow = store.addShape('user', { type: 'arrow', x1: 0, y1: 0, x2: 10, y2: 10 }).changed[0]
+    store.applyUpdate('user', 'setArrowHeads', [arrow], { arrowStart: true, arrowEnd: false })
+    const obj = store.getState().objects.find((o) => o.id === arrow) as { arrowStart: boolean; arrowEnd: boolean }
+    expect(obj).toMatchObject({ arrowStart: true, arrowEnd: false })
+
+    const line = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 10, y2: 10 }).changed[0]
+    const rejected = store.applyUpdate('user', 'setArrowHeads', [line], { arrowStart: true })
+    expect(rejected.changed).toEqual([])
+  })
+})
+
+describe('editorStore slide background color', () => {
+  it('setSlideBackgroundColor sets the active slide backgroundColor and captures history', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.setSlideBackgroundColor('user', '#123456')
+    expect(result.ok).toBe(true)
+    expect(store.getState().backgroundColor).toBe('#123456')
+    expect(store.getHistory().entries.length).toBe(before.entries.length + 1)
+  })
+
+  it('rejects an empty color', () => {
+    const store = new EditorStore(null)
+    const result = store.setSlideBackgroundColor('user', '')
+    expect(result.ok).toBe(false)
+  })
+
+  it('coalesces a rapid burst of background color changes into one undo step', () => {
+    vi.useFakeTimers()
+    try {
+      const store = new EditorStore(null)
+      store.setSlideBackgroundColor('user', '#111111')
+      vi.advanceTimersByTime(50)
+      store.setSlideBackgroundColor('user', '#222222')
+      expect(store.getHistory().entries.length).toBe(1)
+      const undoResult = store.undo('user')
+      expect(undoResult.steppedEntries.length).toBe(1)
+      expect(store.getState().backgroundColor).toBe('#ffffff')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('editorStore boundsOf/clampToSlide for line/arrow, and mixed-type applyGridLayout', () => {
+  it('setPosition moves a line by translating both endpoints', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'line', x1: 10, y1: 10, x2: 50, y2: 30 })
+    const id = changed[0]
+    store.applyUpdate('user', 'setPosition', [id], { dx: 5, dy: 5 })
+    const obj = store.getState().objects.find((o) => o.id === id) as { x1: number; y1: number; x2: number; y2: number }
+    expect(obj).toMatchObject({ x1: 15, y1: 15, x2: 55, y2: 35 })
+  })
+
+  it('setPosition with absolute x/y moves a line so its top-left bound lands there', () => {
+    const store = new EditorStore(null)
+    const { changed } = store.addShape('user', { type: 'line', x1: 10, y1: 10, x2: 50, y2: 30 })
+    const id = changed[0]
+    store.applyUpdate('user', 'setPosition', [id], { x: 100, y: 100 })
+    const obj = store.getState().objects.find((o) => o.id === id) as { x1: number; y1: number; x2: number; y2: number }
+    // bounds were { x: 10, y: 10, width: 40, height: 20 }; moving bounds.x/y to 100,100 translates by dx=90, dy=90.
+    expect(obj).toMatchObject({ x1: 100, y1: 100, x2: 140, y2: 120 })
+  })
+
+  it('applyGridLayout lays out a mix of a textBox and a line by their bounding boxes', () => {
+    const store = new EditorStore(null)
+    const line = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 40, y2: 20 }).changed[0]
+    const result = store.applyUpdate('user', 'applyGridLayout', ['title', line], { direction: 'horizontal', gap: 10 })
+    expect(result.errors).toEqual([])
+    const titleObj = tb(store.getState().objects.find((o) => o.id === 'title'))
+    const lineObj = store.getState().objects.find((o) => o.id === line) as { x1: number; x2: number }
+    expect(lineObj.x1).toBe(titleObj.x + titleObj.width + 10)
+    expect(lineObj.x2 - lineObj.x1).toBe(40)
+  })
+})
+
 // Font-size stepper clicks, color-picker drags, and rapid consecutive
 // nudges/resizes on the same object should collapse into a single undo
 // step rather than one entry per intermediate value — see editor-state.ts's
@@ -638,24 +946,24 @@ describe('editorStore undo/redo history merging', () => {
     const history = store.getHistory()
     expect(history.entries.length).toBe(1)
     expect(history.entries[0].description).toBe('Changed font size on 1 object')
-    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(19)
+    expect(tb(store.getState().objects.find((o) => o.id === 'title')).fontSize).toBe(19)
   })
 
   it('undo after a merged burst reverts all the way back to before the first edit', () => {
     const store = new EditorStore(null)
-    const seedFontSize = store.getState().objects.find((o) => o.id === 'title')!.fontSize
+    const seedFontSize = tb(store.getState().objects.find((o) => o.id === 'title')).fontSize
     store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
     vi.advanceTimersByTime(50)
     store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 19 })
 
     const result = store.undo('user')
     expect(result.steppedEntries.length).toBe(1)
-    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(seedFontSize)
+    expect(tb(store.getState().objects.find((o) => o.id === 'title')).fontSize).toBe(seedFontSize)
   })
 
   it('rapid setPosition calls on the same object (e.g. quick consecutive drags) collapse into one entry', () => {
     const store = new EditorStore(null)
-    const seedX = store.getState().objects.find((o) => o.id === 'title')!.x
+    const seedX = tb(store.getState().objects.find((o) => o.id === 'title')).x
     store.applyUpdate('user', 'setPosition', ['title'], { x: 100, y: 100 })
     vi.advanceTimersByTime(100)
     store.applyUpdate('user', 'setPosition', ['title'], { x: 105, y: 100 })
@@ -665,7 +973,7 @@ describe('editorStore undo/redo history merging', () => {
     expect(store.getHistory().entries.length).toBe(1)
     const undoResult = store.undo('user')
     expect(undoResult.steppedEntries.length).toBe(1)
-    expect(store.getState().objects.find((o) => o.id === 'title')?.x).toBe(seedX)
+    expect(tb(store.getState().objects.find((o) => o.id === 'title')).x).toBe(seedX)
   })
 
   it('edits separated by more than the merge window each get their own entry', () => {
@@ -678,7 +986,7 @@ describe('editorStore undo/redo history merging', () => {
 
   it('forces a new entry once a continuous burst exceeds the max burst duration, even with every gap inside the merge window', () => {
     const store = new EditorStore(null)
-    const seedFontSize = store.getState().objects.find((o) => o.id === 'title')!.fontSize
+    const seedFontSize = tb(store.getState().objects.find((o) => o.id === 'title')).fontSize
     store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 }) // burst start, t=0
     for (let i = 0; i < 5; i++) {
       vi.advanceTimersByTime(500) // < HISTORY_MERGE_WINDOW_MS each time, but t=2500 total exceeds the 2000ms cap
@@ -686,14 +994,14 @@ describe('editorStore undo/redo history merging', () => {
     }
 
     expect(store.getHistory().entries.length).toBe(2)
-    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(22)
+    expect(tb(store.getState().objects.find((o) => o.id === 'title')).fontSize).toBe(22)
 
     // First undo reverts only the second burst (back to 21, the value right before it started).
     store.undo('user')
-    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(21)
+    expect(tb(store.getState().objects.find((o) => o.id === 'title')).fontSize).toBe(21)
     // Second undo reverts the first burst all the way back to the seed value.
     store.undo('user')
-    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(seedFontSize)
+    expect(tb(store.getState().objects.find((o) => o.id === 'title')).fontSize).toBe(seedFontSize)
   })
 
   it('does not merge edits from different actors even within the merge window', () => {

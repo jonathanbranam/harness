@@ -24,6 +24,8 @@ type ClientMessage =
   | { type: 'prompt'; text: string }
   | { type: 'selection'; ids: string[] }
   | { type: 'object_update'; actions: UpdateActionCall[] }
+  | { type: 'add_shape'; args: Record<string, unknown> }
+  | { type: 'set_slide_background'; color: string }
   | { type: 'approval_response'; toolCallId: string; approved: boolean }
   | { type: 'select_deck'; deckId: string }
   | { type: 'create_deck'; name: string }
@@ -141,6 +143,18 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
             const result = editorStore.applyUpdate('user', call.action, call.targetIds, call.args ?? {})
             if (result.errors.length > 0) safeSend(socket, { type: 'error', message: result.errors.join('; ') })
           }
+          return
+        }
+
+        case 'add_shape': {
+          const result = editorStore.addShape('user', msg.args)
+          if (result.errors.length > 0) safeSend(socket, { type: 'error', message: result.errors.join('; ') })
+          return
+        }
+
+        case 'set_slide_background': {
+          const result = editorStore.setSlideBackgroundColor('user', msg.color)
+          if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
           return
         }
 

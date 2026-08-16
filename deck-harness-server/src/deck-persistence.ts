@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Deck, DeckObject, EditorStore, Slide, TextBlock, TextRun } from './editor-state'
+import type { ArrowObject, BoxObject, Deck, DeckObject, EditorStore, EllipseObject, LineObject, Slide, TextBlock, TextBoxObject, TextRun } from './editor-state'
 
 export interface DeckSnapshot {
   decks: Deck[]
@@ -21,6 +21,11 @@ const DEFAULT_FILL_COLOR = '#374151'
 const DEFAULT_BORDER_COLOR = 'transparent'
 const DEFAULT_FONT_COLOR = '#ffffff'
 const DEFAULT_FONT_SIZE = 16
+const DEFAULT_STROKE_COLOR = '#374151'
+const DEFAULT_STROKE_WIDTH = 2
+const DEFAULT_BORDER_WIDTH = 2
+const DEFAULT_CORNER_RADIUS = 0
+const DEFAULT_SLIDE_BACKGROUND_COLOR = '#ffffff'
 const AUTO_SAVE_DEBOUNCE_MS = 750
 
 function sanitizeRun(input: unknown): TextRun | undefined {
@@ -54,11 +59,11 @@ function sanitizeString(input: unknown, fallback: string): string {
   return typeof input === 'string' && input.trim() ? input : fallback
 }
 
-function sanitizeObject(input: unknown): DeckObject | null {
-  if (!input || typeof input !== 'object') return null
-  const o = input as Record<string, unknown>
+function sanitizeTextBoxObject(o: Record<string, unknown>, zIndex: number): TextBoxObject {
   return {
     id: sanitizeString(o.id, randomUUID()),
+    type: 'textBox',
+    zIndex,
     x: sanitizeNumber(o.x, 0),
     y: sanitizeNumber(o.y, 0),
     width: Math.max(1, sanitizeNumber(o.width, 100)),
@@ -71,18 +76,62 @@ function sanitizeObject(input: unknown): DeckObject | null {
   }
 }
 
+function sanitizeBoxLikeObject(o: Record<string, unknown>, type: 'box' | 'ellipse', zIndex: number): BoxObject | EllipseObject {
+  const base = {
+    id: sanitizeString(o.id, randomUUID()),
+    zIndex,
+    x: sanitizeNumber(o.x, 0),
+    y: sanitizeNumber(o.y, 0),
+    width: Math.max(1, sanitizeNumber(o.width, 100)),
+    height: Math.max(1, sanitizeNumber(o.height, 100)),
+    fillColor: sanitizeString(o.fillColor, 'transparent'),
+    borderColor: sanitizeString(o.borderColor, DEFAULT_STROKE_COLOR),
+    borderWidth: Math.max(0, sanitizeNumber(o.borderWidth, DEFAULT_BORDER_WIDTH)),
+  }
+  return type === 'box'
+    ? { ...base, type: 'box', cornerRadius: Math.max(0, sanitizeNumber(o.cornerRadius, DEFAULT_CORNER_RADIUS)) }
+    : { ...base, type: 'ellipse' }
+}
+
+function sanitizeLineLikeObject(o: Record<string, unknown>, type: 'line' | 'arrow', zIndex: number): LineObject | ArrowObject {
+  const base = {
+    id: sanitizeString(o.id, randomUUID()),
+    zIndex,
+    x1: sanitizeNumber(o.x1, 0),
+    y1: sanitizeNumber(o.y1, 0),
+    x2: sanitizeNumber(o.x2, 100),
+    y2: sanitizeNumber(o.y2, 100),
+    strokeColor: sanitizeString(o.strokeColor, DEFAULT_STROKE_COLOR),
+    strokeWidth: Math.max(1, sanitizeNumber(o.strokeWidth, DEFAULT_STROKE_WIDTH)),
+  }
+  return type === 'arrow' ? { ...base, type: 'arrow', arrowStart: o.arrowStart === true, arrowEnd: o.arrowEnd !== false } : { ...base, type: 'line' }
+}
+
+/** Reads `o.type`, defaulting to `'textBox'` when absent (every object saved before this field existed), and dispatches to a per-type sanitizer producing that type's exact field set with defaults — see design.md's "Persistence: type-aware sanitizing, non-breaking for existing decks". `zIndex` defaults to `fallbackZIndex` (the object's position in its slide's array) when absent, so a pre-existing snapshot restores with its current visual stacking preserved. */
+function sanitizeObject(input: unknown, fallbackZIndex: number): DeckObject | null {
+  if (!input || typeof input !== 'object') return null
+  const o = input as Record<string, unknown>
+  const type = o.type === 'box' || o.type === 'ellipse' || o.type === 'line' || o.type === 'arrow' ? o.type : 'textBox'
+  const zIndex = sanitizeNumber(o.zIndex, fallbackZIndex)
+  if (type === 'box' || type === 'ellipse') return sanitizeBoxLikeObject(o, type, zIndex)
+  if (type === 'line' || type === 'arrow') return sanitizeLineLikeObject(o, type, zIndex)
+  return sanitizeTextBoxObject(o, zIndex)
+}
+
 function sanitizeSlide(input: unknown): Slide | null {
   if (!input || typeof input !== 'object') return null
   const s = input as Record<string, unknown>
-  const objects = Array.isArray(s.objects) ? s.objects.map(sanitizeObject).filter((o): o is DeckObject => o !== null) : []
-  return { id: sanitizeString(s.id, randomUUID()), objects }
+  const objects = Array.isArray(s.objects)
+    ? s.objects.map((raw, i) => sanitizeObject(raw, i)).filter((o): o is DeckObject => o !== null)
+    : []
+  return { id: sanitizeString(s.id, randomUUID()), objects, backgroundColor: sanitizeString(s.backgroundColor, DEFAULT_SLIDE_BACKGROUND_COLOR) }
 }
 
 function sanitizeDeck(input: unknown): Deck | null {
   if (!input || typeof input !== 'object') return null
   const d = input as Record<string, unknown>
   const rawSlides = Array.isArray(d.slides) ? d.slides.map(sanitizeSlide).filter((s): s is Slide => s !== null) : []
-  const slides = rawSlides.length > 0 ? rawSlides : [{ id: randomUUID(), objects: [] }]
+  const slides = rawSlides.length > 0 ? rawSlides : [{ id: randomUUID(), objects: [], backgroundColor: DEFAULT_SLIDE_BACKGROUND_COLOR }]
   const activeSlideId = slides.some((s) => s.id === d.activeSlideId) ? (d.activeSlideId as string) : slides[0].id
   return {
     id: sanitizeString(d.id, randomUUID()),
