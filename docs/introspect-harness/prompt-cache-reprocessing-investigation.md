@@ -1,6 +1,18 @@
 # Prompt-Cache Reprocessing in Recorded Introspect Sessions
 
-**Status: open investigation, not resolved.** This is not a design doc for a
+**Status: root cause identified and confirmed live — `PI_CACHE_RETENTION=long`
+substantially fixes it.** A second pass through this investigation
+(2026-08-16) traced the leading hypothesis all the way into
+`@earendil-works/pi-ai`'s actual request-building code, identified
+`PI_CACHE_RETENTION=long` as the one lever actually wired up to affect this
+in the current SDK, and a live re-recording with that env var set confirms a
+large, measurable improvement. See "Second-pass findings" and "Live test
+results" near the bottom for the full story; the rest of this document is
+the original spike write-up, left intact.
+
+---
+
+This is not a design doc for a
 change — it's the write-up requested to pause and hand off a finding made
 while building mockups for `openspec/changes/redesign-introspect-ui`
 (`mockups/apparatus-mockup-linear-stack.html` and
@@ -221,3 +233,294 @@ This is scoped to the `redesign-introspect-ui` Apparatus category question
 only. It doesn't block Apparatus's layout/resize work, stick-to-bottom
 scroll, or the thinking-pill work already resolved in that change's
 design.md — those don't depend on how the "input" bucket is subdivided.
+
+---
+
+## Second-pass findings (2026-08-16)
+
+This pass worked avenue 3 (system-prompt drift) and avenue 2 (DeepInfra
+docs) from the list above, then went further than avenue 1 by reading
+`@earendil-works/pi-ai`'s actual compiled request-building code instead of
+just its type declarations. Avenues 1 and 4 (re-record live with a changed
+setting; a control run against an Anthropic model) are still open — see
+"What's still open" below.
+
+### Avenue 3 resolved: system-prompt drift is definitively ruled out
+
+The recording captures the full resolved system prompt (plus `skills`,
+`guides`, `sensors`) on every `foundation_update` event — one per
+`agent_start`, emitted from `before_agent_start` in
+`introspection-bridge.ts`. Hashing all 7 gives:
+
+```
+line   systemPrompt sha256[:12]   len     skills sha256[:12]   guides   sensors
+2      a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+133    a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+426    a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+1283   a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+6300   a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+6787   a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+7394   a8d7d00ec4c0               18158   ec08d1abb1ad         (empty)  (empty)
+```
+
+Byte-identical across all 7 top-level prompts, no exceptions. The entire
+"foundation" (system prompt + skills) that pi sends is a fixed, unchanging
+prefix for this whole session. There is no prefix drift for a provider-side
+cache to miss on. This closes avenue 3 entirely — the cause is not
+in workspace/skill content changing turn to turn.
+
+(The misleading `resources_discover` comment flagged in avenue 5 has been
+fixed regardless, since it was wrong independent of this finding.)
+
+### New evidence: the reset isn't just at `agent_start` boundaries
+
+Re-extracting the full `input`/`cacheRead` sequence (not just the first/last
+call of each run, as the original pass did) shows the cache resets
+**within** a single `agent_start` burst too, not only between them — and it
+does it in a very specific, repeating way. From `agent_start` run #4 (a
+17-call tool-loop):
+
+```
+seq=10 input=3920 cacheRead= 6688
+seq=11 input=  85 cacheRead=10816
+seq=12 input=4972 cacheRead= 6688   <- back to exactly seq=10's cacheRead
+seq=13 input=1110 cacheRead=11264   <- close to seq=11's cacheRead + growth
+```
+
+and again at the very next run boundary (#4 -> #5):
+
+```
+seq=26 input= 880 cacheRead=17344   (end of run #4)
+seq=27 input=6068 cacheRead=10592   (start of run #5)
+seq=28 input= 873 cacheRead=16640   <- jumps back near run #4's level
+seq=29 input=8322 cacheRead=10592   <- exactly seq=27's cacheRead again
+```
+
+and once more crossing into run #7:
+
+```
+seq=39 input=10404 cacheRead=16672  (start of run #6)
+...
+seq=46 input= 9727 cacheRead=27104  (start of run #7)
+seq=47 input= 5207 cacheRead=36864
+...
+seq=50 input=18002 cacheRead=27072  <- nearly identical to seq=46's cacheRead
+```
+
+The exact-value recurrences (`6688` twice, `10592` twice, `27072`/`27104`
+essentially the same value twice, calls apart) are the tell: this isn't
+noise or a monotonic "cache decays over time" curve. It looks like requests
+are landing on a small, fixed-size pool of backend replicas in round-robin
+or load-balanced fashion, each independently holding (and slowly growing)
+its own prefix-cache watermark for this conversation, with **no session
+affinity pinning consecutive calls — even calls milliseconds apart within
+one tool-loop — to the same replica.**
+
+Full run-by-run summary (`n` = assistant calls in the run):
+
+| run | n  | first (input/cacheRead) | last (input/cacheRead) | sum(input) |
+|-----|----|--------------------------|--------------------------|-----------:|
+| 1   | 2  | 5528 / 0                 | 68 / 5536                | 5,596 |
+| 2   | 2  | 5621 / 0                 | 140 / 5696                | 5,761 |
+| 3   | 5  | 1210 / 5504               | 1007 / 7840               | 4,566 |
+| 4   | 17 | 3920 / 6688               | 880 / 17344                | 18,641 |
+| 5   | 12 | 6068 / 10592              | 962 / 24192                | 21,615 |
+| 6   | 7  | 10404 / 16672             | 1233 / 35328               | 33,330 |
+| 7   | 13 | 9727 / 27104              | 231 / 46432                | 38,672 |
+
+Sum of `usage.input` across all 58 assistant calls: **128,181** tokens —
+matching the original pass's "~128k–143k" estimate, against a final context
+size of 46,606. Sum of `cacheRead` across the same calls: 1,232,064 (high
+because `cacheRead` is cumulative-per-call, not a delta).
+
+### Root cause, confirmed in code (not just types)
+
+The original doc's leading hypothesis — no pi-directed caching, no session
+affinity — is correct, but the code shows *why* more precisely than the
+type declarations alone suggested. In
+`pi-ai/dist/api/openai-completions.js`, `buildParams()`:
+
+```js
+prompt_cache_key: (model.baseUrl.includes("api.openai.com") && cacheRetention !== "none") ||
+    (cacheRetention === "long" && compat.supportsLongCacheRetention)
+    ? clampOpenAIPromptCacheKey(options?.sessionId)
+    : undefined,
+prompt_cache_retention: cacheRetention === "long" && compat.supportsLongCacheRetention ? "24h" : undefined,
+```
+
+and `cacheRetention` itself:
+
+```js
+function resolveCacheRetention(cacheRetention, env) {
+    if (cacheRetention) return cacheRetention;
+    if (getProviderEnvValue("PI_CACHE_RETENTION", env) === "long") return "long";
+    return "short";
+}
+```
+
+So for a DeepInfra-routed model (`baseUrl` is
+`https://api.deepinfra.com/v1/openai`, not `api.openai.com`), **both
+`prompt_cache_key` and `prompt_cache_retention` stay `undefined` unless
+`cacheRetention` resolves to `"long"`** — which requires either an explicit
+per-call `options.cacheRetention` (not exposed anywhere in
+`@earendil-works/pi-coding-agent`'s public SDK — `PromptOptions` and
+`createAgentSession()`'s options have no such field) or the environment
+variable `PI_CACHE_RETENTION=long`, which isn't set anywhere in this repo
+(checked `introspect-harness-server/.env*`, root `.env*`).
+
+Separately, `createClient()` gates the session-affinity headers
+(`session_id`, `x-client-request-id`, `x-session-affinity`) on
+`sessionId && compat.sendSessionAffinityHeaders`. Grepping the entire
+compiled `@earendil-works/pi-coding-agent` SDK (`agent-session.js`,
+`model-runtime.js`, `index.js`) for anywhere that populates
+`options.sessionId` on a model call turns up **nothing** — the only
+`sessionId` in `agent-session.js` is the session's own id, used for
+`.jsonl` file naming and a `cleanupSessionResources` call, never threaded
+into a model request. So the original doc's avenue 1 as literally proposed
+— adding `compat: { sendSessionAffinityHeaders: true, sessionAffinityFormat:
+"openai" }` to the `moonshotai/Kimi-K2.7-Code` entry — **would not change
+anything**: the header-emitting branch can never fire because `sessionId` is
+always `undefined` at that call site in the current SDK version. This is a
+correction to the original doc, not just an addition.
+
+For completeness: `getCompat()`'s auto-detection (`detectCompat()`, used
+since the harness's `models.json` entry sets no `compat` block at all) does
+resolve `supportsLongCacheRetention: true` and `sendSessionAffinityHeaders:
+false` for this DeepInfra/Kimi pairing — so *if* a session id were ever
+threaded through, the retention lever would already be eligible; only the
+affinity-header lever is structurally dead given the current SDK.
+
+### DeepInfra's own docs (avenue 2)
+
+From `docs.deepinfra.com/chat/prompt-caching`:
+
+- Caching is automatic, no parameters required: a hit requires "the
+  beginning of your prompt [to match] a cached prefix from a recent request
+  **on the same model**." "Even a single character difference will
+  invalidate the cache."
+- `prompt_cache_key` is optional but recommended for multi-turn sessions —
+  "Requests with the same key and model share a KV cache" — with a
+  suggested session-scoped format like `"user123-chat456"`.
+- Default retention: "Cache entries expire after a period of inactivity"
+  (duration unspecified in the docs). A paid "Prompt cache retention" option
+  extends this to an explicit 5 minutes or 1 hour.
+- Caches are described as "per-model and per-account," not documented as
+  per-replica — DeepInfra's docs say nothing about load balancing or replica
+  routing either way, so the replica-pool theory remains an inference from
+  the observed pattern, not something confirmed in writing.
+- One open risk for the suggested fix below: pi sends `prompt_cache_retention:
+  "24h"` when it sends the field at all, but DeepInfra's docs only document
+  "5 minutes or 1 hour" as valid retention windows — whether DeepInfra
+  accepts, clamps, or rejects `"24h"` is unverified.
+
+### What's still open
+
+1. **Avenue 1, revised**: the actionable cheap experiment is no longer
+   "add `sendSessionAffinityHeaders`" (dead per above) but **set
+   `PI_CACHE_RETENTION=long` in `introspect-harness-server`'s environment
+   and re-record the same workflow.** This is a genuine live test of the
+   "short default TTL is why the gap between prompts causes a full/partial
+   miss" half of the hypothesis, independent of session affinity (since
+   `prompt_cache_key` will still be `undefined` for DeepInfra either way —
+   `options.sessionId` is never populated). Caveats: (a) this env var is
+   global to the whole server process and affects every openai-completions
+   model configured, not just Kimi; (b) requires a server restart to pick up
+   (`tsx watch` won't hot-reload env changes — see CLAUDE.md) — ask before
+   restarting, per this repo's "never kill dev servers" rule; (c) the "24h"
+   vs. "5m/1h" mismatch above means it may simply no-op against DeepInfra.
+2. **Testing the session-affinity/`prompt_cache_key` half of the hypothesis
+   properly** requires the SDK itself to thread a stable `sessionId` into
+   `GenerateOptions` for each model call — that's a gap in
+   `@earendil-works/pi-coding-agent`/`pi-ai` upstream, not something this
+   harness's extension code can supply (there's no hook in the documented
+   extension surface for injecting per-call model options). Worth filing
+   upstream if the `PI_CACHE_RETENTION=long` experiment above doesn't fully
+   close the gap on its own.
+3. **Avenue 4** (control run against an Anthropic model through the same
+   harness code path) is unchanged from the original doc and still the
+   cleanest way to make the "provider/model side, not harness SDK usage"
+   case airtight — not attempted this pass.
+
+## Live test results (2026-08-16, same day)
+
+`PI_CACHE_RETENTION=long` was added to `introspect-harness-server/.env` and
+a fresh 7-prompt session was recorded against the same
+`moonshotai/Kimi-K2.7-Code` (DeepInfra) model:
+`introspect-harness-server/data/recordings/17232253-18e0-4ba1-923c-66e68771edad/`.
+This is not the identical script as the original recording (different
+prompts, shorter overall — final context 33,547 tokens vs. 46,606), so
+absolute totals aren't directly comparable, but the *shape* of the
+reprocessing pattern is, and it changed dramatically:
+
+**System prompt is still byte-identical across all 7 `agent_start`s**
+(hash `ca74421af042`, confirming the fix didn't touch avenue 3 and drift is
+still not a factor — it's just a shorter prompt this time, 7,528 chars vs.
+18,158, presumably because the recorded workspace/skills state differed).
+
+**Intra-run cache stability — the oscillation is gone.** The original
+recording had `cacheRead` *decrease* from one call to the next, within the
+same `agent_start` burst, 9 times out of 51 consecutive-call pairs (the
+"bounces between two replicas mid-loop" pattern documented above). The new
+recording has **zero** such drops across all 32 intra-run pairs — `cacheRead`
+now climbs strictly monotonically within every run, all 7 of them.
+
+**Cross-`agent_start`-boundary retention improved substantially, with one
+outlier.** Retention = (cacheRead at first call of a run) / (cacheRead at
+last call of the previous run):
+
+| boundary | old retention | new retention |
+|----------|---------------:|---------------:|
+| run1→run2 | 0% | 93.8% |
+| run2→run3 | 96.6% | 76.3% |
+| run3→run4 | 85.3% | **26.6%** |
+| run4→run5 | 61.1% | 91.2% |
+| run5→run6 | 68.9% | 96.2% |
+| run6→run7 | 76.7% | 99.9% |
+| **mean** | **64.8%** | **80.7%** |
+
+5 of 6 boundaries are now ≥76%, three of them >90% (vs. one out of six
+before). One boundary (run3→run4) still took a large hit, comparable to the
+old pattern's worst cases — so the reset isn't eliminated, just far less
+frequent. Whether that one boundary corresponds to an unusually long gap, a
+different tool-call shape, or genuine replica-pool variance wasn't isolated
+this pass.
+
+**Bottom-line cost/efficiency metric** — total `usage.input` summed across
+all assistant calls, divided by the session's final context size (this is
+the "how many times over did we pay to reprocess the conversation"
+multiplier from the original doc's core observation):
+
+- Old (no retention setting): 128,181 / 46,606 = **2.75×**
+- New (`PI_CACHE_RETENTION=long`): 57,400 / 33,547 = **1.71×**
+
+A real, substantial drop, though still well above the theoretical 1.0×
+floor a fully-affine session would approach. The one bad boundary
+(run3→run4) alone accounts for most of the remaining gap: if that boundary
+had retained cache at the same rate as its neighbors (~24,672 instead of the
+6,560 it actually got), the total would have been roughly 39,300 tokens —
+a ratio of ~1.17×, i.e. most of the remaining overhead in this run is that
+single outlier, not a systemic residual.
+
+**Interpretation.** `prompt_cache_key` is still structurally inert for this
+model (confirmed above: `options.sessionId` is never populated anywhere in
+the compiled `@earendil-works/pi-coding-agent` SDK, so that half of
+DeepInfra's documented caching mechanism was never engaged in this test
+either). This result is attributable purely to `prompt_cache_retention:
+"24h"` — meaning DeepInfra evidently accepts and honors that value (the
+"24h vs. documented 5m/1h" risk flagged above did not manifest as a
+silent no-op), and the dominant cause of the original pattern was the
+**default cache TTL expiring during normal think-time gaps between
+prompts**, not an unfixable "no sticky routing across an arbitrarily large
+replica pool" ceiling. The residual (one bad boundary, ~80% average
+retention rather than ~100%) is consistent with a small, finite pool of
+replicas where retention now usually — but not always — outlasts the gap.
+
+**Recommendation**: keep `PI_CACHE_RETENTION=long` set for this model going
+forward — it's a clear net win and the downside risk (global to the server
+process, affects all openai-completions-compat models) didn't cause any
+observed regression in this test. The remaining ~20% average gap and the
+one large-outlier boundary are good candidates for avenue 1's other half
+(session-affinity / `prompt_cache_key`) *if* the SDK gains a way to thread
+`sessionId` into model calls — worth a note upstream — but are no longer
+blocking or urgent given the size of the improvement already achieved with
+a one-line config change.
