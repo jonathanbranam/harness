@@ -114,15 +114,23 @@ The browser deck canvas SHALL re-render to match the active deck's active slide 
 - **THEN** the canvas re-renders to show the newly active slide's objects
 
 ### Requirement: User selection interaction
-Clicking an object on the canvas SHALL replace the selection with that object. Shift-clicking an object SHALL toggle it in or out of the existing selection. Clicking empty canvas SHALL clear the selection.
+Clicking an object on the canvas SHALL replace the selection with that object. Shift-clicking an object SHALL toggle it in or out of the existing selection. Clicking anywhere on the canvas that is not an object — including the slide's own background, not just the margin around it — SHALL clear the selection. Clicks outside the canvas (e.g. in the chat panel or other UI chrome) SHALL NOT affect the selection.
 
 #### Scenario: Multi-select with shift-click
 - **WHEN** the user clicks one object and then shift-clicks a second object
 - **THEN** both objects end up selected
 
 #### Scenario: Clear selection
-- **WHEN** the user clicks an empty area of the canvas
+- **WHEN** the user clicks an empty area of the canvas outside the slide
 - **THEN** the selection becomes empty
+
+#### Scenario: Clicking the slide background clears selection
+- **WHEN** one or more objects are selected and the user clicks the slide's own background (inside the slide bounds, but not on any object)
+- **THEN** the selection becomes empty
+
+#### Scenario: Clicking outside the canvas does not affect selection
+- **WHEN** one or more objects are selected and the user clicks in the chat panel or other UI chrome outside the canvas
+- **THEN** the selection is unchanged
 
 ### Requirement: Selection resets when the active slide changes
 Because object ids are scoped to the slide they belong to, the current selection SHALL be cleared whenever the active deck or active slide changes.

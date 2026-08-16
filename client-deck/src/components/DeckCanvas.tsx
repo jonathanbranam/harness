@@ -536,9 +536,11 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
 
       <div
         className="relative flex-1 min-w-0 min-h-0 bg-gray-950 overflow-hidden"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onSelectionChange([])
-        }}
+        // Objects' own onClick stops propagation before it reaches here (see
+        // TextObjectBox's onClick below), so any click that bubbles this far —
+        // the margin around the slide or the slide's own background — is by
+        // definition not on an object, and should clear the selection.
+        onClick={() => onSelectionChange([])}
       >
         {/* paneRef's padding reserves a minimum margin on every side (excluded
             from ResizeObserver's contentRect, so it isn't counted as fittable
