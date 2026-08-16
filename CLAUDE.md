@@ -9,9 +9,15 @@ browser UI. The first harness is `deck-harness-server` + `client-deck`, a
 live presentation-editing chat UI — see `docs/talks/deck-harness/planning.md`
 for its design. The second harness is `introspect-harness-server` +
 `client-introspect`, a browser chat that drives an in-process `AgentSession`
-and visualizes the agent's context window. See `docs/arch/track-web-architecture.md`
-for the patterns this project deliberately reuses (monorepo shape, Hono,
-Vite/React/Tailwind, cookie-session auth, Caddy per-subdomain pattern, PM2).
+and visualizes the agent's context window. A third harness,
+`dungeon-harness-server` + `client-dungeon`, is scaffolded (auth, one
+long-lived `AgentSession` per login, a jailed agent workspace, a bare chat
+UI) but has no dungeon-tactics-specific tools yet — board tools and Gherkin
+scenario authoring against a live game-board visualization land in later
+phases; see `docs/dungeon-harness/proposal.md`. See
+`docs/arch/track-web-architecture.md` for the patterns this project
+deliberately reuses (monorepo shape, Hono, Vite/React/Tailwind,
+cookie-session auth, Caddy per-subdomain pattern, PM2).
 
 ## Commands
 
@@ -22,17 +28,22 @@ npm run dev:deck-server        # deck-harness-server (tsx watch)
 npm run dev:deck-client        # client-deck (Vite)
 npm run dev:introspect-server  # introspect-harness-server (tsx watch)
 npm run dev:introspect-client  # client-introspect (Vite)
+npm run dev:dungeon-server     # dungeon-harness-server (tsx watch)
+npm run dev:dungeon-client     # client-dungeon (Vite)
 
 # Build (clients only — servers ship via tsx, see below)
-npm run build                # builds both client-deck and client-introspect
+npm run build                # builds client-deck, client-introspect, and client-dungeon
 npm run build:client-deck
 npm run build:client-introspect
+npm run build:client-dungeon
 
 # Production (after `npm run build`)
 npm run start                # runs deck-harness-server, which also serves
                               # client-deck/dist as the SPA
 npm run start:introspect     # runs introspect-harness-server, which also serves
                               # client-introspect/dist as the SPA
+npm run start:dungeon        # runs dungeon-harness-server, which also serves
+                              # client-dungeon/dist as the SPA
 
 # Typecheck (no emit)
 npm run typecheck
@@ -43,6 +54,7 @@ npm test
 # Utilities
 npm run hash-password -w deck-harness-server -- 'your-password'
 npm run hash-password -w introspect-harness-server -- 'your-password'
+npm run hash-password -w dungeon-harness-server -- 'your-password'
 ```
 
 No lint is configured.
@@ -51,13 +63,14 @@ No lint is configured.
 
 The user keeps a server + client instance running at all times, each in its
 own terminal, for **every app in this workspace** — `deck-harness-server` +
-`client-deck`, `introspect-harness-server` + `client-introspect`, and any
-future harness server/client pair added to this monorepo (see "Keep in
-sync" below). Do **not** run `lsof -ti:<port> | xargs kill`, `pkill`, or
-otherwise stop these processes, and do not start a second copy of a server
-or client that's already running (check `lsof -i:<port>` first if unsure —
-deck-harness-server defaults to port 4100, client-deck to 5175; see each
-`vite.config.ts`/`.env` for other harnesses' ports). If a server needs to be
+`client-deck`, `introspect-harness-server` + `client-introspect`,
+`dungeon-harness-server` + `client-dungeon`, and any future harness
+server/client pair added to this monorepo (see "Keep in sync" below). Do
+**not** run `lsof -ti:<port> | xargs kill`, `pkill`, or otherwise stop these
+processes, and do not start a second copy of a server or client that's
+already running (check `lsof -i:<port>` first if unsure — deck-harness-server
+defaults to port 4100, client-deck to 5175; see each `vite.config.ts`/`.env`
+for other harnesses' ports). If a server needs to be
 restarted (e.g. to pick up a changed `.env` value that `tsx watch` won't
 hot-reload), **ask the user to restart it** rather than doing it yourself.
 
@@ -186,12 +199,13 @@ after the fact by inspecting the relevant `.jsonl` file.
 - Unlike track-web, there's no push-to-`main` webhook. `server-deploy.sh` is
   meant to be run by hand over SSH on the deploy box.
 
-> **Keep in sync:** when adding a second harness (its own
+> **Keep in sync:** when adding a new harness (its own
 > `<name>-harness-server/` + `client-<name>/` pair per pi-harness.md), update
 > together: root `package.json` (workspaces + `dev:*`/`build:*` scripts),
 > `vitest.config.mts` (`include` glob), `dev-local.sh`, `ecosystem.config.cjs`
 > (new PM2 app entry), `Caddyfile`/`Caddyfile.local` (new block), and this
-> file.
+> file. `dungeon-harness-server` + `client-dungeon` (ports 4300/5177) is the
+> most recent harness added this way.
 
 ## Model auth
 

@@ -21,3 +21,7 @@ deck.local {
 introspect.local {
 	reverse_proxy localhost:4200
 }
+
+dungeon.local {
+	reverse_proxy localhost:4300
+}

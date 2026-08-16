@@ -1,23 +1,65 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  `harness` hosts web-backed harnesses that run the `pi` coding agent
+  (`@earendil-works/pi-coding-agent`) in-process behind a browser UI — a
+  Hono server owns a live `AgentSession` per login and streams its events
+  over a WebSocket to a Vite/React client. It's a sibling project to
+  track-web, deliberately not sharing its process or deploy pipeline; see
+  docs/arch/pi-harness.md for why and CLAUDE.md for day-to-day commands and
+  architecture notes.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Tech stack: TypeScript (ESM throughout — servers run via `tsx`, not `tsc`,
+  because the pi SDK is ESM-only), Hono, Vite + React 19 + Tailwind 4,
+  WebSocket for event streaming, Vitest, npm workspaces monorepo.
+
+  Repo shape: each harness is an independent `<name>-harness-server` +
+  `client-<name>` workspace pair, each with its own port, `.env`, and PM2
+  entry — not a shared backend. Two harnesses exist today:
+  deck-harness-server/client-deck (live presentation editing) and
+  introspect-harness-server/client-introspect (session introspection —
+  context window, tool trace, recording/replay). A third,
+  dungeon-harness, is in design (see docs/dungeon-harness/proposal.md) —
+  nothing built yet. No shared `packages/` tier exists yet by design; it
+  gets built once real duplication across harness pairs is visible.
+
+  Each harness server sandboxes the agent's `bash`/`write`/`edit` tools to
+  its own workspace directory via a per-harness `permission-gate.ts`
+  extension (path jail, static bash blocklist); introspect's also jails
+  read-only tools since it has no interactive approval UI to fall back on.
+  Registering a new pi tool via `pi.registerTool` requires a matching
+  addition to that harness's `session-store.ts` tool allowlist, or the tool
+  silently isn't exposed to the agent — see the `tasks` rule below.
+
+  OpenSpec capability naming: deck-harness capabilities are flat
+  (`deck-canvas-display`, `deck-persistence`, ...); introspect-harness
+  capabilities are nested under `introspect/` (`introspect/replay`,
+  `introspect/recording`, ...). Follow whichever convention matches the
+  harness a change touches.
+
+rules:
+  tasks:
+    - >-
+      When a task registers a new pi tool via `pi.registerTool` in a
+      harness's extension file (e.g. `*-harness-server/src/pi-extensions/`),
+      add a follow-up task to also add that tool's name to the matching
+      `session-store.ts`'s tool allowlist (`CUSTOM_TOOL_NAMES` in
+      deck-harness-server, `ALLOWED_TOOLS` in introspect-harness-server) —
+      the `tools` array passed to `createAgentSession` is what actually
+      exposes a registered tool to pi, separately from registration itself,
+      and a tool left off that array silently isn't available to the agent
+      even though it compiles and the extension "registers" it without
+      error.
+    - >-
+      When a task changes the inline dark-mode-init `<script>` in a
+      client's `index.html` (the pre-React-mount script that reads
+      `localStorage`'s `<harness>-harness-theme` key and toggles the `dark`
+      class before first paint, to avoid a flash of the wrong theme), add a
+      follow-up task to mirror the same change across every other
+      `client-*/index.html` — this script is intentionally duplicated
+      per-client (not shared code, since it must run before any JS module
+      loads), so a fix applied to only one client silently leaves the
+      others with the old behavior.
 
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.

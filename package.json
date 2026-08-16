@@ -6,21 +6,28 @@
     "deck-harness-server",
     "client-deck",
     "introspect-harness-server",
-    "client-introspect"
+    "client-introspect",
+    "dungeon-harness-server",
+    "client-dungeon"
   ],
   "scripts": {
     "dev:deck-server": "npm run dev -w deck-harness-server",
     "dev:deck-client": "npm run dev -w client-deck",
     "dev:introspect-server": "npm run dev -w introspect-harness-server",
     "dev:introspect-client": "npm run dev -w client-introspect",
+    "dev:dungeon-server": "npm run dev -w dungeon-harness-server",
+    "dev:dungeon-client": "npm run dev -w client-dungeon",
     "build:client-deck": "npm run build -w client-deck",
     "build:client-introspect": "npm run build -w client-introspect",
-    "build": "npm run build:client-deck && npm run build:client-introspect",
+    "build:client-dungeon": "npm run build -w client-dungeon",
+    "build": "npm run build:client-deck && npm run build:client-introspect && npm run build:client-dungeon",
     "start": "npm run start -w deck-harness-server",
     "start:introspect": "npm run start -w introspect-harness-server",
-    "typecheck": "npm run typecheck -w deck-harness-server && npm run typecheck -w introspect-harness-server && tsc -b client-deck --noEmit && tsc -b client-introspect --noEmit",
+    "start:dungeon": "npm run start -w dungeon-harness-server",
+    "typecheck": "npm run typecheck -w deck-harness-server && npm run typecheck -w introspect-harness-server && npm run typecheck -w dungeon-harness-server && tsc -b client-deck --noEmit && tsc -b client-introspect --noEmit && tsc -b client-dungeon --noEmit",
     "hash-password": "npm run hash-password -w deck-harness-server",
     "hash-password:introspect": "npm run hash-password -w introspect-harness-server",
+    "hash-password:dungeon": "npm run hash-password -w dungeon-harness-server",
     "test": "vitest run"
   },
   "devDependencies": {

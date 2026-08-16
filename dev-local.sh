@@ -19,10 +19,18 @@ tmux send-keys "$DIR/scripts/set-pane-title.sh client-deck && npm run dev:deck-c
 tmux split-window -v -c "$DIR"
 tmux send-keys "$DIR/scripts/set-pane-title.sh client-introspect && npm run dev:introspect-client" Enter
 
+# client-dungeon frontend, alongside client-introspect
+tmux split-window -v -c "$DIR"
+tmux send-keys "$DIR/scripts/set-pane-title.sh client-dungeon && npm run dev:dungeon-client" Enter
+
 # Return to original (top-left) pane, then split bottom-left for introspect server
 tmux select-pane -t "$ORIGIN"
 tmux split-window -v -c "$DIR"
 tmux send-keys "$DIR/scripts/set-pane-title.sh introspect-harness-server && npm run dev:introspect-server" Enter
+
+# dungeon-harness-server backend, alongside introspect-harness-server
+tmux split-window -v -c "$DIR"
+tmux send-keys "$DIR/scripts/set-pane-title.sh dungeon-harness-server && npm run dev:dungeon-server" Enter
 
 # Uncomment once Caddyfile.local's hostnames are set up for LAN testing:
 # tmux split-window -v -c "$DIR"

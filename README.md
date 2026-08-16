@@ -55,6 +55,11 @@ meant to run **without exposure to the public internet** — their
 anything else this pattern has been used for. See pi-harness.md's security
 section.
 
+A third harness, **dungeon-harness** (a chat-driven tool for authoring
+Gherkin scenario specs against a live game-board visualization), is in
+design — nothing built yet. See
+[`docs/dungeon-harness/proposal.md`](docs/dungeon-harness/proposal.md).
+
 ## Quickstart
 
 ```bash
@@ -65,12 +70,20 @@ cp deck-harness-server/.env.example deck-harness-server/.env
 npm run hash-password -w deck-harness-server -- 'your-password'
 # paste the printed hash into deck-harness-server/.env as HARNESS_PASSWORD_HASH
 
+cp introspect-harness-server/.env.example introspect-harness-server/.env
+npm run hash-password:introspect -- 'your-password'
+# paste the printed hash into introspect-harness-server/.env as
+# HARNESS_PASSWORD_HASH, and set SESSION_SECRET to any long random string
+# (e.g. `openssl rand -hex 32`)
+
 # Model auth is resolved by pi's own ModelRuntime (~/.pi/agent/auth.json,
 # `pi login`, or a custom ~/.pi/agent/models.json) — see docs/pi-setup.md.
 
 # Run a harness's server + client in separate terminals...
-npm run dev:deck-server   # deck-harness-server
-npm run dev:deck-client   # client-deck
+npm run dev:deck-server         # deck-harness-server
+npm run dev:deck-client         # client-deck
+npm run dev:introspect-server   # introspect-harness-server
+npm run dev:introspect-client   # client-introspect
 
 # ...or use dev-local.sh inside a tmux session to split panes for all of them
 ./dev-local.sh

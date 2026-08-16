@@ -15,3 +15,7 @@ deck-local.test:80 {
 introspect-local.test:80 {
 	reverse_proxy localhost:5176
 }
+
+dungeon-local.test:80 {
+	reverse_proxy localhost:5177
+}

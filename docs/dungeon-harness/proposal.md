@@ -114,13 +114,22 @@ Why this resolves round-trip fidelity: the harness never reads-modifies-
 writes the canonical tree at all (read-only, above) — its writes only ever
 land in files it fully owns, in its own workspace. Nobody hand-edits those
 before the engineer's skill picks them up, so there's no "don't clobber a
-human's manual formatting" hazard on the harness's write path. The one
-remaining edge case — the engineer tweaking a scenario's wording *during*
-review, inside the change's `features/` delta, wanting the harness to
-incorporate that edit into an ongoing design session — would need the
-harness's read-only path to also cover the active change's delta folder,
-not just canonical. Worth deciding if that round-trip matters for v1 or can
-wait (see open questions).
+human's manual formatting" hazard on the harness's write path.
+
+This is now settled by the session lifecycle, not just "not needed for
+v1": a design session ends with an explicit **sign-off** (the designer is
+done, the handoff artifacts are written), and the *next* session for that
+unit only starts after the change has landed and archived — so there is no
+window where a live design session and an in-review OpenSpec change both
+exist for the same unit at once. The harness's read-only path never needs
+to reach into an in-progress change's delta at all; the next session simply
+loads whatever is canonical by then. See "Baseline and changeset" below for
+the lifecycle in full, and note the corollary: since the designer's
+sign-off is meant to be the finished artifact, **track-web-side edits to a
+landed scenario should be rare** — occasional wording/technical fixes
+during implementation, not routine revision. If track-web starts editing
+scenarios often, that's a signal the designer/engineer split isn't working
+as intended and the loop needs a look.
 
 ## Baseline and changeset: the harness computes the diff, not track-web
 
@@ -174,16 +183,66 @@ can ask to see it at any point — "show me what's changed so far") and part
 of the **handoff artifact** alongside the full `.feature` file and the
 implementation notes.
 
+**Session lifecycle is strictly sequential, gated by sign-off.** One unit
+has at most one live thread of work at a time:
+
+1. Session opens → `dungeon_load_baseline` loads that unit's current
+   canonical scenarios.
+2. Designer works with the harness; `dungeon_get_changeset` is available
+   throughout for "what have I changed so far" review.
+3. Designer **signs off** — a deliberate close, not an autosave point — at
+   which point `dungeon_write_feature`/`dungeon_write_changeset`/
+   `dungeon_write_implementation_notes` produce the final handoff set.
+4. Engineer's skill picks up the signed-off artifacts, scaffolds/updates the
+   OpenSpec change, implements, archives — landing the change and updating
+   canonical.
+5. Only *after* that lands does a **new** session for that same unit open,
+   loading the newly-updated canonical as its baseline.
+
+No two sessions for the same unit overlap, and nothing the harness produces
+mid-session is meant to be read by anyone else until sign-off. This is what
+makes the "read-only, never touches an in-progress change" simplification
+above safe rather than merely convenient.
+
+## Archetype scope: start with today's existing units, on purpose
+
+Decided: the first round of scenario work targets the **existing,
+already-implemented** units — `melee`/`ranger`/`rogue`/`magic-user` and
+their NPC counterparts, in today's simpler `UnitDef` shape (flat `maxHp`/
+`movement.range`/`attack` — direction targeting, single/line/plus
+propagation) — not the not-yet-built `fighter`/`rogue`/`ranger`/`mage`
+archetype/turn-structure system from `unit-definition.md`.
+
+This is knowingly **partially throwaway**: once the archetype system lands,
+these units' data shape changes (`archetype`/`params`/`actions[]` instead
+of a flat attack block), so their scenarios and step definitions will likely
+need rewriting rather than just extending. Worth it anyway, because this
+round is what actually proves the pipeline end-to-end while the domain is
+as simple as it will ever be: harness board tools → Gherkin output →
+engineer skill → OpenSpec change → `@amiceli/vitest-cucumber` step library
+→ step catalog → next session reading that catalog back. Finding out the
+loop has a rough edge is far cheaper against 4 simple existing units than
+against the first archetype. It also seeds the step library with real,
+working step definitions before the harder design work starts, rather than
+standing up the whole pipeline and the archetype model at the same time.
+
+Practical corollary: today's simpler targeting/propagation model needs a
+much smaller board-preview interpreter than the full composable
+`movement.md`/`attack.md` model — direction-based targeting, single/line/
+plus footprints, plain range-based movement. Build only that much of the
+local spec-interpreter for round one (see next section); grow it toward the
+fuller model once scenario work moves onto the real archetype system.
+
 ## The game board: reimplemented locally, not imported
 
 Unchanged from earlier drafts: the board the designer interacts with
 (place units, preview a movement path, preview an attack's footprint) needs
-its own math, implemented directly in dungeon-harness against the
-*documented* model (`movement.md`/`attack.md`), not imported from
-track-web. The archetype system these scenarios describe (`fighter`/
-`rogue`/`ranger`/`mage`) isn't implemented in track-web's current engine
-yet anyway, so there's no production-accurate engine to import even if the
-boundary allowed it.
+its own math, implemented directly in dungeon-harness — scoped to whatever
+subset of the `movement.md`/`attack.md` model the current round of
+scenarios actually needs (see "Archetype scope" above) — not imported from
+track-web. Once scenario work moves onto the not-yet-implemented archetype
+system, there's no production-accurate engine to import from track-web even
+if the boundary allowed it, so this stays true either way.
 
 ## Sketch: tool surface
 
@@ -228,14 +287,14 @@ boundary allowed it.
    means a second CLI/runner alongside Vitest for comparatively little
    gain, since the catalog approach below sidesteps needing a step
    registry at all.)
-2. **Placement**: following track-web's existing colocate-tests-with-source
-   convention (`unitDefs.test.ts` sits beside `unitDefs.ts`), the natural
-   home is a `features/` directory under
-   `client-games/src/games/dungeon-tactics-solo/` — that's where the pure
+2. **Placement, confirmed**: `client-games/src/games/dungeon-tactics-solo/features/`
+   — following track-web's existing colocate-tests-with-source convention
+   (`unitDefs.test.ts` sits beside `unitDefs.ts`), this is where the pure
    engine under test (`pc.ts`/`npc.ts`/`turn.ts`) actually lives, not the
-   server-side schema mirror in `src/games/dungeon-tactics/`. Confirm this
-   as part of scoping that change; it's a recommendation, not a decision
-   made here.
+   server-side schema mirror in `src/games/dungeon-tactics/`. This is the
+   path `dungeon_load_baseline`/`dungeon_read_step_catalog` read from and
+   what the engineer's skill's OpenSpec-change `features/` delta ultimately
+   merges into on archive.
 3. **Step catalog generator.** Simplest option, and the one to default to
    per "whatever's easiest to produce": derive it **mechanically from the
    canonical `.feature` files themselves** — walk the corpus, extract every
@@ -265,26 +324,20 @@ can be finalized — worth sequencing first or in lockstep.
 
 ## Open questions
 
-- **Canonical `.feature` directory** — recommendation given above
-  (`client-games/src/games/dungeon-tactics-solo/features/`); confirm when
-  scoping the track-web-side change.
-- **Mid-review round-trip: not needed for v1.** Read access to an
-  *in-progress* (not yet archived) change's `features/` delta, so an
-  engineer's review-time wording tweak feeds back into an ongoing design
-  session, is out of scope for the first cut — "re-open the finished draft
-  in the harness's own workspace" is good enough to start.
+Down to one real open question — everything else raised in earlier drafts
+(canonical directory, step-catalog format, mid-review round-trip, archetype
+scope for round one, scenario-id tagging as the matching strategy) is now
+decided; see the relevant sections above.
+
 - **Scenario-id tag adoption for pre-existing scenarios.** The stable-key
-  tagging convention above only works cleanly once every canonical scenario
-  has one. Whatever scenarios exist by the time this harness starts
-  operating need the tag added (by hand or by a small one-off script) before
-  baseline-loading + diffing can rely on it; until then, title-matching is
-  the fallback and carries the renaming risk described above.
-- **Archetype scope for early scenarios.** `unit-definition.md`'s
-  archetypes aren't implemented yet; confirm whether the first scenarios
-  target that not-yet-built model directly, or start narrower against
-  today's simpler `UnitDef` shape to prove the designer↔engineer↔
-  Gherkin-runner loop end-to-end first, given the step catalog is empty on
-  round one either way (nothing canonical exists yet to extract from).
+  tagging convention only works cleanly once every canonical scenario has
+  one. Since round one is scoped to today's 4 existing units (see
+  "Archetype scope" above), this is a small, bounded problem — those
+  units' first-ever scenarios are being authored fresh anyway, so the tag
+  can just be assigned at creation with no backfill needed. Only matters if
+  scenario work ever needs to start from *pre-existing* `.feature` files
+  that predate this harness — not expected to happen given round one starts
+  the corpus from zero.
 
 ---
 
@@ -308,9 +361,17 @@ This doc has pivoted three times as the actual boundary got clearer:
    reviewable OpenSpec change delta, merged to canonical only on archive.
    dungeon-harness ends up read-only toward track-web and fully
    self-contained on the write side — no worktree needed at all.
-5. **This draft** adds session baselines and harness-owned changeset
+5. **Fifth draft** added session baselines and harness-owned changeset
    computation: a session loads the canonical baseline up front, and the
    harness — not track-web — diffs its working state against that baseline
    (structurally, keyed by a stable per-scenario tag rather than title) so
    both the designer and the engineer review *what changed*, not the whole
    file.
+6. **This draft** closes out the remaining open questions: the `.feature`
+   directory and BDD tool are confirmed, the session lifecycle is now
+   explicitly sequential and sign-off-gated (which is what actually makes
+   "harness never reads an in-progress change" safe, not just a v1
+   shortcut), and round one is scoped to today's existing (non-archetype)
+   units on purpose — a bounded, partially-throwaway pass that proves the
+   whole pipeline and seeds the step library before the harder archetype
+   design work starts.

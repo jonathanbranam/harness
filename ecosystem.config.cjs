@@ -31,5 +31,17 @@ module.exports = {
       error_file: '../logs/introspect-harness-server-error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
     },
+    {
+      name: 'dungeon-harness-server',
+      cwd: './dungeon-harness-server',
+      script: 'npm',
+      args: 'start',
+      env: { NODE_ENV: 'production' },
+      autorestart: true,
+      watch: false,
+      out_file: '../logs/dungeon-harness-server-out.log',
+      error_file: '../logs/dungeon-harness-server-error.log',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
+    },
   ],
 }
