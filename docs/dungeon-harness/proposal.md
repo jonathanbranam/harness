@@ -13,189 +13,304 @@ Two-role workflow:
 
 1. **Designer** (this harness, chat-driven, board-assisted) writes and
    edits `.feature` files.
-2. **Engineer** (you, using OpenSpec — possibly a purpose-built skill) takes
-   `.feature` files and uses them as OpenSpec change input *and* as the
-   acceptance tests that verify the implementation, via the new track-web
-   capability to run Gherkin specs as tests without Phaser.
+2. **Engineer** (you, using OpenSpec via a new track-web-side skill) turns
+   finished `.feature` files into an OpenSpec change, implements it, and
+   the same files become the acceptance tests that verify it — via the new
+   track-web capability to run Gherkin specs without Phaser.
 
 **Gherkin `.feature` files are the single canonical artifact, full stop.**
 Any structured/internal representation dungeon-harness keeps for its own
-purposes (driving the board-preview tools, say) is a **derived working
-cache, never authoritative, never the hand-off artifact**. Three things
-follow directly from that:
+purposes (driving the board-preview tools) is a **derived working cache,
+never authoritative, never handed off as its own format**.
 
-- The harness must be able to **read and re-parse `.feature` files it did
-  not write** — the engineer may edit them directly in track-web, and the
-  designer may edit them by hand too. Whenever the harness opens a scenario
-  session, it re-derives its internal state from whatever the current
-  `.feature` file actually says, not from a stale cache. Gherkin wins,
-  always.
-- The harness's structured form **never gets exported or handed off** —
-  dropped the earlier draft's "structured form for authoring, Gherkin for
-  export" split. There's exactly one artifact.
-- Round-trip fidelity (parse `.feature` → internal model → re-render
-  `.feature`) needs to be good enough that re-writing a file the harness
-  didn't originally author doesn't produce spurious diffs on content that
-  didn't change.
+track-web's **canonical** `.feature` tree specifically means *only the
+already-implemented, already-passing* scenarios — the OpenSpec parallel is
+exact: `openspec/specs/` is only ever updated by archiving a completed
+change, never edited freely mid-flight. See "Delta vs. canonical" below for
+why that distinction is now load-bearing for this design, not just a nice
+analogy.
 
-## What crosses the boundary, in both directions
+Whenever the harness opens a scenario it didn't just author itself, it
+re-derives its internal state from whatever the current `.feature` text
+actually says — Gherkin wins, always, over any stale cache.
 
-Confirmed with you that the interaction is still limited to files, not
-code — but it's now explicitly bidirectional and slightly richer than "just
-the `.feature` files":
+## What crosses the boundary
 
-| Direction | Artifact | Purpose |
-|---|---|---|
-| track-web → harness | **Step catalog** (implemented/available Gherkin step patterns) | Lets the harness draft new scenarios that reuse existing steps instead of inventing near-duplicates, and clearly flags which steps in a draft are *new* (need a step-definition implementation) vs. already supported. |
-| harness → track-web | **`.feature` files** | The canonical spec + acceptance-test artifact. |
-| harness → track-web | **Implementation notes** (advisory) | Suggestions for combining or refactoring steps to reduce redundancy across scenarios — informs the engineer during implementation, not part of the spec itself. |
-| track-web → harness | **`.feature` files** (read) | Picks up edits made outside the harness — see "canonical artifact" above. |
+Settled into something narrower than earlier drafts of this doc assumed,
+once the delta/canonical split (below) is in place:
 
-The step catalog is a new deliverable of the track-web-side Gherkin-runner
-work (see "Track-web side" below), not something dungeon-harness invents —
-it needs to be an accurate reflection of what's actually implemented.
-**Bootstrapping note:** the catalog starts empty. The first round of
-scenarios necessarily introduces all-new steps; the catalog only starts
-paying for itself once there's an existing step vocabulary to draft against.
+| Direction | Artifact | Access | Purpose |
+|---|---|---|---|
+| track-web → harness | Canonical `.feature` corpus (implemented + passing only) | **read-only** | Reconciliation — pick up specs edited outside the harness, and provide context for revising an existing unit's scenarios. |
+| track-web → harness | Step catalog | **read-only** | Draft new scenarios that reuse existing step text instead of inventing near-duplicates; flag which steps in a draft are genuinely new. |
+| harness → engineer | Finished `.feature` files | harness's own workspace, **not written into track-web at all** | Picked up by the engineer's track-web-side skill, which is what actually creates the OpenSpec change. |
+| harness → engineer | **Changeset** (added/modified/removed scenarios vs. the loaded baseline) | harness's own workspace | The actual review artifact — see "Baseline and changeset" below. Lets both the designer and the engineer review *what changed*, not the whole file. |
+| harness → engineer | Implementation notes (advisory) | harness's own workspace | Step-consolidation/refactor suggestions, read by the engineer during implementation. Never fed back into `dungeon_read_feature` — advisory only, not spec. |
 
-## Repo mapping: git worktree, narrowly jailed
+The write side dropped out of track-web entirely (see "Repo mapping"): the
+handoff is the engineer *pulling* from the harness's workspace via their own
+skill, not the harness pushing into track-web's tree. That matches what you
+described — the new skill is "used by the engineer within Claude Code to
+create an OpenSpec change spec based on any updates to the scenario spec,"
+which puts the engineer in the loop on every handoff by construction.
 
-This still argues for a worktree — not for the reason the first draft of
-this doc gave (engine-code reuse, code write access), which is gone now,
-but because real bidirectional file traffic between two apps benefits from
-being a reviewable unit: the designer's output lands as commits on its own
-branch, you review the diff as a batch (consistent with how you already
-work — OpenSpec's propose → review → archive shape), then merge before
-starting implementation.
+## Repo mapping: no worktree needed — read-only beats write-jailed
 
-```bash
-cd /Volumes/Data/work/pi/track-web
-git worktree add ../track-web-dungeon-harness -b dungeon-harness/unit-scenarios dev
-```
+Earlier drafts of this doc went back and forth on a `git worktree` for
+write access into track-web. That whole question dissolves once writes
+don't cross into track-web at all:
 
-Jail `write`/`edit` **only** to the specific paths that hold the exchanged
-artifacts — not `client-games/`, not `src/games/`, not anything else in
-track-web:
+- **Write side**: `dungeon-harness-server` gets a fully **self-contained**
+  workspace, same shape as deck-harness's (`data/workspace/`, gitignored,
+  seeded from a template, permission-gate path jail). `.feature` drafts and
+  implementation notes live there. Nothing to jail into track-web because
+  nothing is written there.
+- **Read side**: the canonical `.feature` corpus and the step catalog only
+  change when an OpenSpec change archives (infrequent, and always a
+  deliberate, reviewed event) — so there's no collision/corruption risk to
+  guard against the way there is for a live write path. A **read-only**
+  path straight into your actual track-web working checkout is enough; no
+  worktree, no branch, no second checkout. (If a genuinely read-only path
+  ever turns out to need isolation too — e.g. you want the harness reading
+  a specific tag/commit rather than your live working tree — a read-only
+  worktree is a one-line upgrade later. Not needed to start.)
 
-- The `.feature` files directory (exact path TBD — see open questions;
-  needs to match wherever the new Gherkin test runner expects to find them).
-- An implementation-notes file/directory alongside it.
-- Read-only access to wherever the step catalog gets generated.
+This is a real simplification from the previous draft's narrowly-jailed
+write worktree, not just a smaller version of it — the trust boundary for
+read-only access is categorically lower-stakes than any write access, so it
+doesn't need the same isolation machinery.
 
-This is a much narrower jail than a code-writing agent would need, and the
-content being exchanged is plain text (Gherkin, Markdown/JSON), not
-TypeScript — a meaningfully smaller trust boundary than the original
-cross-repo-code-write sketch this doc started with.
+## Delta vs. canonical: borrowing OpenSpec's change/spec split
 
-**Lighter alternative worth naming:** since nothing here touches code
-anymore, pointing the jail directly at the features directory inside your
-**actual track-web working checkout** (no worktree, no branch) is a
-legitimate simplification — you'd see designer edits land in your working
-tree in real time instead of reviewing a branch, at the cost of losing the
-clean "review the whole batch, then merge" step. Worktree is the
-recommendation because it matches your existing propose-then-implement
-workflow, but this is a low-stakes call either way given the jail is this
-narrow.
+This is what actually resolves the round-trip-fidelity worry, and it's the
+direct answer to your OpenSpec-delta question:
+
+OpenSpec already separates **delta** (`openspec/changes/<id>/specs/<cap>/
+spec.md`, ADDED/MODIFIED/REMOVED Requirements — what a change *proposes*)
+from **canonical** (`openspec/specs/<cap>/spec.md` — what's actually
+implemented), and only `archive-change`/`sync-specs` moves delta into
+canonical. Apply the same split to Gherkin:
+
+- **Canonical**: `.feature` files under wherever track-web's Gherkin runner
+  scans from (see "Track-web side" below) — implemented, passing, stable.
+  This is what the harness reads.
+- **Delta**: when the engineer's skill turns a batch of the designer's
+  finished `.feature` files into an OpenSpec change, they land as that
+  change's own artifact — e.g. `openspec/changes/<change-id>/features/
+  *.feature` — sitting alongside the change's normal `specs/<capability>/
+  spec.md` prose-requirement delta (ADDED Requirements, `#### Scenario:`
+  blocks in prose). One change now carries both the human-readable
+  requirement delta *and* the literal, executable scenario delta together,
+  reviewed and implemented as one unit — same pattern the deck-harness
+  scaffold change already used (`specs/harness-auth/spec.md` etc., see
+  `openspec/changes/archive/2026-08-15-deck-harness-scaffold/specs/`).
+- **Merge point**: archiving the change moves `features/*.feature` from
+  the change directory into the canonical tree (mirroring `sync-specs`) and
+  triggers a step-catalog regeneration. This is the only point the
+  canonical tree changes, and it's already a deliberate, reviewed action in
+  your existing workflow.
+
+Why this resolves round-trip fidelity: the harness never reads-modifies-
+writes the canonical tree at all (read-only, above) — its writes only ever
+land in files it fully owns, in its own workspace. Nobody hand-edits those
+before the engineer's skill picks them up, so there's no "don't clobber a
+human's manual formatting" hazard on the harness's write path. The one
+remaining edge case — the engineer tweaking a scenario's wording *during*
+review, inside the change's `features/` delta, wanting the harness to
+incorporate that edit into an ongoing design session — would need the
+harness's read-only path to also cover the active change's delta folder,
+not just canonical. Worth deciding if that round-trip matters for v1 or can
+wait (see open questions).
+
+## Baseline and changeset: the harness computes the diff, not track-web
+
+You raised a real gap: a session shouldn't start from a blank page for a
+unit that already has canonical scenarios, and its output shouldn't be "here
+is the whole rewritten file, good luck spotting what changed." Two changes
+follow:
+
+**Sessions start from the canonical baseline.** Opening a design session for
+an existing unit loads that unit's current canonical `.feature` file(s) (via
+the read-only track-web path) as a fixed baseline, held separately from the
+harness's working copy that the designer actually edits. A brand-new unit
+starts from an empty baseline — everything in the session is additions.
+
+**The harness owns the diff, not track-web.** You floated the alternative —
+track-web computing a diff between old and new spec files after the fact —
+and I agree the harness owning it is the better call, for the reason you
+gave (the designer reviews *changes*, not the whole scenario, to check their
+intent landed) plus one more: the harness already holds both the baseline
+and the live working state as structured, parsed objects in memory during
+the session. Diffing there is cheap and precise. Reconstructing the same
+diff on the track-web side afterward means re-parsing two flat `.feature`
+files and guessing at scenario identity from scratch — strictly harder, for
+no benefit.
+
+**Diff at the structured level, not raw text.** Compute the changeset by
+comparing parsed scenario/step objects, not by text-diffing rendered
+Gherkin — otherwise harmless re-rendering (whitespace, comment placement)
+shows up as false "modified" noise. Classify each scenario as
+**added** / **modified** / **removed** relative to baseline, and for a
+modified scenario, which of its steps actually changed — mirroring
+OpenSpec's own ADDED/MODIFIED/REMOVED Requirement delta vocabulary closely
+enough that the engineer's skill can lean on it directly when writing the
+OpenSpec change's requirement delta, rather than re-deriving intent from the
+full file.
+
+**Matching needs a stable key, not scenario titles.** A designer renaming a
+scenario's title while also tweaking its steps would otherwise diff as
+"removed + added" instead of "modified," losing exactly the review value
+this is for. Give each `Scenario` a stable identifier — a Gherkin tag (e.g.
+`@scenario-id:ranger-retreat-after-shot`) written once when the scenario is
+first created and left untouched by later title/wording edits — and match
+baseline-to-working scenarios by that tag, falling back to title-matching
+only for scenarios that predate this convention. Tags are inert to
+`@amiceli/vitest-cucumber` execution and to the mechanical step-catalog
+extraction (which only reads Given/When/Then lines), so this doesn't need
+any track-web-side change to adopt.
+
+The changeset becomes both a **mid-session review surface** (the designer
+can ask to see it at any point — "show me what's changed so far") and part
+of the **handoff artifact** alongside the full `.feature` file and the
+implementation notes.
 
 ## The game board: reimplemented locally, not imported
 
-Unchanged from the previous draft's reasoning: the board the designer
-interacts with (place units, preview a movement path, preview an attack's
-footprint) needs its own math, implemented directly in dungeon-harness
-against the *documented* model (`movement.md`/`attack.md`), not imported
-from track-web. This was already true once code access was off the table,
-and stays true now that the boundary is "files only" — plus the archetype
-system these scenarios describe (`fighter`/`rogue`/`ranger`/`mage`) isn't
-implemented in track-web's current engine yet anyway, so there's no
-production-accurate engine to import even if the boundary allowed it.
+Unchanged from earlier drafts: the board the designer interacts with
+(place units, preview a movement path, preview an attack's footprint) needs
+its own math, implemented directly in dungeon-harness against the
+*documented* model (`movement.md`/`attack.md`), not imported from
+track-web. The archetype system these scenarios describe (`fighter`/
+`rogue`/`ranger`/`mage`) isn't implemented in track-web's current engine
+yet anyway, so there's no production-accurate engine to import even if the
+boundary allowed it.
 
 ## Sketch: tool surface
 
-- `dungeon_get_board_state` — the scenario-in-progress's board, units, and
-  the last previewed step's outcome.
-- `dungeon_preview_movement` / `dungeon_preview_attack` — run the local
-  spec-interpreter against the current board and return the resulting
-  path/footprint, to sanity-check a step before writing it into Gherkin.
-  Read-only, operates on the internal working cache only.
-- `dungeon_place_unit` / `dungeon_set_terrain` — compose the board state
-  that backs a scenario's Background/Given steps visually.
-- `dungeon_read_feature` — parse a `.feature` file (from the jailed path)
-  into the internal working model. Called whenever a session opens an
-  existing scenario, so edits made outside the harness are picked up before
-  any new writing happens.
-- `dungeon_read_step_catalog` — read track-web's current list of
-  implemented/available steps, to inform drafting.
-- `dungeon_write_feature` — render the internal model to Gherkin and write
-  it to the jailed `.feature` path. This is the only canonical write.
-- `dungeon_write_implementation_notes` — write/append advisory suggestions
-  (step consolidation, redundancy, refactor ideas) to the notes artifact.
-  Explicitly non-canonical — never read back by `dungeon_read_feature`.
+- `dungeon_get_board_state` / `dungeon_preview_movement` /
+  `dungeon_preview_attack` / `dungeon_place_unit` / `dungeon_set_terrain` —
+  unchanged from earlier drafts; compose and sanity-check the board driving
+  a scenario's Given steps, against the local spec-interpreter.
+- `dungeon_load_baseline` — load a unit's current canonical `.feature`
+  file(s) from the read-only track-web path as the session's fixed
+  baseline (empty baseline for a new unit). Called once per session, before
+  editing starts.
+- `dungeon_read_feature` — parse a `.feature` file into the internal
+  working model. Reads from the harness's own workspace (resuming a draft
+  in progress) — not from track-web directly; that's what
+  `dungeon_load_baseline` is for.
+- `dungeon_read_step_catalog` — read the current step catalog from the
+  read-only track-web path, to inform drafting.
+- `dungeon_get_changeset` — diff the working model against the loaded
+  baseline (structural, tag-keyed — see "Baseline and changeset" above) and
+  return added/modified/removed scenarios, for the designer to review
+  mid-session.
+- `dungeon_write_feature` — render the working model to Gherkin, written
+  **only** into the harness's own workspace.
+- `dungeon_write_changeset` — write the current changeset (same content as
+  `dungeon_get_changeset`) into the harness's own workspace, as the review
+  artifact accompanying the `.feature` file at handoff.
+- `dungeon_write_implementation_notes` — advisory suggestions, written
+  **only** into the harness's own workspace. Never read back by
+  `dungeon_read_feature`.
 
 ## Track-web side (separate work, not dungeon-harness's build)
 
-The "one change for track-web" you described needs to deliver more than
-just a test runner, given the exchange above:
-
-1. A way to run `.feature` files as acceptance tests against unit behavior
-   in a Vitest test, not through Phaser — a Given/When/Then step-definition
-   layer over the pure engine functions (today's `pc.ts`/`npc.ts`/`turn.ts`,
-   or their eventual archetype-registry replacements). track-web has no
-   Gherkin/Cucumber tooling today (checked `package.json` — nothing there),
-   so this is new: a small custom parser+runner, or a library like
-   `@amiceli/vitest-cucumber` if its style fits.
-2. **The step catalog generator** — introspect the registered step
-   definitions and emit the list dungeon-harness reads. Needs to be
-   regenerated whenever step definitions change, and land somewhere the
-   harness's worktree jail can read.
-3. A decision on the `.feature` files' canonical directory, since that
-   location is now load-bearing for three things at once: what the test
-   runner scans, what the harness's write jail targets, and what a
-   scenario→OpenSpec-scaffolding skill would read.
+1. **BDD tool: `@amiceli/vitest-cucumber`.** track-web already runs
+   everything through Vitest (`vitest.config.mts`, no Jest, no existing
+   Cucumber dependency — checked `package.json`, nothing there today), so
+   this is the fit that doesn't add a second test runner: `.feature` files
+   pair with a `*.spec.ts` that calls `loadFeature()`/`describeFeature()`
+   and writes ordinary Vitest assertions for each Given/When/Then, running
+   under the existing `npm test`. (Alternative considered: classic
+   `@cucumber/cucumber` has a more built-in global step-registry/dry-run
+   story, which would make step-catalog generation close to free — but it
+   means a second CLI/runner alongside Vitest for comparatively little
+   gain, since the catalog approach below sidesteps needing a step
+   registry at all.)
+2. **Placement**: following track-web's existing colocate-tests-with-source
+   convention (`unitDefs.test.ts` sits beside `unitDefs.ts`), the natural
+   home is a `features/` directory under
+   `client-games/src/games/dungeon-tactics-solo/` — that's where the pure
+   engine under test (`pc.ts`/`npc.ts`/`turn.ts`) actually lives, not the
+   server-side schema mirror in `src/games/dungeon-tactics/`. Confirm this
+   as part of scoping that change; it's a recommendation, not a decision
+   made here.
+3. **Step catalog generator.** Simplest option, and the one to default to
+   per "whatever's easiest to produce": derive it **mechanically from the
+   canonical `.feature` files themselves** — walk the corpus, extract every
+   unique Given/When/Then line, emit a flat list. This sidesteps needing
+   any framework-level step-registry introspection (vitest-cucumber doesn't
+   have a strong global-step-pattern story the way cucumber-js does) and
+   stays trivially correct: "implemented steps" is exactly "step text that
+   appears in the canonical tree," which is definitionally true once the
+   delta/canonical split above is in place. Format: JSON (mechanical to
+   diff and parse); a rendered Markdown view is a cheap add-on if a human
+   wants to skim it, not a separate source of truth.
+4. **The new engineer skill** (lives in track-web's `.claude/skills/`, not
+   here — it's track-web work run by the engineer in Claude Code): reads
+   the designer's finished `.feature` files + implementation notes from the
+   harness's workspace, scaffolds an OpenSpec change (`proposal.md`/
+   `design.md`/`tasks.md` per the usual `propose-change` shape), and writes
+   the scenarios into that change's `features/` delta directory alongside
+   hand-written or generated `specs/<capability>/spec.md` prose-requirement
+   deltas. Implementation and step-definition writing proceed as normal
+   OpenSpec `apply-change` work; `archive-change` is where canonical
+   updates (both `specs/` and now `features/`) actually happen.
 
 This is track-web's own OpenSpec change, independent of dungeon-harness's
-build — but its shape (catalog format, file layout) needs to be settled
-before dungeon-harness's jail config and `dungeon_read_step_catalog` can be
-finalized, so it's worth sequencing first or in lockstep.
+build, but its shape (catalog format, `.feature` directory, the skill)
+needs to be settled before `dungeon_read_step_catalog`/`dungeon_read_feature`
+can be finalized — worth sequencing first or in lockstep.
 
 ## Open questions
 
-- **`.feature` files' canonical directory** — drives the runner, the jail,
-  and the scaffolding skill. Decide as part of the track-web-side change.
-- **Step catalog format** — plain Markdown list (human-skimmable, LLM-
-  readable) vs. structured JSON (easier for the harness to parse
-  mechanically). Leaning JSON with a generated Markdown view, but not
-  decided.
-- **"New skill for this" (scenario → OpenSpec change scaffolding)** — lives
-  in track-web's `.claude/skills/` (it's track-web work consuming a
-  `.feature` file) or dungeon-harness's own workspace template (natural
-  next step after a scenario session ends)? Leaning track-web, since
-  that's where OpenSpec changes and the Gherkin runner both live.
-- **Round-trip fidelity bar.** How exact does re-rendered Gherkin need to
-  match hand-edited formatting (comment placement, tag ordering, blank
-  lines)? Worth deciding before `dungeon_write_feature` risks clobbering an
-  engineer's manual edits with harmless-looking reformatting.
+- **Canonical `.feature` directory** — recommendation given above
+  (`client-games/src/games/dungeon-tactics-solo/features/`); confirm when
+  scoping the track-web-side change.
+- **Mid-review round-trip: not needed for v1.** Read access to an
+  *in-progress* (not yet archived) change's `features/` delta, so an
+  engineer's review-time wording tweak feeds back into an ongoing design
+  session, is out of scope for the first cut — "re-open the finished draft
+  in the harness's own workspace" is good enough to start.
+- **Scenario-id tag adoption for pre-existing scenarios.** The stable-key
+  tagging convention above only works cleanly once every canonical scenario
+  has one. Whatever scenarios exist by the time this harness starts
+  operating need the tag added (by hand or by a small one-off script) before
+  baseline-loading + diffing can rely on it; until then, title-matching is
+  the fallback and carries the renaming risk described above.
 - **Archetype scope for early scenarios.** `unit-definition.md`'s
   archetypes aren't implemented yet; confirm whether the first scenarios
   target that not-yet-built model directly, or start narrower against
   today's simpler `UnitDef` shape to prove the designer↔engineer↔
   Gherkin-runner loop end-to-end first, given the step catalog is empty on
-  round one either way.
+  round one either way (nothing canonical exists yet to extract from).
 
 ---
 
 ## Revision notes
 
-This doc has pivoted twice as the actual boundary got clearer:
+This doc has pivoted three times as the actual boundary got clearer:
 
 1. **First draft** assumed dungeon-harness needed `write`/`edit` access into
-   track-web's game *code* (engine + unit-def data), and proposed a
-   `git worktree` + `file:` dependency to reuse track-web's pure engine
-   functions for a scenario runner.
+   track-web's game *code*, and proposed a `git worktree` + `file:`
+   dependency to reuse track-web's engine functions for a scenario runner.
 2. **Second draft** established the designer/engineer split: dungeon-harness
-   never touches track-web code at all, only scenario files, with a
-   self-contained (deck-harness-style) workspace and a locally-reimplemented
-   board interpreter. The worktree and code-reuse plan were dropped as moot.
-3. **This draft** confirms Gherkin as the sole canonical artifact (not the
-   structured form), and adds the step-catalog and implementation-notes
-   exchange — which brings back a narrow, files-only worktree jail (not a
-   code jail) for the reasons in "Repo mapping" above.
+   never touches track-web code, only scenario files, self-contained
+   workspace, locally-reimplemented board interpreter.
+3. **Third draft** made Gherkin the sole canonical artifact and added the
+   step-catalog/implementation-notes exchange, which brought back a
+   narrowly-jailed *write* worktree into track-web for the `.feature`
+   files themselves.
+4. **Fourth draft** replaced that write worktree with the delta/canonical
+   split borrowed from OpenSpec's own `changes/` vs. `specs/` model: the
+   engineer's skill (not the harness) is what writes into track-web, as a
+   reviewable OpenSpec change delta, merged to canonical only on archive.
+   dungeon-harness ends up read-only toward track-web and fully
+   self-contained on the write side — no worktree needed at all.
+5. **This draft** adds session baselines and harness-owned changeset
+   computation: a session loads the canonical baseline up front, and the
+   harness — not track-web — diffs its working state against that baseline
+   (structurally, keyed by a stable per-scenario tag rather than title) so
+   both the designer and the engineer review *what changed*, not the whole
+   file.
