@@ -61,6 +61,20 @@ deck-harness-server defaults to port 4100, client-deck to 5175; see each
 restarted (e.g. to pick up a changed `.env` value that `tsx watch` won't
 hot-reload), **ask the user to restart it** rather than doing it yourself.
 
+## Verifying UI changes: use playwright-cli
+
+The globally installed `@playwright/cli` (`playwright-cli` on PATH) is
+available for driving a real browser against the already-running dev
+clients — use it to verify UI changes instead of asking the user to click
+through them by hand. Typical flow: `playwright-cli open
+http://localhost:5175` (client-deck) or the equivalent introspect-client
+port, log in (the harness's cookie-session auth — ask the user for the
+password if you don't already have it, don't guess), then `snapshot`/
+`click`/`fill`/`screenshot` as needed. See `playwright-cli --help` for the
+full command list. This still runs against the user's already-running dev
+server per "Never kill or restart the dev servers" above — don't start a
+second client instance.
+
 ## Why the harness servers ship via `tsx`, not `tsc`
 
 Every other Node service in this family (track-web) builds with `tsc` to
