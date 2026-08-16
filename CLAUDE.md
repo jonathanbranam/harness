@@ -140,8 +140,19 @@ server source tree. Each server has its own workspace:
 
 - `deck-harness-server/data/workspace/` (gitignored, runtime-only), seeded from
   `deck-harness-server/templates/agent-workspace/`.
-- `introspect-harness-server/data/workspace/` (gitignored, runtime-only), seeded
-  from `introspect-harness-server/templates/agent-workspace/`.
+- `introspect-harness-server`'s workspace lives **outside the repo tree**, at
+  `~/.local/share/introspect-harness/workspace/` by default (override via
+  `INTROSPECT_WORKSPACE_DIR`), seeded from
+  `introspect-harness-server/templates/agent-workspace/`. It's deliberately
+  not repo-nested: an ancestor-walking CLI invoked via `bash` (e.g. `openspec`,
+  which resolves its project root by walking up from `cwd` rather than taking
+  a path argument) must not be able to walk up into this repo's own
+  `openspec/`/`.git`. The seed template also ships its own pre-initialized
+  `openspec/` directory so such tools resolve at the workspace root itself
+  and never need to walk up at all. A pre-existing
+  `introspect-harness-server/data/workspace/` from before this change is
+  orphaned (gitignored, no longer read or written) and safe to delete by
+  hand.
 
 See each server's `agent-workspace.ts`. The deck harness's permission-gate
 extension's path jail enforces that `write`/`edit` can't escape that
