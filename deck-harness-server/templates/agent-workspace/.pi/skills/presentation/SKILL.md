@@ -14,8 +14,17 @@ Use this skill when the user is working with the live presentation editor.
 - The editor maintains a list of objects on the active slide (currently text
   boxes; shapes/images are future work). Object ids are unique only within
   their slide, not across the whole deck.
-- Each object has an `id`, `x`, `y`, `width`, `height`, `text`, `fillColor`,
-  and `fontSize`.
+- Each object has an `id`, `x`, `y`, `width`, `height`, structured rich-text
+  `text` (blocks of runs — see below), `fillColor`, `borderColor`,
+  `fontColor`, and `fontSize`. `fillColor`/`borderColor` may be a color
+  value or `"transparent"`.
+- `text` is an array of blocks — `{ kind: "paragraph", runs }` or
+  `{ kind: "listItem", listType: "bulleted" | "numbered", runs }` — where
+  each run is `{ text, bold?, italic? }`. Use `presentation_update`'s
+  `applyTextStyle` action to bold/italicize a character range or convert
+  blocks to/from a list, addressed by plain-text offsets (the same text
+  `presentation_select_by_text` matches against). Use `setText` to replace a
+  box's whole content, passing either a plain string or a full `TextBlock[]`.
 - The user can select objects in the browser; the current selection IDs are
   injected into context on every message (along with the active deck/slide
   identity), and also available on demand via `presentation_get_state`.

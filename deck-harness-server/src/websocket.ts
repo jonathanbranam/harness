@@ -13,7 +13,7 @@ import type { Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import type { WSContext, WSEvents } from 'hono/ws'
 import { SESSION_COOKIE } from './auth'
-import { type DeckState, editorStore } from './editor-state'
+import { type DeckState, editorStore, type UpdateActionCall } from './editor-state'
 import type { ApprovalRequest, RequestApproval } from './pi-extensions/permission-gate'
 import type { RenderRequest, RenderResult, RequestRender } from './pi-extensions/slide-visual-inspection'
 import { getOrCreateSession } from './session-store'
@@ -23,6 +23,7 @@ const RENDER_TIMEOUT_MS = 15_000
 type ClientMessage =
   | { type: 'prompt'; text: string }
   | { type: 'selection'; ids: string[] }
+  | { type: 'object_update'; actions: UpdateActionCall[] }
   | { type: 'approval_response'; toolCallId: string; approved: boolean }
   | { type: 'select_deck'; deckId: string }
   | { type: 'create_deck'; name: string }
@@ -124,6 +125,21 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
         case 'selection':
           editorStore.setSelection(msg.ids)
           return
+
+        // User-originated edits (drag, resize, in-place text editing,
+        // formatting toolbar) go through the exact same applyUpdate call the
+        // presentation_update tool uses, so id-scoping/validation and
+        // mutation behavior never diverge between the two actors — see
+        // design.md's "One mutation path, reused by both actors". Actions
+        // apply in order within one batch so a formatting op can commit a
+        // setText immediately before an applyTextStyle addressed against it.
+        case 'object_update': {
+          for (const call of msg.actions) {
+            const result = editorStore.applyUpdate(call.action, call.targetIds, call.args ?? {})
+            if (result.errors.length > 0) safeSend(socket, { type: 'error', message: result.errors.join('; ') })
+          }
+          return
+        }
 
         case 'approval_response':
           pendingApprovals.get(msg.toolCallId)?.(msg.approved)

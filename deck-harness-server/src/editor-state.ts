@@ -9,14 +9,27 @@
 
 import { randomUUID } from 'node:crypto'
 
+export interface TextRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+}
+
+/** A paragraph or list-item block of inline runs — see openspec/changes/edit-text-boxes/design.md's "Structured text shape". */
+export type TextBlock =
+  | { kind: 'paragraph'; runs: TextRun[] }
+  | { kind: 'listItem'; listType: 'bulleted' | 'numbered'; runs: TextRun[] }
+
 export interface DeckObject {
   id: string
   x: number
   y: number
   width: number
   height: number
-  text: string
+  text: TextBlock[]
   fillColor: string
+  borderColor: string
+  fontColor: string
   fontSize: number
 }
 
@@ -57,18 +70,179 @@ export interface OpResult {
   error?: string
 }
 
-export type UpdateAction = 'setPosition' | 'setSize' | 'setText' | 'setFillColor' | 'setFontSize' | 'applyGridLayout'
+export type UpdateAction =
+  | 'setPosition'
+  | 'setSize'
+  | 'setText'
+  | 'setFillColor'
+  | 'setFontColor'
+  | 'setBorderColor'
+  | 'setFontSize'
+  | 'applyGridLayout'
+  | 'addObject'
+  | 'removeObject'
+  | 'applyTextStyle'
 
 export interface UpdateResult {
   changed: string[]
   errors: string[]
 }
 
+/** One `applyUpdate` call, as sent in a batch over the `object_update` WS message. */
+export interface UpdateActionCall {
+  action: UpdateAction
+  targetIds: string[]
+  args: Record<string, unknown>
+}
+
+// --- Structured text helpers ---
+//
+// `plainTextOf` is the one place that flattens structured text to a string —
+// every call site that needs plain text (select_by_text matching, offset
+// addressing for applyTextStyle) routes through it rather than re-deriving
+// its own notion of "the text", per design.md's risk mitigation for the
+// `text` shape change. Blocks are joined with "\n" so multi-block offsets
+// are unambiguous and stable across edits.
+
+function blockPlainText(block: TextBlock): string {
+  return block.runs.map((r) => r.text).join('')
+}
+
+export function plainTextOf(object: { text: TextBlock[] }): string {
+  return object.text.map(blockPlainText).join('\n')
+}
+
+function wrapPlainText(text: string): TextBlock[] {
+  return [{ kind: 'paragraph', runs: text ? [{ text }] : [] }]
+}
+
+function sanitizeRun(input: unknown): TextRun | undefined {
+  if (!input || typeof input !== 'object' || typeof (input as { text?: unknown }).text !== 'string') return undefined
+  const r = input as { text: string; bold?: unknown; italic?: unknown }
+  const run: TextRun = { text: r.text }
+  if (r.bold === true) run.bold = true
+  if (r.italic === true) run.italic = true
+  return run
+}
+
+function sanitizeBlock(input: unknown): TextBlock {
+  const b = (input ?? {}) as { kind?: unknown; listType?: unknown; runs?: unknown }
+  const runs = Array.isArray(b.runs) ? b.runs.map(sanitizeRun).filter((r): r is TextRun => !!r) : []
+  if (b.kind === 'listItem' && (b.listType === 'bulleted' || b.listType === 'numbered')) {
+    return { kind: 'listItem', listType: b.listType, runs }
+  }
+  return { kind: 'paragraph', runs }
+}
+
+/**
+ * Load-time normalizer (design.md's mitigation for the breaking `text` shape
+ * change): a legacy plain string becomes a single unstyled paragraph block;
+ * an already-structured value is sanitized field-by-field (untrusted tool/WS
+ * input can't inject an arbitrary shape); anything else becomes empty text.
+ */
+export function normalizeText(input: unknown): TextBlock[] {
+  if (typeof input === 'string') return wrapPlainText(input)
+  if (Array.isArray(input)) return input.length ? input.map(sanitizeBlock) : wrapPlainText('')
+  return wrapPlainText('')
+}
+
+function splitRunsAndMark(runs: TextRun[], localStart: number, localEnd: number, mark: 'bold' | 'italic', value: boolean): TextRun[] {
+  const result: TextRun[] = []
+  let pos = 0
+  for (const run of runs) {
+    const runLen = run.text.length
+    const runStart = pos
+    const runEnd = pos + runLen
+    pos = runEnd
+    if (runLen === 0 || runEnd <= localStart || runStart >= localEnd) {
+      result.push(run)
+      continue
+    }
+    const overlapStart = Math.max(0, localStart - runStart)
+    const overlapEnd = Math.min(runLen, localEnd - runStart)
+    if (overlapStart > 0) result.push({ ...run, text: run.text.slice(0, overlapStart) })
+    const marked: TextRun = { ...run, text: run.text.slice(overlapStart, overlapEnd) }
+    if (mark === 'bold') {
+      if (value) marked.bold = true
+      else delete marked.bold
+    } else {
+      if (value) marked.italic = true
+      else delete marked.italic
+    }
+    result.push(marked)
+    if (overlapEnd < runLen) result.push({ ...run, text: run.text.slice(overlapEnd) })
+  }
+  return result
+}
+
+/** Applies bold/italic to the plain-text range [start, end), splitting runs at the boundaries as needed. */
+function applyMarkToBlocks(blocks: TextBlock[], start: number, end: number, mark: 'bold' | 'italic', value: boolean): TextBlock[] {
+  let cursor = 0
+  return blocks.map((block, i) => {
+    if (i > 0) cursor += 1 // "\n" separator, matches plainTextOf's join
+    const text = blockPlainText(block)
+    const blockStart = cursor
+    cursor = blockStart + text.length
+    const localStart = Math.max(0, start - blockStart)
+    const localEnd = Math.min(text.length, end - blockStart)
+    if (localStart >= localEnd) return block
+    return { ...block, runs: splitRunsAndMark(block.runs, localStart, localEnd, mark, value) } as TextBlock
+  })
+}
+
+/** Converts blocks whose plain-text range overlaps [start, end) between paragraph and listItem, preserving runs. */
+function applyListTypeToBlocks(blocks: TextBlock[], start: number, end: number, listType: 'bulleted' | 'numbered' | null): TextBlock[] {
+  let cursor = 0
+  return blocks.map((block, i) => {
+    if (i > 0) cursor += 1
+    const text = blockPlainText(block)
+    const blockStart = cursor
+    const blockEnd = blockStart + text.length
+    cursor = blockEnd
+    const touched = start <= blockEnd && end >= blockStart
+    if (!touched) return block
+    return listType ? { kind: 'listItem', listType, runs: block.runs } : { kind: 'paragraph', runs: block.runs }
+  })
+}
+
 function seedObjects(): DeckObject[] {
   return [
-    { id: 'title', x: 40, y: 40, width: 400, height: 80, text: 'Deck Harness', fillColor: '#1f2937', fontSize: 32 },
-    { id: 'box-1', x: 40, y: 160, width: 200, height: 120, text: 'Talk to pi about the server here', fillColor: '#374151', fontSize: 16 },
-    { id: 'box-2', x: 260, y: 160, width: 200, height: 120, text: 'It can move, resize, and restyle these boxes', fillColor: '#374151', fontSize: 16 },
+    {
+      id: 'title',
+      x: 40,
+      y: 40,
+      width: 400,
+      height: 80,
+      text: wrapPlainText('Deck Harness'),
+      fillColor: '#1f2937',
+      borderColor: 'transparent',
+      fontColor: '#ffffff',
+      fontSize: 32,
+    },
+    {
+      id: 'box-1',
+      x: 40,
+      y: 160,
+      width: 200,
+      height: 120,
+      text: wrapPlainText('Talk to pi about the server here'),
+      fillColor: '#374151',
+      borderColor: 'transparent',
+      fontColor: '#ffffff',
+      fontSize: 16,
+    },
+    {
+      id: 'box-2',
+      x: 260,
+      y: 160,
+      width: 200,
+      height: 120,
+      text: wrapPlainText('It can move, resize, and restyle these boxes'),
+      fillColor: '#374151',
+      borderColor: 'transparent',
+      fontColor: '#ffffff',
+      fontSize: 16,
+    },
   ]
 }
 
@@ -114,7 +288,7 @@ class EditorStore {
       activeDeckId: this.activeDeckId,
       slides: deck.slides.map((s) => ({ id: s.id })),
       activeSlideId: deck.activeSlideId,
-      objects: slide.objects.map((o) => ({ ...o })),
+      objects: slide.objects.map((o) => ({ ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) })),
       selection: [...this.selection],
     }
   }
@@ -206,7 +380,10 @@ class EditorStore {
     const slide = this.activeSlide()
     const needle = caseSensitive ? query : query.toLowerCase()
     return slide.objects
-      .filter((o) => (caseSensitive ? o.text : o.text.toLowerCase()).includes(needle))
+      .filter((o) => {
+        const text = plainTextOf(o)
+        return (caseSensitive ? text : text.toLowerCase()).includes(needle)
+      })
       .map((o) => o.id)
   }
 
@@ -235,6 +412,53 @@ class EditorStore {
       return { changed, errors }
     }
 
+    if (action === 'addObject') {
+      const required = ['x', 'y', 'width', 'height'] as const
+      for (const key of required) {
+        if (typeof args[key] !== 'number') errors.push(`addObject requires numeric "${key}"`)
+      }
+      if (errors.length > 0) return { changed, errors }
+      const id = typeof args.id === 'string' && args.id.trim() ? args.id : randomUUID()
+      if (slide.objects.some((o) => o.id === id)) {
+        errors.push(`Object with id "${id}" already exists on the active slide`)
+        return { changed, errors }
+      }
+      const newObject: DeckObject = {
+        id,
+        x: args.x as number,
+        y: args.y as number,
+        width: Math.max(1, args.width as number),
+        height: Math.max(1, args.height as number),
+        text: normalizeText(args.text),
+        fillColor: typeof args.fillColor === 'string' ? args.fillColor : '#374151',
+        borderColor: typeof args.borderColor === 'string' ? args.borderColor : 'transparent',
+        fontColor: typeof args.fontColor === 'string' ? args.fontColor : '#ffffff',
+        fontSize: typeof args.fontSize === 'number' ? Math.max(1, args.fontSize) : 16,
+      }
+      slide.objects.push(newObject)
+      changed.push(newObject.id)
+      this.emit()
+      return { changed, errors }
+    }
+
+    if (action === 'removeObject') {
+      for (const id of targetIds) {
+        const index = slide.objects.findIndex((o) => o.id === id)
+        if (index === -1) {
+          errors.push(`No object with id "${id}"`)
+          continue
+        }
+        slide.objects.splice(index, 1)
+        changed.push(id)
+      }
+      if (changed.length > 0) {
+        const known = new Set(slide.objects.map((o) => o.id))
+        this.selection = this.selection.filter((id) => known.has(id))
+      }
+      this.emit()
+      return { changed, errors }
+    }
+
     for (const id of targetIds) {
       const obj = slide.objects.find((o) => o.id === id)
       if (!obj) {
@@ -253,14 +477,31 @@ class EditorStore {
           if (typeof args.height === 'number') obj.height = Math.max(1, args.height)
           break
         case 'setText':
-          if (typeof args.text === 'string') obj.text = args.text
+          if (typeof args.text === 'string' || Array.isArray(args.text)) obj.text = normalizeText(args.text)
           break
         case 'setFillColor':
           if (typeof args.color === 'string') obj.fillColor = args.color
           break
+        case 'setBorderColor':
+          if (typeof args.color === 'string') obj.borderColor = args.color
+          break
+        case 'setFontColor':
+          if (typeof args.color === 'string') obj.fontColor = args.color
+          break
         case 'setFontSize':
           if (typeof args.fontSize === 'number') obj.fontSize = Math.max(1, args.fontSize)
           break
+        case 'applyTextStyle': {
+          const start = typeof args.start === 'number' ? args.start : 0
+          const end = typeof args.end === 'number' ? args.end : start
+          if (args.mark === 'bold' || args.mark === 'italic') {
+            obj.text = applyMarkToBlocks(obj.text, start, end, args.mark, args.value === true)
+          } else if ('listType' in args) {
+            const listType = args.listType === 'bulleted' || args.listType === 'numbered' ? args.listType : null
+            obj.text = applyListTypeToBlocks(obj.text, start, end, listType)
+          }
+          break
+        }
       }
       changed.push(id)
     }

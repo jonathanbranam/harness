@@ -13,14 +13,26 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import { editorStore, type UpdateAction } from '../editor-state'
 
-const ACTIONS = ['setPosition', 'setSize', 'setText', 'setFillColor', 'setFontSize', 'applyGridLayout'] as const
+const ACTIONS = [
+  'setPosition',
+  'setSize',
+  'setText',
+  'setFillColor',
+  'setFontColor',
+  'setBorderColor',
+  'setFontSize',
+  'applyGridLayout',
+  'addObject',
+  'removeObject',
+  'applyTextStyle',
+] as const
 
 export function presentationBridge(pi: ExtensionAPI) {
   pi.registerTool({
     name: 'presentation_get_state',
     label: 'Get Presentation State',
     description:
-      'Get the current presentation state: the active deck and slide identity, every object on the active slide (id, bounds, text, styling), and the current selection. Call this before making changes so you are reasoning about the live deck, not a stale copy.',
+      'Get the current presentation state: the active deck and slide identity, every object on the active slide (id, bounds, structured rich-text `text`, and styling: fillColor, borderColor, fontColor, fontSize), and the current selection. `text` is an array of blocks (paragraph or listItem), each with inline runs carrying optional bold/italic flags. `fillColor`/`borderColor` may be a color value or the literal "transparent". Call this before making changes so you are reasoning about the live deck, not a stale copy.',
     promptSnippet: 'Read the live deck: active deck/slide identity, all objects on the active slide, and the current selection',
     parameters: Type.Object({}),
     execute: async () => {
@@ -37,10 +49,15 @@ export function presentationBridge(pi: ExtensionAPI) {
 Available actions:
 - setPosition: { x?: number, y?: number, dx?: number, dy?: number }
 - setSize: { width?: number, height?: number }
-- setText: { text: string }
-- setFillColor: { color: string } (hex, e.g. "#ff0000")
+- setText: { text: string | TextBlock[] } — a plain string is wrapped as a single unstyled paragraph; pass TextBlock[] directly for rich content. TextBlock is { kind: "paragraph", runs: TextRun[] } | { kind: "listItem", listType: "bulleted" | "numbered", runs: TextRun[] }. TextRun is { text: string, bold?: boolean, italic?: boolean }.
+- setFillColor: { color: string } (hex, e.g. "#ff0000", or "transparent" for no fill)
+- setFontColor: { color: string } (hex)
+- setBorderColor: { color: string } (hex, or "transparent" for no border)
 - setFontSize: { fontSize: number } (points)
 - applyGridLayout: { direction: "horizontal" | "vertical", gap?: number }
+- addObject: { x: number, y: number, width: number, height: number, text?: string | TextBlock[], fillColor?: string, borderColor?: string, fontColor?: string, fontSize?: number } — targetIds is ignored; x/y/width/height are required since only you (not the editor) know where the new box should go. Returns the new object's id in the result's "changed" list.
+- removeObject: {} — removes each object in targetIds from the active slide.
+- applyTextStyle: { start: number, end: number, mark?: "bold" | "italic", value?: boolean } or { start: number, end: number, listType: "bulleted" | "numbered" | null } — start/end are character offsets into the target's plain-text content (the same string presentation_select_by_text matches against, with blocks joined by "\\n"); mark+value toggles bold/italic on that range; listType converts the blocks the range touches into that list type, or back to a plain paragraph when null.
 
 Always prefer the most specific action. If multiple objects are selected and the user asks to lay them out, use applyGridLayout.`,
     promptSnippet: 'Move, resize, restyle, or lay out objects in the live deck',
@@ -68,7 +85,8 @@ Always prefer the most specific action. If multiple objects are selected and the
   pi.registerTool({
     name: 'presentation_select_by_text',
     label: 'Select by Text',
-    description: 'Return the IDs of objects whose visible text contains the given query string. Use this to find objects before styling or moving them.',
+    description:
+      'Return the IDs of objects whose visible text contains the given query string. Matching is against the plain-text content of each object\'s structured text (all runs concatenated, ignoring bold/italic/list formatting). Use this to find objects before styling or moving them.',
     promptSnippet: 'Find object ids by matching their visible text',
     parameters: Type.Object({
       query: Type.String(),
@@ -90,7 +108,7 @@ Always prefer the most specific action. If multiple objects are selected and the
       message: {
         customType: 'editor_context',
         role: 'user' as const,
-        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, selected: ${state.selection.join(', ') || '(none)'}):\n${JSON.stringify(state, null, 2)}`,
+        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, selected: ${state.selection.join(', ') || '(none)'}). Each object's "text" is structured rich text (an array of paragraph/listItem blocks of runs with optional bold/italic), and objects carry fillColor, borderColor, and fontColor, each of which may be a color value or "transparent" (for fillColor/borderColor):\n${JSON.stringify(state, null, 2)}`,
         display: false,
       },
     }

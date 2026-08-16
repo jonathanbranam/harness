@@ -2,15 +2,50 @@ import { toPng } from 'html-to-image'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { genId } from '../id'
 
+// Duplicated from deck-harness-server/src/editor-state.ts (no shared
+// `packages/` tier yet — see CLAUDE.md's "No packages/ tier yet"); keep this
+// shape in sync with the server's DeckObject/UpdateAction types by hand.
+
+export interface TextRun {
+  text: string
+  bold?: boolean
+  italic?: boolean
+}
+
+export type TextBlock =
+  | { kind: 'paragraph'; runs: TextRun[] }
+  | { kind: 'listItem'; listType: 'bulleted' | 'numbered'; runs: TextRun[] }
+
 export interface DeckObject {
   id: string
   x: number
   y: number
   width: number
   height: number
-  text: string
+  text: TextBlock[]
   fillColor: string
+  borderColor: string
+  fontColor: string
   fontSize: number
+}
+
+export type UpdateAction =
+  | 'setPosition'
+  | 'setSize'
+  | 'setText'
+  | 'setFillColor'
+  | 'setFontColor'
+  | 'setBorderColor'
+  | 'setFontSize'
+  | 'applyGridLayout'
+  | 'addObject'
+  | 'removeObject'
+  | 'applyTextStyle'
+
+export interface UpdateActionCall {
+  action: UpdateAction
+  targetIds: string[]
+  args: Record<string, unknown>
 }
 
 export interface DeckSummary {
@@ -220,6 +255,14 @@ export function useDeckSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'selection', ids }))
   }, [])
 
+  // Routes user-originated canvas edits (drag, resize, text edit, format
+  // toolbar) through the same UpdateAction shapes the presentation_update
+  // tool uses, applied server-side via the same EditorStore.applyUpdate
+  // call — see websocket.ts's object_update handler.
+  const sendObjectUpdate = useCallback((actions: UpdateActionCall[]) => {
+    wsRef.current?.send(JSON.stringify({ type: 'object_update', actions }))
+  }, [])
+
   const respondApproval = useCallback((toolCallId: string, approved: boolean) => {
     wsRef.current?.send(JSON.stringify({ type: 'approval_response', toolCallId, approved }))
     setPendingApproval(null)
@@ -257,6 +300,7 @@ export function useDeckSocket() {
     canvasRef,
     sendPrompt,
     sendSelection,
+    sendObjectUpdate,
     respondApproval,
     selectDeck,
     createDeck,
