@@ -1,13 +1,16 @@
 // In-memory "live deck" that the browser canvas and the presentation-bridge
-// pi extension both read/write in-process. No persistence: this is a local,
-// iterate-fast prototype per docs/talks/deck-harness/planning.md — see that
-// doc's "Open questions" for whether/how to persist deck state later.
+// pi extension both read/write in-process. Auto-persisted to disk by
+// deck-persistence.ts (debounced save on every `emit`, restored into the
+// `editorStore` singleton below on startup) — see
+// openspec/changes/persist-deck-state/design.md.
 //
 // Shape: decks -> slides -> objects, with exactly one active deck and one
 // active slide per deck (deck-management's design.md). Object ids are unique
 // only within their slide, not globally across the deck.
 
 import { randomUUID } from 'node:crypto'
+import { env } from './env'
+import { loadSnapshot, readSnapshotFile } from './deck-persistence'
 
 export interface TextRun {
   text: string
@@ -246,17 +249,23 @@ function seedObjects(): DeckObject[] {
   ]
 }
 
-class EditorStore {
+export class EditorStore {
   private decks = new Map<string, Deck>()
   private activeDeckId: string
   private selection: string[] = []
   private listeners = new Set<(state: DeckState) => void>()
 
-  constructor() {
-    const slide: Slide = { id: randomUUID(), objects: seedObjects() }
-    const deck: Deck = { id: randomUUID(), name: 'Deck 1', slides: [slide], activeSlideId: slide.id }
-    this.decks.set(deck.id, deck)
-    this.activeDeckId = deck.id
+  /** @param initial Restored snapshot to seed from (see deck-persistence.ts's `loadSnapshot`); omitted/null builds the hardcoded demo deck (first run / no persisted state). */
+  constructor(initial?: { decks: Deck[]; activeDeckId: string } | null) {
+    if (initial && initial.decks.length > 0) {
+      for (const deck of initial.decks) this.decks.set(deck.id, deck)
+      this.activeDeckId = initial.activeDeckId
+    } else {
+      const slide: Slide = { id: randomUUID(), objects: seedObjects() }
+      const deck: Deck = { id: randomUUID(), name: 'Deck 1', slides: [slide], activeSlideId: slide.id }
+      this.decks.set(deck.id, deck)
+      this.activeDeckId = deck.id
+    }
   }
 
   subscribe(listener: (state: DeckState) => void): () => void {
@@ -509,6 +518,23 @@ class EditorStore {
     this.emit()
     return { changed, errors }
   }
+
+  /** Full decks/slides/objects snapshot (not the `getState()` broadcast shape, which only carries the active slide's objects) — used by deck-persistence.ts's debounced auto-save. */
+  exportSnapshot(): { decks: Deck[]; activeDeckId: string } {
+    return {
+      decks: [...this.decks.values()].map((d) => ({
+        id: d.id,
+        name: d.name,
+        activeSlideId: d.activeSlideId,
+        slides: d.slides.map((s) => ({
+          id: s.id,
+          objects: s.objects.map((o) => ({ ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) })),
+        })),
+      })),
+      activeDeckId: this.activeDeckId,
+    }
+  }
 }
 
-export const editorStore = new EditorStore()
+const initialSnapshot = loadSnapshot(readSnapshotFile(env.DECK_STATE_FILE))
+export const editorStore = new EditorStore(initialSnapshot)

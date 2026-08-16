@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { editorStore, plainTextOf, type TextBlock } from './editor-state'
+import { EditorStore, editorStore, plainTextOf, type TextBlock } from './editor-state'
 
 describe('editorStore', () => {
   it('setSelection drops unknown ids', () => {
@@ -299,5 +299,52 @@ describe('plainTextOf and select_by_text over structured text', () => {
     editorStore.applyUpdate('setText', ['box-1'], { text: 'Hello world' })
     editorStore.applyUpdate('applyTextStyle', ['box-1'], { start: 0, end: 5, mark: 'bold', value: true })
     expect(editorStore.selectByText('lo wo')).toContain('box-1')
+  })
+})
+
+describe('EditorStore construction from a persisted snapshot', () => {
+  it('restores decks/slides/objects/active ids from a provided snapshot', () => {
+    const snapshot = {
+      decks: [
+        {
+          id: 'deck-a',
+          name: 'Deck A',
+          activeSlideId: 'slide-a',
+          slides: [
+            {
+              id: 'slide-a',
+              objects: [
+                {
+                  id: 'obj-a',
+                  x: 5,
+                  y: 5,
+                  width: 50,
+                  height: 50,
+                  text: [{ kind: 'paragraph', runs: [{ text: 'restored' }] }] as TextBlock[],
+                  fillColor: '#000000',
+                  borderColor: '#111111',
+                  fontColor: '#ffffff',
+                  fontSize: 20,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      activeDeckId: 'deck-a',
+    }
+
+    const store = new EditorStore(snapshot)
+    const state = store.getState()
+    expect(state.activeDeckId).toBe('deck-a')
+    expect(state.activeSlideId).toBe('slide-a')
+    expect(state.objects).toEqual(snapshot.decks[0].slides[0].objects)
+  })
+
+  it('falls back to the hardcoded seed deck when constructed without a snapshot', () => {
+    const store = new EditorStore(null)
+    const state = store.getState()
+    expect(state.decks.length).toBe(1)
+    expect(state.objects.length).toBeGreaterThan(0)
   })
 })
