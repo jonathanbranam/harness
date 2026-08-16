@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apparatus mockup (grid, sections) — redesign-introspect-ui</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #030712;
+    --panel: #0b1220;
+    --panel2: #111827;
+    --border: #1f2937;
+    --text: #f3f4f6;
+    --text-dim: #9ca3af;
+    --text-dimmer: #6b7280;
+
+    --c-foundation: #64748b;
+    --c-user: #6366f1;
+    --c-skill: #a78bfa;
+    --c-input: #38bdf8;
+    --c-thinking: #fb923c;
+    --c-output: #2dd4bf;
+    --c-tool-done: #34d399;
+    --c-tool-error: #f87171;
+    --c-tool-running: #94a3b8;
+
+    --zone-smart: rgba(52, 211, 153, 0.05);
+    --zone-dumb: rgba(251, 191, 36, 0.10);
+    --zone-compaction: rgba(248, 113, 113, 0.14);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  a { color: #93c5fd; }
+
+  .page {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 28px 24px 80px;
+  }
+
+  header.top h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+    font-weight: 600;
+  }
+  header.top p.sub {
+    margin: 0 0 18px;
+    color: var(--text-dim);
+    font-size: 13px;
+    max-width: 900px;
+    line-height: 1.5;
+  }
+  header.top p.sub code { color: #c4b5fd; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 480px 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+  @media (max-width: 940px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Apparatus pane mockup ---- */
+  .apparatus {
+    background: #05070d;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .apparatus .head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .apparatus .head .title {
+    font-weight: 600;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .apparatus .head .title .icons { color: var(--text-dimmer); font-size: 12px; letter-spacing: 2px; }
+  .apparatus .head .stats { text-align: right; font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+  .apparatus .head .stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .apparatus .head .stats .pct { font-size: 15px; font-weight: 700; }
+  .apparatus .head .stats .pct.zone-smart { color: var(--c-tool-done); }
+  .apparatus .head .stats .pct.zone-dumb { color: #fbbf24; }
+  .apparatus .head .stats .pct.zone-compaction { color: var(--c-tool-error); }
+
+  .foundation-cap {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel2);
+  }
+  .foundation-cap h3 {
+    margin: 0 0 6px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+  }
+  .foundation-cap .prompt-snip {
+    font-size: 11px;
+    color: var(--text-dimmer);
+    line-height: 1.4;
+    max-height: 3.6em;
+    overflow: hidden;
+  }
+  .skill-badges { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .skill-badges span {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #1e293b;
+    color: #cbd5e1;
+  }
+
+  /* ---- grid rendering ---- */
+  .grid-wrap { position: relative; padding: 10px 14px 14px; }
+  .grid-outer {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #0a0f1a;
+    padding: 8px;
+  }
+  .zone-band { position: absolute; left: 0; right: 0; pointer-events: none; }
+  .zone-label {
+    position: absolute;
+    right: 6px;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dimmer);
+    pointer-events: none;
+    background: rgba(3,7,18,0.55);
+    padding: 1px 4px;
+    border-radius: 3px;
+    z-index: 2;
+  }
+  .cell-grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 2px;
+  }
+  .cell {
+    border-radius: 3px;
+    background: rgba(255,255,255,0.045);
+    cursor: default;
+    transition: filter 0.05s linear;
+  }
+  .cell.filled { cursor: pointer; }
+  .cell.current {
+    box-shadow: 0 0 0 2px #f3f4f6, 0 0 6px 1px rgba(255,255,255,0.55);
+  }
+  .cell.section-hover {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.7) inset;
+    filter: brightness(1.3);
+  }
+  .marker-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .tool-marker-wrap {
+    position: absolute;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    padding: 1px;
+    pointer-events: auto;
+    cursor: default;
+  }
+  .tool-marker {
+    border-radius: 2px;
+    box-shadow: 0 0 0 1.5px #05070d;
+  }
+
+  /* ---- tooltip ---- */
+  #tooltip {
+    position: fixed;
+    max-width: 340px;
+    background: #111827;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: #e5e7eb;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    pointer-events: none;
+    z-index: 50;
+    display: none;
+  }
+  #tooltip .tt-kind {
+    display: inline-block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  #tooltip .tt-snippet {
+    white-space: pre-wrap;
+    color: #d1d5db;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    max-height: 160px;
+    overflow: hidden;
+  }
+  #tooltip .tt-meta { color: #9ca3af; margin-top: 6px; font-size: 10.5px; }
+  #tooltip .tt-breakdown { margin-top: 6px; border-top: 1px solid #374151; padding-top: 6px; }
+  #tooltip .tt-breakdown div { display: flex; justify-content: space-between; gap: 10px; color: #cbd5e1; }
+  #tooltip .tt-breakdown .k { display:flex; align-items:center; gap:5px; }
+  #tooltip .tt-breakdown .sw { width:7px; height:7px; border-radius:2px; flex:none; }
+
+  /* ---- right column ---- */
+  .side { display: flex; flex-direction: column; gap: 18px; }
+  .card {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .card h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-dim);
+    margin: 0 0 10px;
+  }
+
+  .controls .row { margin-bottom: 14px; }
+  .controls label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+  .controls label b { color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: #6366f1; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .presets button {
+    background: #1f2937;
+    border: 1px solid #374151;
+    color: #e5e7eb;
+    font-size: 11.5px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .presets button:hover { background: #2b3646; }
+  .presets button.active { background: #4338ca; border-color: #6366f1; }
+  .hint { font-size: 11px; color: var(--text-dimmer); margin-top: 8px; line-height: 1.5; }
+
+  .legend { display: flex; flex-direction: column; gap: 7px; }
+  .legend .item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .legend .swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .legend .name { flex: 1; color: var(--text-dim); }
+  .legend .val { font-variant-numeric: tabular-nums; color: var(--text); font-size: 11.5px; }
+
+  .tool-status-legend {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .tool-status-legend .item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); }
+  .tool-status-legend .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .tool-status-legend .item b { color: var(--text); font-weight: 600; }
+
+  .zones-legend { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .zones-legend .item { font-size: 11.5px; color: var(--text-dim); display: flex; justify-content: space-between; }
+  .zones-legend .item b { color: var(--text); }
+
+  .notes { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+  .notes p { margin: 0 0 10px; }
+  .notes strong { color: var(--text); }
+  .notes code { color: #c4b5fd; background: #1e293b; padding: 0 4px; border-radius: 3px; }
+
+  footer.attrib { margin-top: 28px; font-size: 11px; color: var(--text-dimmer); }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header class="top">
+  <h1>Apparatus — redesign mockup (grid, sections variant)</h1>
+  <p class="sub">
+    A refinement of <a href="apparatus-mockup-grid.html">apparatus-mockup-grid.html</a> (same waffle-grid approach,
+    same recorded session) after a first round of feedback. Three changes from that mockup:
+    contiguous runs of the same category now read as one <strong>section</strong> spanning multiple grid cells
+    (hover any cell in a run to see the whole run highlighted, and the tooltip totals the whole section, not just
+    one cell); the tiny circular tool-call dots are replaced with square markers, deduplicated to one per grid
+    cell (hover lists every call that landed there) and sized by how many calls landed in that cell; and the
+    "running" tool-call color was moved off amber (too close to the thinking color) onto neutral gray, with a
+    dedicated status-color legend so it's clear <em>running ≠ failed</em>. See also the sibling
+    <a href="apparatus-mockup-linear-stack.html">apparatus-mockup-linear-stack.html</a> for the same data as a
+    continuous stacked bar. Reconstructed from a real recorded session
+    (<code id="rec-id"></code>, model <code id="rec-model"></code>) — see methodology card, bottom right.
+  </p>
+</header>
+
+<div class="layout">
+
+  <div class="apparatus">
+    <div class="head">
+      <div class="title">Apparatus <span class="icons">▭ ▢ ⤢</span></div>
+      <div class="stats">
+        <div><span class="pct" id="stat-pct">—</span></div>
+        <div><b id="stat-tokens">—</b> tokens · ~$<b id="stat-cost">—</b></div>
+      </div>
+    </div>
+
+    <div class="foundation-cap">
+      <h3>Foundation (first cells, top-left)</h3>
+      <div class="prompt-snip" id="foundation-snip"></div>
+      <div class="skill-badges" id="foundation-skills"></div>
+    </div>
+
+    <div class="grid-wrap">
+      <div class="grid-outer" id="grid-outer">
+        <div class="zone-band" id="zone-smart"></div>
+        <div class="zone-band" id="zone-dumb"></div>
+        <div class="zone-band" id="zone-compaction"></div>
+        <div class="zone-label" id="zone-label-smart">smart zone</div>
+        <div class="zone-label" id="zone-label-dumb">dumb zone</div>
+        <div class="zone-label" id="zone-label-compaction">forced compaction</div>
+        <div class="cell-grid" id="cell-grid"></div>
+        <div class="marker-layer" id="marker-layer"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="side">
+
+    <div class="card controls">
+      <h2>Scrub the recording</h2>
+      <div class="row">
+        <label>Session progress <b id="progress-label">turn 0</b></label>
+        <input type="range" id="progress" min="0" max="0" value="0" step="1">
+      </div>
+      <div class="presets">
+        <button id="preset-start">Start</button>
+        <button id="preset-mid">Mid-session</button>
+        <button id="preset-end" class="active">End of session (recorded)</button>
+        <button id="preset-extended">Extended ×4 (illustrative)</button>
+      </div>
+      <div class="hint" id="extend-hint" style="display:none;">
+        Beyond the recorded 39 turns, this repeats the same recorded turn pattern to illustrate what crossing
+        the dumb / forced-compaction zones would look like. Not real data — clearly out of scope of what actually happened.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Composition at this point</h2>
+      <div class="legend" id="legend"></div>
+      <div class="tool-status-legend">
+        <div class="item"><span class="sw" style="background:var(--c-tool-done)"></span><b>done</b> — call completed successfully</div>
+        <div class="item"><span class="sw" style="background:var(--c-tool-running)"></span><b>running</b> — still in flight (a live session only; this static recording never has one)</div>
+        <div class="item"><span class="sw" style="background:var(--c-tool-error)"></span><b>error</b> — the call failed</div>
+      </div>
+      <div class="zones-legend">
+        <div class="item"><span>smart zone</span><b id="zone-bound-smart">0–50%</b></div>
+        <div class="item"><span>dumb zone</span><b id="zone-bound-dumb">50–80%</b></div>
+        <div class="item"><span>forced compaction</span><b id="zone-bound-compaction">80–100%</b></div>
+      </div>
+    </div>
+
+    <div class="card notes">
+      <h2>Methodology &amp; findings from grounding this in real data</h2>
+      <p><strong>Source:</strong> a real 7-prompt / 39-turn OpenSpec workflow session (create → write proposal → sync-specs → archive a change called <code>daily-reflection-tracker</code>), recorded by this harness with <code>PI_CACHE_RETENTION=long</code> set — this is the same "Cache test" recording analyzed in <code>docs/introspect-harness/prompt-cache-reprocessing-investigation.md</code>'s "Live test results" section. Ends at 33,547 / 262,144 tokens (12.8%), comfortably inside the smart zone the whole time.</p>
+      <p><strong>Thinking is real and substantial:</strong> <code>usage.reasoning</code> was <code>0</code> on every single message in this session too, but 12,864 characters of actual <code>thinking_delta</code> text came through — confirming design.md's finding that thinking-pill presence must key off the delta stream, not the usage field.</p>
+      <p><strong>The cache-retention fix helped, but didn't eliminate reprocessing:</strong> summed across all 39 assistant calls, real <code>usage.input</code> totals 57,400 tokens against a 33,547-token final context — a 1.71× reprocessing ratio, down from 2.75× in the un-fixed recording the investigation doc started from, but still real. In this rendering, about three-quarters of every "new input" pill's mass is <code>reprocessed context (cache miss)</code> rather than genuinely new tool-result content — visible as input spikes right after each <code>agent_start</code>, same pattern as before, just smaller.</p>
+      <p><strong>Skill auto-loads are still a distinct, sizeable category:</strong> 3 of this session's 7 top-level messages (<code>new-change</code>, <code>sync-specs</code>, <code>archive-change</code>) were skill files auto-injected into context rather than anything the user typed — split out here as its own pill color since it's exactly the kind of invisible context growth Apparatus exists to surface.</p>
+      <p><strong>Grid + sections rendering approach:</strong> the whole grid is still a fixed <code>24 × 50</code> = 1,200 cells representing 0–100% of the context window (each cell ≈ 218 tokens). Chronological entries are binned into cells exactly as in the base grid mockup, but each cell now takes a single flat color (its dominant category) instead of a two-tone gradient split. A run of consecutive cells sharing the same dominant category is then grouped into one <strong>section</strong>: hovering any cell in it highlights every cell in the run (so it visibly reads as one shape, not N independent squares) and the tooltip reports the section's total tokens and cell span, not just the hovered cell's slice. The faint gaps between cells stay visible everywhere, including inside a section, so you can still count how many cells (how much size) a section covers even while it reads as one grouped unit.</p>
+      <p><strong>Tool call markers:</strong> markers are now small squares, deduplicated to <em>one per occupied grid cell</em> — if several tool calls landed in the same cell they no longer stack/overlap as separate dots; instead the square grows slightly with the call count (up to a cap) and hovering anywhere over that cell's marker lists every call that landed there (name, status, turn). The hoverable area is the full cell, not just the tiny square, since tiny circles were hard to target. Marker color reflects the <em>worst</em> status among that cell's calls: green (done), gray (running — in-flight, only possible in a live session), or red (error/failed) — see the status legend to the left. In this static recording no call is ever "running," so only green and red actually appear.</p>
+    </div>
+
+    <footer class="attrib">Generated for design review of <code>openspec/changes/redesign-introspect-ui</code>. Not wired to the running app.</footer>
+  </div>
+</div></div>
+
+<div id="tooltip"></div>
+
+<script>
+const DATA = {"foundation":{"systemPromptLen":7528,"systemPromptSnippet":"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\nAvailable tools:\n- read: Read file contents\n- bash: Execute bash commands (ls, grep, find, etc.)\n- write: Create or overwrite files\n- edit: Make precise file edits with exact text replacement, including multiple disjoint edits in one call\n- grep: Search file contents for patterns (respects .gitignore)\n- find: Find files by glob","skills":["introspect","apply-change","archive-change","continue-change","ff-change","new-change","openspec-bulk-archive-change","openspec-explore","propose-change","sync-specs","verify-change"],"tokens":1211},"entries":[{"kind":"user","label":null,"tokensNaive":10,"snippet":"list the files in this workspace for me","run":1,"tokens":4,"cumAfter":1215},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":1211,"snippet":""}],"run":1,"tokens":1215,"cumAfter":2430},{"kind":"thinking","tokensNaive":69,"snippet":"The user wants to list the files in the current workspace. I should use the ls tool to list the directory contents. The current working directory is /Users/jbranam/.local/share/introspect-harness/workspace, so I'll use ls with that path or just default to current directory. ","run":1,"tokens":29,"cumAfter":2459},{"kind":"output","tokensNaive":1,"snippet":"   ","run":1,"tokens":8,"cumAfter":2467},{"kind":"tool","name":"ls","status":"done","run":1,"tokens":2,"cumAfter":2469},{"kind":"input","tokensNaive":8,"breakdown":[{"label":"tool result","tokens":3,"snippet":".agents/\n.pi/\nAGENTS.md\nopenspec/"},{"label":"reprocessed context (cache miss)","tokens":31,"snippet":""}],"run":1,"tokens":35,"cumAfter":2504},{"kind":"thinking","tokensNaive":49,"snippet":"The user asked to list files in the workspace. I got the top-level listing. I can also list the subdirectories to give a more complete picture. Let me list .agents, .pi, and openspec directories. ","run":1,"tokens":20,"cumAfter":2524},{"kind":"output","tokensNaive":1,"snippet":"     ","run":1,"tokens":36,"cumAfter":2560},{"kind":"tool","name":"ls","status":"done","run":1,"tokens":2,"cumAfter":2562},{"kind":"tool","name":"ls","status":"done","run":1,"tokens":2,"cumAfter":2564},{"kind":"tool","name":"ls","status":"done","run":1,"tokens":2,"cumAfter":2566},{"kind":"input","tokensNaive":11,"breakdown":[{"label":"tool result","tokens":1,"snippet":"skills/"},{"label":"tool result","tokens":1,"snippet":"skills/"},{"label":"tool result","tokens":3,"snippet":"changes/\nconfig.yaml\nspecs/"},{"label":"reprocessed context (cache miss)","tokens":55,"snippet":""}],"run":1,"tokens":60,"cumAfter":2626},{"kind":"thinking","tokensNaive":82,"snippet":"I can see the structure. Let me provide a concise summary of the workspace files. I could go deeper but the user just asked to list files. The top-level shows .agents/, .pi/, AGENTS.md, openspec/. Within those, .agents/skills/, .pi/skills/, openspec/changes/, openspec/config.yaml","run":1,"tokens":34,"cumAfter":2660},{"kind":"output","tokensNaive":64,"snippet":" Here are the files and directories in the workspace:\n\n```\n/Users/jbranam/.local/share/introspect-harness/workspace/\n├── .agents/\n│   └── skills/\n├── .pi/\n│   └── skills/\n├── AGENTS.md\n└── openspec/\n    ├── changes/\n    ├── config.yaml\n    └── specs/\n```","run":1,"tokens":28,"cumAfter":2688},{"kind":"skill","label":"new-change","tokensNaive":1030,"snippet":"<skill name=\"new-change\" location=\"/Users/jbranam/.local/share/introspect-harness/workspace/.agents/skills/new-change/SKILL.md\">\nReferences are relative to /Users/jbranam/.local/share/introspect-harness/workspace/.agents/skills/new-change.\n\nStart a new change using the experiment","run":2,"tokens":426,"cumAfter":3114},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":87,"snippet":""}],"run":2,"tokens":512,"cumAfter":3626},{"kind":"thinking","tokensNaive":167,"snippet":"The user wants me to start a new change using the new-change skill. They want to create a single page HTML app for daily reflection questions with ratings 0-5. I need to:\n\n1. Derive a kebab-case name from their description\n2. Check if there's a store registered\n3. Create the chan","run":2,"tokens":69,"cumAfter":3695},{"kind":"output","tokensNaive":1,"snippet":"   ","run":2,"tokens":7,"cumAfter":3702},{"kind":"tool","name":"bash","status":"done","run":2,"tokens":2,"cumAfter":3704},{"kind":"input","tokensNaive":9,"breakdown":[{"label":"tool result","tokens":4,"snippet":"{\n  \"stores\": [],\n  \"status\": []\n}\n"},{"label":"reprocessed context (cache miss)","tokens":28,"snippet":""}],"run":2,"tokens":31,"cumAfter":3735},{"kind":"thinking","tokensNaive":80,"snippet":"No stores registered, so commands will act on the nearest local `openspec/` root, which is `/Users/jbranam/.local/share/introspect-harness/workspace/openspec`.\n\nNow I need to create the change. Let me derive a name: \"daily-reflection-tracker\" seems appropriate. I'll use the defau","run":2,"tokens":33,"cumAfter":3768},{"kind":"output","tokensNaive":0,"snippet":"  ","run":2,"tokens":10,"cumAfter":3778},{"kind":"tool","name":"bash","status":"done","run":2,"tokens":2,"cumAfter":3780},{"kind":"input","tokensNaive":60,"breakdown":[{"label":"tool result","tokens":25,"snippet":"- Creating change 'daily-reflection-tracker' with schema 'spec-driven'...\nCreated change 'daily-reflection-tracker' at openspec/changes/daily-reflection-tracker/\nSchema: spec-driven\nNext: openspec sta"},{"label":"reprocessed context (cache miss)","tokens":28,"snippet":""}],"run":2,"tokens":52,"cumAfter":3832},{"kind":"thinking","tokensNaive":28,"snippet":"Good, the change was created. Now I need to show the status and then get instructions for the first artifact. ","run":2,"tokens":12,"cumAfter":3844},{"kind":"output","tokensNaive":1,"snippet":"   ","run":2,"tokens":12,"cumAfter":3856},{"kind":"tool","name":"bash","status":"done","run":2,"tokens":2,"cumAfter":3858},{"kind":"input","tokensNaive":736,"breakdown":[{"label":"tool result","tokens":304,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":46,"snippet":""}],"run":2,"tokens":350,"cumAfter":4208},{"kind":"thinking","tokensNaive":19,"snippet":"Now I need to get instructions for the first artifact, which is `proposal`. ","run":2,"tokens":8,"cumAfter":4216},{"kind":"output","tokensNaive":0,"snippet":"  ","run":2,"tokens":13,"cumAfter":4229},{"kind":"tool","name":"bash","status":"done","run":2,"tokens":2,"cumAfter":4231},{"kind":"input","tokensNaive":1016,"breakdown":[{"label":"tool result","tokens":420,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"artifactId\": \"proposal\",\n  \"schemaName\": \"spec-driven\",\n  \"changeDir\": \"/Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily"},{"label":"reprocessed context (cache miss)","tokens":0,"snippet":""}],"run":2,"tokens":420,"cumAfter":4651},{"kind":"thinking","tokensNaive":98,"snippet":"I have all the information needed. Now I need to summarize for the user and stop, waiting for direction. I should not create the artifact yet.\n\nLet me provide a concise summary with:\n- Change name and location\n- Schema/workflow and artifact sequence\n- Current status (0/4 artifact","run":2,"tokens":41,"cumAfter":4692},{"kind":"output","tokensNaive":456,"snippet":" Created change `daily-reflection-tracker` in repo-local mode.\n\n**Location:** `openspec/changes/daily-reflection-tracker/`\n**Schema:** `spec-driven`\n\n**Artifact sequence:**\n1. `proposal.md`\n2. `specs/**/*.md` + `design.md` (unlocked by proposal)\n3. `tasks.md` (unlocked by specs +","run":2,"tokens":162,"cumAfter":4854},{"kind":"user","label":null,"tokensNaive":4,"snippet":"write the proposal","run":3,"tokens":2,"cumAfter":4856},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":1009,"snippet":""}],"run":3,"tokens":1010,"cumAfter":5866},{"kind":"thinking","tokensNaive":308,"snippet":"The user wants me to write the proposal. I need to create the proposal.md file in the change directory. Let me think about what this app needs:\n\n1. Single page HTML app\n2. Daily reflection questions with 0-5 ratings\n3. Questions start with \"Did I do my best today to...\" \n4. Areas","run":3,"tokens":127,"cumAfter":5993},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":128,"cumAfter":6121},{"kind":"tool","name":"write","status":"done","run":3,"tokens":2,"cumAfter":6123},{"kind":"input","tokensNaive":36,"breakdown":[{"label":"tool result","tokens":15,"snippet":"Successfully wrote 1318 bytes to /Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker/proposal.md"},{"label":"reprocessed context (cache miss)","tokens":148,"snippet":""}],"run":3,"tokens":163,"cumAfter":6286},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":14,"cumAfter":6300},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":6302},{"kind":"input","tokensNaive":740,"breakdown":[{"label":"tool result","tokens":306,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":43,"snippet":""}],"run":3,"tokens":349,"cumAfter":6651},{"kind":"thinking","tokensNaive":51,"snippet":"The proposal is done. Now specs and design are ready. I should get the instructions for specs and design. Since they are independent (both require proposal), I can get both instructions. Let me call them. ","run":3,"tokens":21,"cumAfter":6672},{"kind":"output","tokensNaive":1,"snippet":"    ","run":3,"tokens":23,"cumAfter":6695},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":6697},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":6699},{"kind":"input","tokensNaive":2223,"breakdown":[{"label":"tool result","tokens":584,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"artifactId\": \"specs\",\n  \"schemaName\": \"spec-driven\",\n  \"changeDir\": \"/Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-re"},{"label":"tool result","tokens":335,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"artifactId\": \"design\",\n  \"schemaName\": \"spec-driven\",\n  \"changeDir\": \"/Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-r"},{"label":"reprocessed context (cache miss)","tokens":0,"snippet":""}],"run":3,"tokens":919,"cumAfter":7618},{"kind":"thinking","tokensNaive":134,"snippet":"I need to write the specs and design. Since they are independent, I can write both. Let me create:\n\n1. specs/daily-reflection-tracker/spec.md\n2. design.md\n\nFor specs, I need to define requirements:\n- App loads with seeded historical data\n- Fixed questions list\n- Each question rat","run":3,"tokens":55,"cumAfter":7673},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":496,"cumAfter":8169},{"kind":"tool","name":"write","status":"done","run":3,"tokens":2,"cumAfter":8171},{"kind":"tool","name":"write","status":"done","run":3,"tokens":2,"cumAfter":8173},{"kind":"input","tokensNaive":77,"breakdown":[{"label":"tool result","tokens":17,"snippet":"Successfully wrote 2251 bytes to /Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker/specs/daily-reflection-tracker/spec.md"},{"label":"tool result","tokens":14,"snippet":"Successfully wrote 2424 bytes to /Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker/design.md"},{"label":"reprocessed context (cache miss)","tokens":517,"snippet":""}],"run":3,"tokens":548,"cumAfter":8721},{"kind":"thinking","tokensNaive":23,"snippet":"Now I need to check status and then write tasks.md. Let me get the instructions for tasks. ","run":3,"tokens":10,"cumAfter":8731},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":12,"cumAfter":8743},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":8745},{"kind":"input","tokensNaive":793,"breakdown":[{"label":"tool result","tokens":328,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":40,"snippet":""}],"run":3,"tokens":368,"cumAfter":9113},{"kind":"thinking","tokensNaive":14,"snippet":"Now tasks is ready. Let me get instructions for tasks. ","run":3,"tokens":6,"cumAfter":9119},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":13,"cumAfter":9132},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":9134},{"kind":"input","tokensNaive":617,"breakdown":[{"label":"tool result","tokens":255,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"artifactId\": \"tasks\",\n  \"schemaName\": \"spec-driven\",\n  \"changeDir\": \"/Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-re"},{"label":"reprocessed context (cache miss)","tokens":43,"snippet":""}],"run":3,"tokens":298,"cumAfter":9432},{"kind":"thinking","tokensNaive":26,"snippet":"Now I need to write the tasks.md. Then I can proceed to implementation. Let me write a clear task list. ","run":3,"tokens":11,"cumAfter":9443},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":186,"cumAfter":9629},{"kind":"tool","name":"write","status":"done","run":3,"tokens":2,"cumAfter":9631},{"kind":"input","tokensNaive":35,"breakdown":[{"label":"tool result","tokens":14,"snippet":"Successfully wrote 1387 bytes to /Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker/tasks.md"},{"label":"reprocessed context (cache miss)","tokens":197,"snippet":""}],"run":3,"tokens":212,"cumAfter":9843},{"kind":"thinking","tokensNaive":21,"snippet":"Now I need to validate and then implement. Let me check status first, then validate. ","run":3,"tokens":9,"cumAfter":9852},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":12,"cumAfter":9864},{"kind":"tool","name":"bash","status":"error","run":3,"tokens":2,"cumAfter":9866},{"kind":"input","tokensNaive":22,"breakdown":[{"label":"tool result","tokens":9,"snippet":"error: unknown option '--change'\n(Did you mean --changes?)\n\n\nCommand exited with code 1"},{"label":"reprocessed context (cache miss)","tokens":29,"snippet":""}],"run":3,"tokens":38,"cumAfter":9904},{"kind":"thinking","tokensNaive":83,"snippet":"The command is `openspec validate` maybe with --changes or just validate the current change. Let me check the help or just run without the flag. The instructions said validate rejects zero-delta changes, so there must be a validate command. Let me try `openspec validate` or `open","run":3,"tokens":34,"cumAfter":9938},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":5,"cumAfter":9943},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":9945},{"kind":"input","tokensNaive":215,"breakdown":[{"label":"tool result","tokens":89,"snippet":"Usage: openspec validate [options] [item-name]\n\nValidate changes and specs\n\nOptions:\n  --all              Validate all changes and specs\n  --changes          Validate all changes\n  --specs            "},{"label":"reprocessed context (cache miss)","tokens":5,"snippet":""}],"run":3,"tokens":94,"cumAfter":10039},{"kind":"thinking","tokensNaive":26,"snippet":"So it's `openspec validate [item-name]`. Let me run `openspec validate daily-reflection-tracker --json`. ","run":3,"tokens":11,"cumAfter":10050},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":13,"cumAfter":10063},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":10065},{"kind":"input","tokensNaive":125,"breakdown":[{"label":"tool result","tokens":52,"snippet":"{\n  \"items\": [\n    {\n      \"id\": \"daily-reflection-tracker\",\n      \"type\": \"change\",\n      \"valid\": true,\n      \"issues\": [],\n      \"durationMs\": 21\n    }\n  ],\n  \"summary\": {\n    \"totals\": {\n      \"it"},{"label":"reprocessed context (cache miss)","tokens":49,"snippet":""}],"run":3,"tokens":101,"cumAfter":10166},{"kind":"thinking","tokensNaive":622,"snippet":"Validation passed. Now I should implement. The user asked me to write the proposal, and I've done all the planning artifacts. Now I should probably continue to implementation since the tasks are ready. But the skill says to stop and wait for user direction after showing the first","run":3,"tokens":228,"cumAfter":10394},{"kind":"output","tokensNaive":0,"snippet":"  ","run":3,"tokens":0,"cumAfter":10394},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":10396},{"kind":"input","tokensNaive":834,"breakdown":[{"label":"tool result","tokens":345,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":48,"snippet":""}],"run":3,"tokens":393,"cumAfter":10789},{"kind":"thinking","tokensNaive":27,"snippet":"Planning is complete. Now I should get apply instructions and implement. Let me get the apply instructions.  ","run":3,"tokens":11,"cumAfter":10800},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":12,"cumAfter":10812},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":10814},{"kind":"input","tokensNaive":850,"breakdown":[{"label":"tool result","tokens":351,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"changeDir\": \"/Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"con"},{"label":"reprocessed context (cache miss)","tokens":57,"snippet":""}],"run":3,"tokens":408,"cumAfter":11222},{"kind":"thinking","tokensNaive":102,"snippet":"Now I need to implement the index.html file. Let me write a complete single-page app. I'll create it at the workspace root as specified in the proposal.\n\nKey features:\n- Fixed questions starting with \"Did I do my best today to...\"\n- 0-5 rating inputs (radio buttons)\n- Save to loc","run":3,"tokens":42,"cumAfter":11264},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":2074,"cumAfter":13338},{"kind":"tool","name":"write","status":"done","run":3,"tokens":2,"cumAfter":13340},{"kind":"input","tokensNaive":25,"breakdown":[{"label":"tool result","tokens":10,"snippet":"Successfully wrote 16724 bytes to /Users/jbranam/.local/share/introspect-harness/workspace/index.html"},{"label":"reprocessed context (cache miss)","tokens":2094,"snippet":""}],"run":3,"tokens":2105,"cumAfter":15445},{"kind":"thinking","tokensNaive":95,"snippet":"Now I need to update the tasks as complete. I should edit the tasks.md file to mark all tasks complete. Then validate. Let me also test the file by maybe opening it or at least checking syntax. Since I can't run a browser, I can use node to check for JS syntax errors maybe, but i","run":3,"tokens":39,"cumAfter":15484},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":349,"cumAfter":15833},{"kind":"tool","name":"edit","status":"done","run":3,"tokens":2,"cumAfter":15835},{"kind":"input","tokensNaive":36,"breakdown":[{"label":"tool result","tokens":15,"snippet":"Successfully replaced 15 block(s) in /Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker/tasks.md."},{"label":"reprocessed context (cache miss)","tokens":364,"snippet":""}],"run":3,"tokens":379,"cumAfter":16214},{"kind":"thinking","tokensNaive":93,"snippet":"Now let me validate the change again and check status. Also, I should do a basic syntax check on the JS. I can extract the script and run node --check, but it's embedded. Let me use a simple approach with node to parse the JS. Actually, I can use a quick bash command to check for","run":3,"tokens":38,"cumAfter":16252},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":21,"cumAfter":16273},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":16275},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":16277},{"kind":"input","tokensNaive":959,"breakdown":[{"label":"tool result","tokens":52,"snippet":"{\n  \"items\": [\n    {\n      \"id\": \"daily-reflection-tracker\",\n      \"type\": \"change\",\n      \"valid\": true,\n      \"issues\": [],\n      \"durationMs\": 23\n    }\n  ],\n  \"summary\": {\n    \"totals\": {\n      \"it"},{"label":"tool result","tokens":345,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":74,"snippet":""}],"run":3,"tokens":470,"cumAfter":16747},{"kind":"thinking","tokensNaive":88,"snippet":"The change is complete and validated. Let me also do a quick JS syntax check by extracting the script and running node --check. I'll use a bash command to extract the script content between <script> and <\/script> tags and check syntax.\n\nActually, I can just use node with a small ","run":3,"tokens":36,"cumAfter":16783},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":49,"cumAfter":16832},{"kind":"tool","name":"bash","status":"error","run":3,"tokens":2,"cumAfter":16834},{"kind":"input","tokensNaive":56,"breakdown":[{"label":"tool result","tokens":23,"snippet":"Blocked: path outside the workspace root: /tmp/check.js. Stay within the allowed directories (/Users/jbranam/.local/share/introspect-harness/workspace, /var/folders/4f/k1qsyp7n00b9wbjscczh_x0c0000gn/T"},{"label":"reprocessed context (cache miss)","tokens":66,"snippet":""}],"run":3,"tokens":89,"cumAfter":16923},{"kind":"thinking","tokensNaive":35,"snippet":"I need to write to the allowed temp directory. Let me use /var/folders/4f/k1qsyp7n00b9wbjscczh_x0c0000gn/T/introspect-harness/tmp/check.js.  ","run":3,"tokens":14,"cumAfter":16937},{"kind":"output","tokensNaive":1,"snippet":"   ","run":3,"tokens":81,"cumAfter":17018},{"kind":"tool","name":"bash","status":"done","run":3,"tokens":2,"cumAfter":17020},{"kind":"input","tokensNaive":3,"breakdown":[{"label":"tool result","tokens":1,"snippet":"JS syntax OK\n"},{"label":"reprocessed context (cache miss)","tokens":87,"snippet":""}],"run":3,"tokens":88,"cumAfter":17108},{"kind":"thinking","tokensNaive":14,"snippet":"Everything is done. Let me provide a summary to the user. ","run":3,"tokens":6,"cumAfter":17114},{"kind":"output","tokensNaive":334,"snippet":" Done. I wrote the proposal, completed the remaining planning artifacts (specs, design, tasks), and implemented the app.\n\n**Files created:**\n- `index.html` — the complete single-page daily reflection tracker app.\n- `openspec/changes/daily-reflection-tracker/proposal.md`\n- `opensp","run":3,"tokens":132,"cumAfter":17246},{"kind":"skill","label":"sync-specs","tokensNaive":3095,"snippet":"<skill name=\"sync-specs\" location=\"/Users/jbranam/.local/share/introspect-harness/workspace/.agents/skills/sync-specs/SKILL.md\">\nReferences are relative to /Users/jbranam/.local/share/introspect-harness/workspace/.agents/skills/sync-specs.\n\nSync delta specs from a change to main ","run":4,"tokens":1279,"cumAfter":18525},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":6913,"snippet":""}],"run":4,"tokens":8192,"cumAfter":26717},{"kind":"thinking","tokensNaive":110,"snippet":"The user invoked the sync-specs skill. I need to follow its steps.\n\n1. Select the change: From conversation context, the change is \"daily-reflection-tracker\". I should announce it.\n2. Resolve change context: Run openspec status.\n3. Find delta specs: Use existingOutputPaths from s","run":4,"tokens":45,"cumAfter":26762},{"kind":"output","tokensNaive":0,"snippet":"  ","run":4,"tokens":9,"cumAfter":26771},{"kind":"tool","name":"bash","status":"done","run":4,"tokens":2,"cumAfter":26773},{"kind":"input","tokensNaive":834,"breakdown":[{"label":"tool result","tokens":345,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":45,"snippet":""}],"run":4,"tokens":389,"cumAfter":27162},{"kind":"thinking","tokensNaive":110,"snippet":"Using change: daily-reflection-tracker. The delta spec path is /Users/jbranam/.local/share/introspect-harness/workspace/openspec/changes/daily-reflection-tracker/specs/daily-reflection-tracker/spec.md. The main spec path is /Users/jbranam/.local/share/introspect-harness/workspace","run":4,"tokens":45,"cumAfter":27207},{"kind":"output","tokensNaive":1,"snippet":"    ","run":4,"tokens":35,"cumAfter":27242},{"kind":"tool","name":"read","status":"done","run":4,"tokens":2,"cumAfter":27244},{"kind":"tool","name":"read","status":"error","run":4,"tokens":2,"cumAfter":27246},{"kind":"input","tokensNaive":600,"breakdown":[{"label":"tool result","tokens":233,"snippet":"## Purpose\n\nProvide a self-contained browser-based tool for rating daily effort across personal life areas and reviewing trends over recent weeks.\n\n## ADDED Requirements\n\n### Requirement: App initiali"},{"label":"tool result","tokens":15,"snippet":"ENOENT: no such file or directory, access '/Users/jbranam/.local/share/introspect-harness/workspace/openspec/specs/daily-reflection-tracker/spec.md'"},{"label":"reprocessed context (cache miss)","tokens":32,"snippet":""}],"run":4,"tokens":280,"cumAfter":27526},{"kind":"thinking","tokensNaive":86,"snippet":"The main spec doesn't exist yet, so I need to create it. The delta spec has a Purpose section and ADDED requirements. I need to create a main spec with:\n\n# daily-reflection-tracker Specification\n\n## Purpose\n(copy from delta)\n\n## Requirements\n(all the ADDED requirements, but no de","run":4,"tokens":36,"cumAfter":27562},{"kind":"output","tokensNaive":1,"snippet":"   ","run":4,"tokens":14,"cumAfter":27576},{"kind":"tool","name":"bash","status":"done","run":4,"tokens":2,"cumAfter":27578},{"kind":"input","tokensNaive":3,"breakdown":[{"label":"tool result","tokens":1,"snippet":"(no output)"},{"label":"reprocessed context (cache miss)","tokens":33,"snippet":""}],"run":4,"tokens":35,"cumAfter":27613},{"kind":"output","tokensNaive":0,"snippet":"  ","run":4,"tokens":236,"cumAfter":27849},{"kind":"tool","name":"write","status":"done","run":4,"tokens":2,"cumAfter":27851},{"kind":"input","tokensNaive":34,"breakdown":[{"label":"tool result","tokens":14,"snippet":"Successfully wrote 2287 bytes to /Users/jbranam/.local/share/introspect-harness/workspace/openspec/specs/daily-reflection-tracker/spec.md"},{"label":"reprocessed context (cache miss)","tokens":252,"snippet":""}],"run":4,"tokens":266,"cumAfter":28117},{"kind":"thinking","tokensNaive":7,"snippet":"Now validate the main specs. ","run":4,"tokens":3,"cumAfter":28120},{"kind":"output","tokensNaive":0,"snippet":"  ","run":4,"tokens":11,"cumAfter":28131},{"kind":"tool","name":"bash","status":"done","run":4,"tokens":2,"cumAfter":28133},{"kind":"input","tokensNaive":124,"breakdown":[{"label":"tool result","tokens":51,"snippet":"{\n  \"items\": [\n    {\n      \"id\": \"daily-reflection-tracker\",\n      \"type\": \"spec\",\n      \"valid\": true,\n      \"issues\": [],\n      \"durationMs\": 6\n    }\n  ],\n  \"summary\": {\n    \"totals\": {\n      \"items"},{"label":"reprocessed context (cache miss)","tokens":40,"snippet":""}],"run":4,"tokens":91,"cumAfter":28224},{"kind":"thinking","tokensNaive":12,"snippet":"Validation passed. Now I should show the summary. ","run":4,"tokens":5,"cumAfter":28229},{"kind":"output","tokensNaive":160,"snippet":" Using change: `daily-reflection-tracker` (override with `/sync-specs <other>`).\n\n## Specs Synced: daily-reflection-tracker\n\nUpdated main specs:\n\n**daily-reflection-tracker**:\n- Created new spec file at `openspec/specs/daily-reflection-tracker/spec.md`\n- Added requirements:\n  - A","run":4,"tokens":61,"cumAfter":28290},{"kind":"skill","label":"archive-change","tokensNaive":2634,"snippet":"<skill name=\"archive-change\" location=\"/Users/jbranam/.local/share/introspect-harness/workspace/.agents/skills/archive-change/SKILL.md\">\nReferences are relative to /Users/jbranam/.local/share/introspect-harness/workspace/.agents/skills/archive-change.\n\nArchive a completed change ","run":5,"tokens":1089,"cumAfter":29379},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":965,"snippet":""}],"run":5,"tokens":2054,"cumAfter":31433},{"kind":"thinking","tokensNaive":229,"snippet":"The user invoked the archive-change skill. I need to follow its steps.\n\n1. Select the change: infer from context -> daily-reflection-tracker. Announce.\n2. Load archive inputs: run openspec instructions archive --change daily-reflection-tracker --json. This is advisory; if fails, ","run":5,"tokens":95,"cumAfter":31528},{"kind":"output","tokensNaive":1,"snippet":"    ","run":5,"tokens":12,"cumAfter":31540},{"kind":"tool","name":"bash","status":"done","run":5,"tokens":2,"cumAfter":31542},{"kind":"tool","name":"bash","status":"done","run":5,"tokens":2,"cumAfter":31544},{"kind":"input","tokensNaive":874,"breakdown":[{"label":"tool result","tokens":17,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"root\": {\n    \"path\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"source\": \"nearest\"\n  }\n}\n"},{"label":"tool result","tokens":345,"snippet":"{\n  \"changeName\": \"daily-reflection-tracker\",\n  \"schemaName\": \"spec-driven\",\n  \"planningHome\": {\n    \"kind\": \"repo\",\n    \"root\": \"/Users/jbranam/.local/share/introspect-harness/workspace\",\n    \"change"},{"label":"reprocessed context (cache miss)","tokens":63,"snippet":""}],"run":5,"tokens":424,"cumAfter":31968},{"kind":"thinking","tokensNaive":42,"snippet":"Status shows all artifacts done. Need to check tasks.md for incomplete tasks. We already marked them all complete. Let's verify by reading or just trust? Better to read. ","run":5,"tokens":17,"cumAfter":31985},{"kind":"output","tokensNaive":1,"snippet":"   ","run":5,"tokens":14,"cumAfter":31999},{"kind":"tool","name":"read","status":"done","run":5,"tokens":2,"cumAfter":32001},{"kind":"input","tokensNaive":347,"breakdown":[{"label":"tool result","tokens":143,"snippet":"## 1. Scaffold the HTML file\n\n- [x] 1.1 Create `index.html` in the workspace root with a semantic page structure: header, daily-entry section, and history section.\n- [x] 1.2 Embed CSS for layout, typo"},{"label":"reprocessed context (cache miss)","tokens":47,"snippet":""}],"run":5,"tokens":190,"cumAfter":32191},{"kind":"thinking","tokensNaive":239,"snippet":"All tasks complete. Now assess delta spec sync state. We need to compare delta spec with main spec. They should be identical except main spec has title and Requirements section header vs ADDED Requirements. We already synced. So no changes needed. Prompt: \"Archive now\", \"Sync any","run":5,"tokens":99,"cumAfter":32290},{"kind":"output","tokensNaive":166,"snippet":" Using change: `daily-reflection-tracker` (override with `/archive-change <other>`).\n\n**Completion check:**\n- All planning artifacts are `done` (proposal, specs, design, tasks).\n- All 15 tasks are complete.\n- Delta spec exists for capability `daily-reflection-tracker`.\n\n**Delta s","run":5,"tokens":50,"cumAfter":32340},{"kind":"user","label":null,"tokensNaive":3,"snippet":"archive now","run":6,"tokens":1,"cumAfter":32341},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":679,"snippet":""}],"run":6,"tokens":680,"cumAfter":33021},{"kind":"output","tokensNaive":1,"snippet":"   ","run":6,"tokens":45,"cumAfter":33066},{"kind":"tool","name":"bash","status":"done","run":6,"tokens":2,"cumAfter":33068},{"kind":"input","tokensNaive":3,"breakdown":[{"label":"tool result","tokens":1,"snippet":"(no output)"},{"label":"reprocessed context (cache miss)","tokens":58,"snippet":""}],"run":6,"tokens":60,"cumAfter":33128},{"kind":"output","tokensNaive":1,"snippet":"   ","run":6,"tokens":14,"cumAfter":33142},{"kind":"tool","name":"bash","status":"done","run":6,"tokens":2,"cumAfter":33144},{"kind":"input","tokensNaive":214,"breakdown":[{"label":"tool result","tokens":88,"snippet":"{\n  \"items\": [\n    {\n      \"id\": \"daily-reflection-tracker\",\n      \"type\": \"spec\",\n      \"valid\": true,\n      \"issues\": [],\n      \"durationMs\": 6\n    }\n  ],\n  \"summary\": {\n    \"totals\": {\n      \"items"},{"label":"reprocessed context (cache miss)","tokens":59,"snippet":""}],"run":6,"tokens":148,"cumAfter":33292},{"kind":"thinking","tokensNaive":1,"snippet":"None ","run":6,"tokens":1,"cumAfter":33293},{"kind":"output","tokensNaive":96,"snippet":" ## Archive Complete\n\n**Change:** daily-reflection-tracker  \n**Schema:** spec-driven  \n**Archived to:** `openspec/changes/archive/2025-06-10-daily-reflection-tracker/`  \n**Specs:** ✓ Synced to main specs  \n**Status:** All artifacts complete. All tasks complete.\n\nValidation passed","run":6,"tokens":38,"cumAfter":33331},{"kind":"user","label":null,"tokensNaive":8,"snippet":"Thanks so much, it looks great!","run":7,"tokens":3,"cumAfter":33334},{"kind":"input","tokensNaive":0,"breakdown":[{"label":"reprocessed context (cache miss)","tokens":202,"snippet":""}],"run":7,"tokens":205,"cumAfter":33539},{"kind":"thinking","tokensNaive":26,"snippet":"The user is expressing gratitude and satisfaction. No further action needed beyond a friendly response. ","run":7,"tokens":11,"cumAfter":33550},{"kind":"output","tokensNaive":32,"snippet":"  You're welcome! Glad you like it. If you ever want to add more questions, export data, or tweak the chart, just let me know.","run":7,"tokens":9,"cumAfter":33559}],"contextWindow":262144,"midCutIndex":79,"meta":{"recordingId":"17232253-18e0-4ba1-923c-66e68771edad","model":"moonshotai/Kimi-K2.7-Code","realFinalTokens":33547,"realFinalPercent":12.8}};
+
+const ZONES = { smart: 0.50, dumb: 0.80 }; // compaction = above dumb
+
+const CAT = {
+  foundation: { label: 'Foundation', color: 'var(--c-foundation)' },
+  user:       { label: 'User prompt', color: 'var(--c-user)' },
+  skill:      { label: 'Skill auto-loaded', color: 'var(--c-skill)' },
+  input:      { label: 'New input (tool results + reprocessed context)', color: 'var(--c-input)' },
+  thinking:   { label: 'Thinking', color: 'var(--c-thinking)' },
+  output:     { label: 'Assistant output', color: 'var(--c-output)' },
+};
+const TOOL_COLOR = { done: 'var(--c-tool-done)', error: 'var(--c-tool-error)', running: 'var(--c-tool-running)' };
+
+// Fixed waffle grid representing 0..contextWindow linearly, filling row-major.
+const COLS = 24;
+const ROWS = 50;
+const TOTAL_CELLS = COLS * ROWS;
+const CELL = 14, GAP = 2, PITCH = CELL + GAP;
+
+document.getElementById('rec-id').textContent = DATA.meta.recordingId;
+document.getElementById('rec-model').textContent = DATA.meta.model;
+
+function buildExtended(times) {
+  const realEntries = DATA.entries;
+  const realTotal = DATA.foundation.tokens + realEntries.reduce((s, e) => s + e.tokens, 0);
+  const realTurns = realEntries[realEntries.length - 1].run;
+  let out = [];
+  for (let cycle = 0; cycle < times; cycle++) {
+    const offsetTokens = cycle * realTotal;
+    const offsetRun = cycle * realTurns;
+    for (const e of realEntries) {
+      out.push(Object.assign({}, e, {
+        cumAfter: e.cumAfter + offsetTokens,
+        run: e.run + offsetRun,
+        extrapolated: cycle > 0,
+      }));
+    }
+  }
+  return out;
+}
+
+let currentEntries = DATA.entries;
+let currentIsExtended = false;
+
+function setupSlider() {
+  const slider = document.getElementById('progress');
+  slider.max = currentEntries.length;
+  slider.value = currentEntries.length;
+}
+
+function fmtTokens(n) { return Math.round(n).toLocaleString(); }
+
+function zoneOf(pct) {
+  if (pct >= ZONES.dumb * 100) return 'compaction';
+  if (pct >= ZONES.smart * 100) return 'dumb';
+  return 'smart';
+}
+
+/** Build chronological [start,end) token segments (foundation + non-tool entries). Tool
+ * calls are excluded here — they're rendered as overlay markers, not binned into cells,
+ * since their true token share is negligible and they're worth always seeing regardless
+ * of aggregation (see notes card). */
+function buildSegments(visible, foundationTokens) {
+  const segs = [{ start: 0, end: foundationTokens, kind: 'foundation', ref: { kind: 'foundation' } }];
+  let cursor = foundationTokens;
+  for (const e of visible) {
+    if (e.kind === 'tool') continue;
+    const start = cursor, end = cursor + e.tokens;
+    segs.push({ start, end, kind: e.kind, ref: e });
+    cursor = end;
+  }
+  return segs;
+}
+
+/** Debounce + aggregate: bin the chronological segments into fixed-size grid cells.
+ * Several small consecutive entries (a thinking sliver, a tool result, an output sliver)
+ * naturally land in the same cell and are reported together. Each cell keeps its full
+ * per-kind contribution breakdown but is colored by a single dominant category — the
+ * blended color split from the base grid mockup is dropped in favor of grouping same-
+ * dominant runs into one visual section (see buildSections). */
+function buildCells(segs, quantum, maxCells) {
+  const total = segs.length ? segs[segs.length - 1].end : 0;
+  const filledCount = Math.min(Math.ceil(total / quantum), maxCells);
+  const cells = [];
+  let segIdx = 0;
+  for (let c = 0; c < filledCount; c++) {
+    const cellStart = c * quantum, cellEnd = (c + 1) * quantum;
+    while (segIdx < segs.length && segs[segIdx].end <= cellStart) segIdx++;
+    const contrib = {};
+    const items = [];
+    let k = segIdx;
+    while (k < segs.length && segs[k].start < cellEnd) {
+      const s = segs[k];
+      const overlap = Math.min(s.end, cellEnd) - Math.max(s.start, cellStart);
+      if (overlap > 0) {
+        contrib[s.kind] = (contrib[s.kind] || 0) + overlap;
+        items.push({ kind: s.kind, tokens: overlap, ref: s.ref });
+      }
+      k++;
+    }
+    const sorted = Object.entries(contrib).sort((a, b) => b[1] - a[1]);
+    const dominant = sorted.length ? sorted[0][0] : null;
+    cells.push({ index: c, contrib, items, dominant });
+  }
+  return cells;
+}
+
+/** Group consecutive (row-major) cells that share the same dominant category into one
+ * "section" — this is what makes an aggregate read as a single shape spanning many grid
+ * cells instead of N independently-colored squares. Hovering any cell in a section
+ * highlights every cell in it and the tooltip reports the section's total, not just the
+ * hovered cell's slice. */
+function buildSections(cells) {
+  const sections = [];
+  let current = null;
+  for (const cell of cells) {
+    if (current && current.dominant === cell.dominant) {
+      current.cells.push(cell);
+    } else {
+      current = { dominant: cell.dominant, cells: [cell], divs: [] };
+      sections.push(current);
+    }
+    cell.section = current;
+  }
+  for (const s of sections) {
+    const totalsByKind = {};
+    const items = [];
+    for (const cell of s.cells) {
+      for (const [k, v] of Object.entries(cell.contrib)) totalsByKind[k] = (totalsByKind[k] || 0) + v;
+      items.push(...cell.items);
+    }
+    s.totalsByKind = totalsByKind;
+    s.items = items;
+    s.total = Object.values(totalsByKind).reduce((a, b) => a + b, 0);
+    s.startIndex = s.cells[0].index;
+    s.endIndex = s.cells[s.cells.length - 1].index;
+  }
+  return sections;
+}
+
+function cellColor(cell) {
+  if (!cell.dominant) return 'rgba(255,255,255,0.045)';
+  return CAT[cell.dominant] ? CAT[cell.dominant].color : '#555';
+}
+
+function worstStatus(list) {
+  if (list.some(e => e.status === 'error')) return 'error';
+  if (list.some(e => e.status === 'running')) return 'running';
+  return 'done';
+}
+
+function render() {
+  const slider = document.getElementById('progress');
+  const idx = parseInt(slider.value, 10);
+  const visible = currentEntries.slice(0, idx);
+
+  const foundationTokens = DATA.foundation.tokens;
+  const cumTotal = visible.length ? visible[visible.length - 1].cumAfter : foundationTokens;
+  const pct = (cumTotal / DATA.contextWindow) * 100;
+
+  document.getElementById('stat-tokens').textContent = fmtTokens(cumTotal);
+  document.getElementById('stat-cost').textContent = ((cumTotal / 1_000_000) * 5).toFixed(4);
+  const pctEl = document.getElementById('stat-pct');
+  pctEl.textContent = pct.toFixed(1) + '%';
+  pctEl.className = 'pct zone-' + zoneOf(pct);
+
+  const lastRun = visible.length ? visible[visible.length - 1].run : 0;
+  const extraNote = visible.some(e => e.extrapolated) ? ' (extrapolated)' : '';
+  document.getElementById('progress-label').innerHTML =
+    '<b>' + idx + ' / ' + currentEntries.length + '</b> entries · turn ~' + lastRun + extraNote;
+
+  document.getElementById('foundation-snip').textContent = DATA.foundation.systemPromptSnippet + '…';
+  const skillsEl = document.getElementById('foundation-skills');
+  skillsEl.innerHTML = '';
+  DATA.foundation.skills.forEach(s => {
+    const span = document.createElement('span');
+    span.textContent = s;
+    skillsEl.appendChild(span);
+  });
+
+  const quantum = DATA.contextWindow / TOTAL_CELLS;
+  const segs = buildSegments(visible, foundationTokens);
+  const cells = buildCells(segs, quantum, TOTAL_CELLS);
+  const sections = buildSections(cells);
+
+  // grid outer sizing
+  const gridWidth = COLS * PITCH - GAP;
+  const gridHeight = ROWS * PITCH - GAP;
+  const outer = document.getElementById('grid-outer');
+  outer.style.width = (gridWidth + 16) + 'px';
+
+  const cellGrid = document.getElementById('cell-grid');
+  cellGrid.style.gridTemplateColumns = `repeat(${COLS}, ${CELL}px)`;
+  cellGrid.innerHTML = '';
+  for (let i = 0; i < TOTAL_CELLS; i++) {
+    const div = document.createElement('div');
+    div.className = 'cell';
+    div.style.width = CELL + 'px';
+    div.style.height = CELL + 'px';
+    if (i < cells.length) {
+      const cell = cells[i];
+      div.classList.add('filled');
+      div.style.background = cellColor(cell);
+      if (i === cells.length - 1) div.classList.add('current');
+      cell.section.divs.push(div);
+      div.addEventListener('mouseenter', () => {
+        cell.section.divs.forEach(d => d.classList.add('section-hover'));
+      });
+      div.addEventListener('mousemove', (ev) => showCellTooltip(ev, cell.section));
+      div.addEventListener('mouseleave', () => {
+        cell.section.divs.forEach(d => d.classList.remove('section-hover'));
+        hideTooltip();
+      });
+    }
+    cellGrid.appendChild(div);
+  }
+
+  // tool markers: one square indicator per occupied grid cell (deduped), sized by how
+  // many calls landed there, colored by the worst status among them. Hover lists every
+  // call that landed in the cell instead of showing/covering N separate tiny dots.
+  const markerLayer = document.getElementById('marker-layer');
+  markerLayer.innerHTML = '';
+  const toolsByCell = {};
+  for (const e of visible) {
+    if (e.kind !== 'tool') continue;
+    const cellIndexF = e.cumAfter / quantum;
+    const cellIndex = Math.min(Math.floor(cellIndexF), TOTAL_CELLS - 1);
+    (toolsByCell[cellIndex] = toolsByCell[cellIndex] || []).push(e);
+  }
+  for (const key of Object.keys(toolsByCell)) {
+    const cellIndex = parseInt(key, 10);
+    const list = toolsByCell[cellIndex];
+    const row = Math.floor(cellIndex / COLS);
+    const col = cellIndex % COLS;
+    const status = worstStatus(list);
+    const wrap = document.createElement('div');
+    wrap.className = 'tool-marker-wrap';
+    wrap.style.left = (8 + col * PITCH) + 'px';
+    wrap.style.top = (8 + row * PITCH) + 'px';
+    wrap.style.width = CELL + 'px';
+    wrap.style.height = CELL + 'px';
+    const sq = document.createElement('div');
+    sq.className = 'tool-marker';
+    const size = Math.min(6 + (list.length - 1) * 2, 12);
+    sq.style.width = size + 'px';
+    sq.style.height = size + 'px';
+    sq.style.background = TOOL_COLOR[status];
+    if (list.some(e => e.extrapolated)) sq.style.opacity = '0.55';
+    wrap.appendChild(sq);
+    wrap.addEventListener('mousemove', (ev) => showToolCellTooltip(ev, list));
+    wrap.addEventListener('mouseleave', hideTooltip);
+    markerLayer.appendChild(wrap);
+  }
+
+  // zone bands, positioned by which row a given token threshold falls into
+  function pixelYForTokens(tokens) {
+    const cellIdx = Math.min(tokens / quantum, TOTAL_CELLS);
+    const row = Math.floor(cellIdx / COLS);
+    return 8 + row * PITCH;
+  }
+  const smartY = pixelYForTokens(ZONES.smart * DATA.contextWindow);
+  const dumbY = pixelYForTokens(ZONES.dumb * DATA.contextWindow);
+  const bottomY = 8 + gridHeight;
+
+  const smartBand = document.getElementById('zone-smart');
+  smartBand.style.top = '8px'; smartBand.style.left = '8px';
+  smartBand.style.width = gridWidth + 'px';
+  smartBand.style.height = (smartY - 8) + 'px'; smartBand.style.background = 'var(--zone-smart)';
+  const dumbBand = document.getElementById('zone-dumb');
+  dumbBand.style.top = smartY + 'px'; dumbBand.style.left = '8px';
+  dumbBand.style.width = gridWidth + 'px';
+  dumbBand.style.height = (dumbY - smartY) + 'px'; dumbBand.style.background = 'var(--zone-dumb)';
+  const compBand = document.getElementById('zone-compaction');
+  compBand.style.top = dumbY + 'px'; compBand.style.left = '8px';
+  compBand.style.width = gridWidth + 'px';
+  compBand.style.height = Math.max(bottomY - dumbY, 0) + 'px'; compBand.style.background = 'var(--zone-compaction)';
+
+  document.getElementById('zone-label-smart').style.top = Math.max(smartY - 14, 4) + 'px';
+  document.getElementById('zone-label-dumb').style.top = (smartY + 4) + 'px';
+  document.getElementById('zone-label-compaction').style.top = (dumbY + 4) + 'px';
+
+  renderLegend(visible, foundationTokens);
+}
+
+function showCellTooltip(ev, section) {
+  const dominant = section.dominant;
+  const color = dominant && CAT[dominant] ? CAT[dominant].color : '#555';
+  const label = dominant && CAT[dominant] ? CAT[dominant].label : 'empty';
+  const cellCount = section.cells.length;
+  let html = '<div class="tt-kind" style="background:' + color + '22;color:' + color + ';border:1px solid ' + color + '55;">' + escapeHtml(label) + ' · section of ' + cellCount + (cellCount === 1 ? ' cell' : ' cells') + '</div>';
+
+  // group items by kind for a compact breakdown, summed across every cell in the section
+  const byKind = {};
+  for (const it of section.items) {
+    if (!byKind[it.kind]) byKind[it.kind] = { tokens: 0, snippet: '', ref: it.ref };
+    byKind[it.kind].tokens += it.tokens;
+    if (!byKind[it.kind].snippet && it.ref && it.ref.snippet) byKind[it.kind].snippet = it.ref.snippet;
+    if (it.kind === 'skill' && it.ref && it.ref.label) byKind[it.kind].label = it.ref.label;
+  }
+  const rows = Object.entries(byKind).sort((a, b) => b[1].tokens - a[1].tokens);
+  html += '<div class="tt-breakdown">' + rows.map(([kind, v]) => {
+    const c = CAT[kind] ? CAT[kind].color : '#555';
+    const lbl = kind === 'skill' && v.label ? 'skill: ' + v.label : (CAT[kind] ? CAT[kind].label : kind);
+    return '<div><span class="k"><span class="sw" style="background:' + c + '"></span>' + escapeHtml(lbl) + '</span><span>' + fmtTokens(v.tokens) + ' tok</span></div>';
+  }).join('') + '</div>';
+
+  const firstSnippet = rows.map(([, v]) => v.snippet).find(s => s);
+  if (firstSnippet) {
+    html += '<div class="tt-snippet">' + escapeHtml(firstSnippet.slice(0, 200)) + '</div>';
+  }
+  html += '<div class="tt-meta">' + fmtTokens(section.total) + ' tok total in this section · cells #' + (section.startIndex + 1) + '–' + (section.endIndex + 1) + '</div>';
+
+  const tt = document.getElementById('tooltip');
+  tt.innerHTML = html;
+  tt.style.display = 'block';
+  const x = Math.min(ev.clientX + 16, window.innerWidth - 360);
+  const y = Math.min(ev.clientY + 16, window.innerHeight - 40);
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+
+function showToolCellTooltip(ev, list) {
+  const header = list.length + (list.length === 1 ? ' tool call in this cell' : ' tool calls in this cell');
+  let html = '<div class="tt-kind" style="background:#37415144;color:#e5e7eb;border:1px solid #374151;">' + header + '</div>';
+  html += '<div class="tt-breakdown">' + list.map(e => {
+    const c = TOOL_COLOR[e.status] || TOOL_COLOR.done;
+    return '<div><span class="k"><span class="sw" style="background:' + c + '"></span>' + escapeHtml(e.name) + (e.extrapolated ? ' (extrapolated)' : '') + '</span><span>' + e.status + ' · turn ' + e.run + '</span></div>';
+  }).join('') + '</div>';
+
+  const tt = document.getElementById('tooltip');
+  tt.innerHTML = html;
+  tt.style.display = 'block';
+  const x = Math.min(ev.clientX + 16, window.innerWidth - 360);
+  const y = Math.min(ev.clientY + 16, window.innerHeight - 40);
+  tt.style.left = x + 'px';
+  tt.style.top = y + 'px';
+}
+function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function renderLegend(visible, foundationTokens) {
+  const totals = { foundation: foundationTokens, tool: 0 };
+  for (const e of visible) {
+    if (e.kind === 'tool') { totals.tool += 15; continue; }
+    totals[e.kind] = (totals[e.kind] || 0) + e.tokens;
+  }
+  const grand = Object.values(totals).reduce((a, b) => a + b, 0) || 1;
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  const order = ['foundation', 'user', 'skill', 'input', 'thinking', 'output', 'tool'];
+  for (const key of order) {
+    const tok = totals[key] || 0;
+    const item = document.createElement('div');
+    item.className = 'item';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = key === 'tool' ? 'var(--c-tool-done)' : CAT[key].color;
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = key === 'tool' ? 'Tool calls (markers)' : CAT[key].label;
+    const val = document.createElement('span');
+    val.className = 'val';
+    if (key === 'tool') {
+      const calls = visible.filter(e => e.kind === 'tool');
+      const errors = calls.filter(e => e.status === 'error').length;
+      val.textContent = calls.length + ' calls' + (errors ? ' (' + errors + ' error)' : '');
+    } else {
+      val.textContent = fmtTokens(tok) + ' (' + ((tok / grand) * 100).toFixed(1) + '%)';
+    }
+    item.appendChild(swatch); item.appendChild(name); item.appendChild(val);
+    legend.appendChild(item);
+  }
+}
+
+// ---- controls wiring ----
+const slider = document.getElementById('progress');
+slider.addEventListener('input', render);
+
+function setPreset(which) {
+  document.querySelectorAll('.presets button').forEach(b => b.classList.remove('active'));
+  document.getElementById('extend-hint').style.display = 'none';
+  if (which === 'extended') {
+    currentEntries = buildExtended(4);
+    currentIsExtended = true;
+    setupSlider();
+    slider.value = currentEntries.length;
+    document.getElementById('preset-extended').classList.add('active');
+    document.getElementById('extend-hint').style.display = 'block';
+  } else {
+    if (currentIsExtended) {
+      currentEntries = DATA.entries;
+      currentIsExtended = false;
+      setupSlider();
+    }
+    if (which === 'start') { slider.value = 0; document.getElementById('preset-start').classList.add('active'); }
+    if (which === 'mid') { slider.value = DATA.midCutIndex; document.getElementById('preset-mid').classList.add('active'); }
+    if (which === 'end') { slider.value = DATA.entries.length; document.getElementById('preset-end').classList.add('active'); }
+  }
+  render();
+}
+document.getElementById('preset-start').addEventListener('click', () => setPreset('start'));
+document.getElementById('preset-mid').addEventListener('click', () => setPreset('mid'));
+document.getElementById('preset-end').addEventListener('click', () => setPreset('end'));
+document.getElementById('preset-extended').addEventListener('click', () => setPreset('extended'));
+
+document.getElementById('zone-bound-smart').textContent = '0–' + Math.round(ZONES.smart * 100) + '%';
+document.getElementById('zone-bound-dumb').textContent = Math.round(ZONES.smart * 100) + '–' + Math.round(ZONES.dumb * 100) + '%';
+document.getElementById('zone-bound-compaction').textContent = Math.round(ZONES.dumb * 100) + '-100%';
+
+setupSlider();
+render();
+</script>
+</body>
+</html>
