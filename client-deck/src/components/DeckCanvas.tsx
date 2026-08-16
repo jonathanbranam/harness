@@ -445,14 +445,16 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
   }
 
   return (
-    // min-w-0: this is the grid item for DeckPage's `1fr` column. Without it,
-    // its default overflow:visible min-width:auto resolves to its content's
-    // min-content size — and since a descendant (the scaled canvas wrapper
-    // below) has an explicit pixel width derived from `scale`, that would
-    // ratchet the grid track's minimum width up on every render and never
-    // let it shrink back down, only grow (mirrors DeckPage.tsx's min-h-0 on
-    // the same grid, but for the horizontal axis).
-    <div className="h-full min-w-0 flex flex-col">
+    // min-w-0/min-h-0: this is the grid item for DeckPage's `1fr` column and
+    // its single (implicit, auto-sized) row. Without both, its default
+    // overflow:visible min-width/min-height:auto resolves to its content's
+    // min-content size in that axis — and since a descendant (the scaled
+    // canvas wrapper below) has explicit pixel width/height derived from
+    // `scale`, that would ratchet the grid track's minimum size up on every
+    // render and never let it shrink back down, only grow (mirrors
+    // DeckPage.tsx's min-h-0 on the grid container itself, which only
+    // protects the container — this protects the item within it).
+    <div className="h-full min-w-0 min-h-0 flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900 text-sm">
         <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={addTextBox}>
           + Text box
