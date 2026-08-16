@@ -48,6 +48,13 @@ type Corner = (typeof RESIZE_CORNERS)[number]
 const SELECTION_OVERLAY_Z_INDEX = 9999
 const EDITING_Z_INDEX = 9998
 
+// Diagonal red line drawn over a color swatch to indicate "no color" —
+// a gradient rather than a rotated element so it stays crisp at any swatch size.
+const NONE_SWATCH_OVERLAY_STYLE = {
+  background:
+    'linear-gradient(to top right, transparent calc(50% - 1.5px), #ef4444 calc(50% - 1.5px), #ef4444 calc(50% + 1.5px), transparent calc(50% + 1.5px))',
+}
+
 type Rect = { x: number; y: number; width: number; height: number }
 interface EndpointOverride {
   which: 'start' | 'end'
@@ -813,16 +820,25 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
 
           <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Fill
-            <input
-              type="color"
-              className="w-6 h-6 bg-transparent disabled:opacity-40"
-              disabled={!firstSelected || isLineLike(firstSelected)}
-              value={firstSelected && 'fillColor' in firstSelected && firstSelected.fillColor !== 'transparent' ? firstSelected.fillColor : '#374151'}
-              onChange={(e) => setStyleOnSelection('setFillColor', { color: e.target.value })}
-            />
+            <span className="relative inline-block w-6 h-6">
+              <input
+                type="color"
+                className="w-6 h-6 bg-transparent disabled:opacity-40"
+                disabled={!firstSelected || isLineLike(firstSelected)}
+                value={firstSelected && 'fillColor' in firstSelected && firstSelected.fillColor !== 'transparent' ? firstSelected.fillColor : '#374151'}
+                onChange={(e) => setStyleOnSelection('setFillColor', { color: e.target.value })}
+              />
+              {firstSelected && 'fillColor' in firstSelected && firstSelected.fillColor === 'transparent' && (
+                <span className="pointer-events-none absolute inset-0 rounded-sm" style={NONE_SWATCH_OVERLAY_STYLE} />
+              )}
+            </span>
             <button
               type="button"
-              className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40"
+              className={
+                firstSelected && 'fillColor' in firstSelected && firstSelected.fillColor === 'transparent'
+                  ? 'text-xs font-semibold text-red-500 underline disabled:opacity-40'
+                  : 'text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40'
+              }
               disabled={!firstSelected || isLineLike(firstSelected)}
               onClick={() => setStyleOnSelection('setFillColor', { color: 'transparent' })}
             >
@@ -832,24 +848,33 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
 
           <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Border
-            <input
-              type="color"
-              className="w-6 h-6 bg-transparent disabled:opacity-40"
-              disabled={!firstSelected}
-              value={
-                firstSelected
-                  ? isLineLike(firstSelected)
-                    ? firstSelected.strokeColor
-                    : firstSelected.borderColor !== 'transparent'
-                      ? firstSelected.borderColor
-                      : '#ffffff'
-                  : '#ffffff'
-              }
-              onChange={(e) => setStyleOnSelection('setBorderColor', { color: e.target.value })}
-            />
+            <span className="relative inline-block w-6 h-6">
+              <input
+                type="color"
+                className="w-6 h-6 bg-transparent disabled:opacity-40"
+                disabled={!firstSelected}
+                value={
+                  firstSelected
+                    ? isLineLike(firstSelected)
+                      ? firstSelected.strokeColor
+                      : firstSelected.borderColor !== 'transparent'
+                        ? firstSelected.borderColor
+                        : '#ffffff'
+                    : '#ffffff'
+                }
+                onChange={(e) => setStyleOnSelection('setBorderColor', { color: e.target.value })}
+              />
+              {firstSelected && !isLineLike(firstSelected) && firstSelected.borderColor === 'transparent' && (
+                <span className="pointer-events-none absolute inset-0 rounded-sm" style={NONE_SWATCH_OVERLAY_STYLE} />
+              )}
+            </span>
             <button
               type="button"
-              className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40"
+              className={
+                firstSelected && !isLineLike(firstSelected) && firstSelected.borderColor === 'transparent'
+                  ? 'text-xs font-semibold text-red-500 underline disabled:opacity-40'
+                  : 'text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40'
+              }
               disabled={!firstSelected || isLineLike(firstSelected)}
               onClick={() => setStyleOnSelection('setBorderColor', { color: 'transparent' })}
             >

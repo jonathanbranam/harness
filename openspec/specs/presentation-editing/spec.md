@@ -297,14 +297,28 @@ its fill color, and the canvas SHALL render the border accordingly.
 - **THEN** the canvas renders that text box with no visible border
 
 ### Requirement: User controls fill and border transparency from the canvas
-The user SHALL be able to set a selected text box's fill color or border
+The user SHALL be able to set a selected object's fill color or border
 color to transparent from the canvas, without needing to issue a tool call.
+The styling toolbar's fill and border controls SHALL visually indicate when
+the selected object's fill or border is currently transparent, distinct
+from their appearance when a color is set.
 
 #### Scenario: User clears a fill via the canvas
-- **WHEN** the user selects a text box and chooses a "no fill" /
+- **WHEN** the user selects a text box or shape and chooses a "no fill" /
   transparent option from the canvas's styling controls
 - **THEN** the object's fill color in shared deck state becomes
   `"transparent"`, and the canvas renders it with no background fill
+
+#### Scenario: Transparent fill or border is shown in the toolbar
+- **WHEN** the selected object's fill or border color is `"transparent"`
+- **THEN** that control's color swatch renders a diagonal line through it,
+  and its "none" option is styled to show it is the active choice
+
+#### Scenario: Toolbar reverts to normal once a color is set
+- **WHEN** the user picks a color for a fill or border that was previously
+  transparent
+- **THEN** the diagonal-line indicator on that swatch and the "none"
+  option's active styling are both removed
 
 ### Requirement: Selection chrome renders above all slide objects
 The selection outline and resize handles for a selected object SHALL be visually rendered above every object on the slide, regardless of the selected object's position in the slide's z-order (stacking order).
