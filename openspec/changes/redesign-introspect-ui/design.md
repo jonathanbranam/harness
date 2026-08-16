@@ -1,0 +1,61 @@
+## Context
+
+See proposal.md for motivation. Relevant current state:
+
+- `IntrospectPage.tsx` lays out a fixed CSS grid (`grid-cols-[380px_1fr]`). `ChatPanel` and `ApparatusView` already each have their own `overflow-y-auto` region correctly isolated by `min-h-0` flex ancestors — independent scrolling is structurally present today; what's missing is stick-to-bottom behavior, since nothing currently tracks scroll position before appending content.
+- `ApparatusView` currently reuses the same `ContextBlock[]` list `ChatPanel` renders, via a near-duplicate `Block` component — this is the "duplicated transcript" problem the proposal calls out.
+- No resizable-panel library is installed in either client (`client-deck` or `client-introspect`).
+- Investigated in `@earendil-works/pi-ai`'s `types.d.ts`: every `AssistantMessage` carries a non-optional `usage: Usage` field — `{ input, output, cacheRead, cacheWrite, cacheWrite1h?, reasoning?, totalTokens, cost }`. `reasoning` is explicitly documented as a subset of `output`, present only when "the provider reports them." `AssistantMessage.content` can include `ThinkingContent` items alongside `TextContent`/`ToolCall`, so "thinking" is a first-class content kind in the SDK, not something we'd have to infer.
+- Confirmed (checked `types.d.ts` directly, prompted by the user having seen the pi CLI render thinking text in a distinct background color): the SDK exposes the actual thinking *text*, not just a token count, and it isn't gated on `usage.reasoning` at all. `ThinkingContent` is `{ type: "thinking", thinking: string, thinkingSignature?, redacted? }`, and the streaming API emits a `thinking_start` / `thinking_delta` (`{ delta: string }`) / `thinking_end` trio mirroring `text_delta` — this is exactly what the CLI renders specially. `introspection-bridge.ts` already forwards `message_update` verbatim, so `thinking_delta` events already reach the browser today; `useIntrospectSocket.ts`'s `handleEvent` only branches on `assistantEvent?.type === 'text_delta'`, so `thinking_delta` is currently received and silently dropped. Nothing in this repo reads "thinking" data anywhere yet.
+- `introspection-bridge.ts` already forwards `message_end` events verbatim (`emit({ ...event })`), so `event.message.usage` is already present in every `message_end` payload reaching the browser today — the client just doesn't read it yet.
+- `context_usage` events already carry the model's real `contextWindow` (262,144 for the currently configured `moonshotai/Kimi-K2.7-Code`).
+
+## Goals / Non-Goals
+
+**Goals:**
+- Independent scroll with stick-to-bottom in the chat pane.
+- A resizable, drag-handled pane border; a wider chat default width.
+- Maximize / minimize / restore per pane, generalized so freed/reclaimed width is redistributed across however many panes are currently visible (not hardcoded to exactly two).
+- Apparatus becomes a non-scrolling, always-fits capacity visualization scaled to the model's real context window, with labeled smart/dumb/forced-compaction zones and content colored by category (tool call / input / output / thinking where available).
+
+**Non-Goals:**
+- Persisting pane layout across page reloads (`localStorage`) — explicitly out of scope per your steer; only *within-session* layout history matters, and that's the sibling `add-ui-layout-recording` change's job.
+- Nailing exact zone percentage boundaries — left as a tunable constant, expected to be adjusted after seeing it rendered.
+- A general N-pane plugin/registration system beyond making the resize/minimize math not assume exactly two panes.
+- Touch/mobile drag support.
+
+## Decisions
+
+**1. Pane shell: adopt `react-resizable-panels`, not a hand-rolled drag implementation.**
+It provides `Panel`/`PanelGroup`/`PanelResizeHandle` with drag-resize, `collapsible`/`collapsedSize`, and an imperative ref API (`.collapse()`/`.expand()`/`.resize()`) — exactly the drag+collapse+min-size combination this needs, and it auto-redistributes size among sibling panels, which directly gives us "minimizing one pane distributes freed width among the others" without custom math. The vertical-rail-with-rotated-title *visual* is still custom chrome we build ourselves (the library has no opinion on that), layered on top of a panel once its size crosses a "collapsed" threshold. Alternative considered: hand-rolled `mousedown`/`mousemove`/`mouseup` math — rejected per your steer that a library is fine if it simplifies the implementation, and a11y isn't a requirement either way so the library's built-in keyboard support is a bonus, not the deciding factor.
+
+**2. Stick-to-bottom scrolling.**
+Before each `blocks` update that will append to `ChatPanel`'s list, capture `scrollHeight - scrollTop - clientHeight` (distance from bottom). If that distance was already within a small threshold (e.g. 48px) *before* the update, scroll to bottom again after the DOM updates (layout effect on a ref); otherwise leave the scroll position untouched. Apparatus no longer needs this at all under this redesign, since it becomes non-scrolling by design (see Decision 3) — one less place to implement it.
+
+**3. Apparatus scales to the real context window from the start; no runtime rescale/marker mechanic.**
+This is a deliberate simplification of the original "start at 200k, compress to represent 300k with a boundary marker" idea, worth flagging explicitly since it changes what you described: once zone bands are fixed *percentages of the real ceiling* (your steer, in response to the 200k/300k example not fitting Kimi K2.7's actual 262,144 limit), the natural implementation is to map the pane's full fixed height to `0%..100%` of `contextWindow` from turn one. Zone bands are then just static labeled sub-regions of that fixed height — they never move, and no "compress and mark where the old boundary was" logic is needed. "Never fills and scrolls" falls out for free, since `usage / contextWindow` is always ≤ 1 by construction. If you actually want the dynamic zoom-as-you-approach-the-limit behavior instead of a fixed full-scale view, say so and this decision changes.
+
+**4. Zone bands are a named, tunable constant.**
+A single `CONTEXT_ZONES` constant (e.g. `{ smart: 0.X, dumb: 0.Y, compaction: 0.Z }` as fractions of `contextWindow`) rather than inline magic numbers, since you flagged the exact split as provisional (Dex Horthy's ~40-60% "dumb zone" framing "seems a little aggressive"). Exact starting values are an implementation-time call, easy to retune without touching the spec or this design.
+
+**5. Token-category pills, sourced from data already flowing through the system.**
+- **Tool-call pills**: one per `tool_execution_start`/`tool_execution_end` pair, as today, colored by status — no data gap here.
+- **Input/output pills**: one pair per assistant `message_end`, sized proportionally to that message's `usage.input` / `usage.output` against `contextWindow`. This is real per-turn accounting, not an approximation — `AssistantMessage.usage` already carries it, and it's already forwarded to the browser.
+- **Thinking**: presence is detected from the `thinking_delta` stream (accumulated between `thinking_start`/`thinking_end` for the in-flight message), not from `usage.reasoning` — per Context above, the actual thinking text arrives unconditionally, while `usage.reasoning` is a conditionally-reported token count that may be absent even when thinking content did arrive. Sizing prefers `usage.reasoning` when the provider reports it (carved out of the output pill's share, since it's documented as a subset of `output`, not additive); when thinking content arrived but `usage.reasoning` is absent, approximate its share from the accumulated thinking text's character length (rough chars-per-token heuristic) rather than skipping the pill — good enough for a capacity visualization, not exact accounting. This is a deliberate product choice, not just a data-availability one: the presentation audience (mostly Claude Code / Gemini users) is used to those tools hiding thinking verbosity entirely, so making thinking visibly consume real context space in Apparatus is one of the points the visualization exists to make — it shouldn't disappear just because one provider omits a usage field.
+- Apparatus stops reading the shared `ContextBlock[]` list `ChatPanel` uses for its content and instead derives its own pill data from the raw event stream (`message_end`, `message_update` for `thinking_delta`, `context_usage`, `tool_execution_*`) inside `useIntrospectSocket.ts`, since it needs different aggregation (per-message usage, not per-delta text) than chat does.
+- **Chat pane deliberately does not render thinking text**, even though `thinking_delta` is available to it via the same `message_update` stream Chat already consumes for `text_delta`. This is a conscious scope choice (your steer), not an oversight — revisit later if wanted. Apparatus's pill is the only place thinking becomes visible in this change, as a capacity signal rather than readable text.
+
+**6. No server or protocol changes.**
+Every event this reads (`context_usage`, `message_end`, `tool_execution_*`) is already forwarded by the existing server pipeline; this is a client-only change.
+
+## Risks / Trade-offs
+
+- [Provider may not report `usage.reasoning`] → No longer a "thinking disappears" risk: presence is keyed off actual `thinking_delta` events, which arrive independently of `usage.reasoning`. The remaining risk is narrower — the pill's *size* falls back to a char-length heuristic instead of exact token accounting when `usage.reasoning` is absent, so its width is approximate in that case. Verify against a live Kimi K2.7 response early in implementation to see which case applies.
+- [Many small turns in a long session → some pills only a few px tall] → Give tool-call pills a minimum rendered height regardless of their (near-zero) token share, since they represent negligible context-window space anyway and a sub-pixel pill would be unreadable/unclickable.
+- [New client dependency (`react-resizable-panels`)] → Small, focused, scoped to `client-introspect` only; doesn't touch the server or `client-deck`.
+- [Apparatus no longer shows full block text] → Intentional per the proposal; chat pane remains the single source of full-text transcript.
+
+## Open Questions
+
+- ~~Does the configured `moonshotai/Kimi-K2.7-Code` (served via DeepInfra's OpenAI-compatible endpoint) actually populate `usage.reasoning` on responses?~~ Resolved as no-longer-blocking: thinking-pill *presence* now keys off `thinking_delta` events, not `usage.reasoning`, so the pill renders regardless of whether this provider populates that field. What's still worth empirically checking once implementation starts is narrower: whether `usage.reasoning` is populated (giving exact pill sizing) or absent (falling back to the char-length heuristic in Decision 5).
+- Exact default zone percentages (smart/dumb/forced-compaction) — deliberately left tunable; not required before implementation starts.
