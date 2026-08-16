@@ -60,6 +60,17 @@ function summarize(value: unknown): string {
   }
 }
 
+/** Extracts the text of a pi `AgentMessage.content` (a string, or an array of text/image content parts). */
+function extractMessageText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (part && typeof part === 'object' && (part as { type?: string }).type === 'text' ? ((part as { text?: string }).text ?? '') : ''))
+      .join('')
+  }
+  return ''
+}
+
 export function useIntrospectSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const streamingIdRef = useRef<string | null>(null)
@@ -154,9 +165,19 @@ export function useIntrospectSocket() {
     const type = event.type as string
 
     if (type === 'message_start') {
-      const message = event.message as { id?: string; role?: string } | undefined
+      const message = event.message as { id?: string; role?: string; content?: unknown } | undefined
       if (message?.role === 'assistant') {
         streamingIdRef.current = message.id ?? genId()
+        return
+      }
+      // The user's own prompt is a forwarded event like any other (both live
+      // and replay), not a client-local echo — see `sendPrompt`, which no
+      // longer adds this bubble itself.
+      if (message?.role === 'user') {
+        const text = extractMessageText(message.content)
+        if (text.trim() !== '') {
+          setBlocks((b) => [{ id: message.id ?? genId(), role: 'user', text }, ...b])
+        }
       }
       return
     }
@@ -298,7 +319,9 @@ export function useIntrospectSocket() {
   }
 
   const sendPrompt = useCallback((text: string) => {
-    setBlocks((b) => [{ id: genId(), role: 'user', text }, ...b])
+    // No local echo here: the user bubble is rendered from the server's
+    // forwarded `message_start` (role: 'user') event instead, so live and
+    // replay both populate the chat panel from the same event stream.
     wsRef.current?.send(JSON.stringify({ type: 'prompt', text }))
   }, [])
 

@@ -30,8 +30,14 @@ type ClientMessage =
 
 type ServerMessage = { type: 'error'; message: string } | Record<string, unknown>
 
-/** How often `replay_play` advances one event, in ms. Simple fixed pace — see design.md's "keep the timeline simple" note. */
-const REPLAY_PLAY_INTERVAL_MS = 800
+// A single turn can be hundreds of raw events (mostly per-token
+// `message_update` streaming deltas), so `replay_play` advances in small
+// batches per tick rather than one event at a time — one-at-a-time made
+// playback of a short recording take minutes and look frozen. `step`
+// (Prev/Next) still moves one event at a time for fine-grained manual
+// inspection, per the replay spec's "user's controlled pace" scenario.
+const REPLAY_PLAY_INTERVAL_MS = 150
+const REPLAY_PLAY_EVENTS_PER_TICK = 10
 
 function safeSend(ws: WSContext, msg: ServerMessage) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg))
@@ -192,7 +198,7 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
         stopPlayback()
         playTimer = setInterval(() => {
           const hs = harnessSession
-          const nextIndex = (hs?.replayEngine.getCurrentIndex() ?? -1) + 1
+          const nextIndex = (hs?.replayEngine.getCurrentIndex() ?? -1) + REPLAY_PLAY_EVENTS_PER_TICK
           replayStepTo(token, nextIndex)
             .then((step) => emitReplayStep(socket, step))
             .catch((err) => {
