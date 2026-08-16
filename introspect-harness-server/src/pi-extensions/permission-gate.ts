@@ -93,13 +93,22 @@ function canonicalize(target: string): string {
   }
 }
 
-/** True if `raw` (resolved against `jail`, then against symlinks) escapes `jail`. */
-function escapesJail(raw: string, jail: string): boolean {
-  const resolved = resolve(jail, raw)
-  if (isOutsideJail(jail, resolved)) return true
-  const canonicalJail = canonicalize(jail)
+/**
+ * True if `raw` escapes every root in `roots`. A relative `raw` is resolved
+ * against `roots[0]` (the process's actual cwd — the same base the real
+ * tool implementations use), matching how a relative tool-call path is
+ * actually interpreted; an absolute `raw` resolves the same regardless of
+ * base. The resolved path then has to fall lexically inside at least one
+ * root — and, after following symlinks, inside at least one root's
+ * canonical form — or it counts as an escape.
+ */
+function escapesAllRoots(raw: string, roots: string[]): boolean {
+  const resolved = resolve(roots[0], raw)
+  const insideLexically = roots.some((root) => !isOutsideJail(root, resolved))
+  if (!insideLexically) return true
   const canonicalResolved = canonicalize(resolved)
-  return isOutsideJail(canonicalJail, canonicalResolved)
+  const insideCanonically = roots.some((root) => !isOutsideJail(canonicalize(root), canonicalResolved))
+  return !insideCanonically
 }
 
 function stripQuotes(token: string): string {
@@ -118,12 +127,12 @@ const PATH_TOKEN = /(?:^|[\s=:])((?:\.\.(?:\/[^\s'"]*)?)|(?:\/[^\s'"]*))/g
 /** `~`, `~user`, `~/rest`, or `~user/rest` — shell home-directory expansion. */
 const HOME_TOKEN = /(?:^|[\s=:])(~[a-zA-Z0-9_-]*(?:\/[^\s'"]*)?)/g
 
-/** Exported for testing. Returns a violation reason, or undefined if the command stays confined to `jail`. */
-export function checkBashConfinement(command: string, jail: string): string | undefined {
+/** Exported for testing. Returns a violation reason, or undefined if the command stays confined to `roots`. */
+export function checkBashConfinement(command: string, roots: string[]): string | undefined {
   for (const match of command.matchAll(CD_TARGET)) {
     const raw = stripQuotes(match[1])
     if (raw === '-') continue
-    if (escapesJail(raw, jail)) {
+    if (escapesAllRoots(raw, roots)) {
       return `cd outside the workspace root: ${raw}`
     }
   }
@@ -134,7 +143,7 @@ export function checkBashConfinement(command: string, jail: string): string | un
 
   for (const match of command.matchAll(PATH_TOKEN)) {
     const raw = stripQuotes(match[1])
-    if (escapesJail(raw, jail)) {
+    if (escapesAllRoots(raw, roots)) {
       return `path outside the workspace root: ${raw}`
     }
   }
@@ -142,9 +151,9 @@ export function checkBashConfinement(command: string, jail: string): string | un
   return undefined
 }
 
-/** Exported for testing. Returns a violation reason, or undefined if `path` stays inside `jail`. */
-export function checkPathJail(path: string, jail: string): string | undefined {
-  if (escapesJail(path, jail)) {
+/** Exported for testing. Returns a violation reason, or undefined if `path` stays inside one of `roots`. */
+export function checkPathJail(path: string, roots: string[]): string | undefined {
+  if (escapesAllRoots(path, roots)) {
     return `path outside the workspace root: ${path}`
   }
   return undefined
@@ -153,16 +162,17 @@ export function checkPathJail(path: string, jail: string): string | undefined {
 /** Built-in tools that take a `path` argument and must stay confined to the workspace. */
 const JAILED_TOOLS = new Set(['read', 'write', 'edit', 'ls', 'find', 'grep'])
 
-function jailPolicyNotice(jail: string): string {
-  return `\n\n## Workspace sandbox\n\nYour tools (read, write, edit, ls, find, grep, bash) are confined to this workspace directory: ${jail}. Do not attempt to read, write, list, search, or execute anything outside it — not via parent-directory traversal (\`..\`), absolute paths, the home directory (\`~\`), symlinks, or any other means. Creating links (\`ln\`, \`cp -s\`) is also disallowed outright. Such calls are blocked by the server and just waste a turn; treat this workspace directory as the entire filesystem available to you.`
+function jailPolicyNotice(roots: string[]): string {
+  const rootList = roots.map((root) => `- ${root}`).join('\n')
+  return `\n\n## Workspace sandbox\n\nYour tools (read, write, edit, ls, find, grep, bash) are confined to these directories:\n${rootList}\n\nDo not attempt to read, write, list, search, or execute anything outside them — not via parent-directory traversal (\`..\`), absolute paths, the home directory (\`~\`), symlinks, or any other means. Creating links (\`ln\`, \`cp -s\`) is also disallowed outright. Such calls are blocked by the server and just waste a turn; treat these directories as the entire filesystem available to you.`
 }
 
-export function createPermissionGateExtension(opts: { cwd: string }): ExtensionFactory {
-  const jail = resolve(opts.cwd)
+export function createPermissionGateExtension(opts: { cwd: string; tempDir: string }): ExtensionFactory {
+  const roots = [resolve(opts.cwd), resolve(opts.tempDir)]
 
   return function permissionGate(pi: ExtensionAPI) {
     pi.on('before_agent_start', (event) => ({
-      systemPrompt: event.systemPrompt + jailPolicyNotice(jail),
+      systemPrompt: event.systemPrompt + jailPolicyNotice(roots),
     }))
 
     pi.on('tool_call', (event) => {
@@ -174,9 +184,9 @@ export function createPermissionGateExtension(opts: { cwd: string }): ExtensionF
         if (linkViolation) {
           return { block: true, reason: `Blocked by static policy: ${linkViolation}.`, terminate: true }
         }
-        const violation = checkBashConfinement(event.input.command, jail)
+        const violation = checkBashConfinement(event.input.command, roots)
         if (violation) {
-          return { block: true, reason: `Blocked: ${violation}. Stay within the workspace directory (${jail}).` }
+          return { block: true, reason: `Blocked: ${violation}. Stay within the allowed directories (${roots.join(', ')}).` }
         }
         return
       }
@@ -184,9 +194,9 @@ export function createPermissionGateExtension(opts: { cwd: string }): ExtensionF
       if (JAILED_TOOLS.has(event.toolName)) {
         const path = (event.input as { path?: unknown }).path
         if (typeof path === 'string') {
-          const violation = checkPathJail(path, jail)
+          const violation = checkPathJail(path, roots)
           if (violation) {
-            return { block: true, reason: `Blocked: ${violation}. Stay within the workspace directory (${jail}).` }
+            return { block: true, reason: `Blocked: ${violation}. Stay within the allowed directories (${roots.join(', ')}).` }
           }
         }
       }

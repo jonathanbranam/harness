@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, type AgentSession } from '@earendil-works/pi-coding-agent'
 import { env } from './env'
@@ -41,6 +42,10 @@ export async function getOrCreateSession(sessionId: string): Promise<HarnessSess
   // session returns above and never reaches this reset.
   resetWorkspaceToSeed(env.INTROSPECT_WORKSPACE_DIR, SEEDS_DIR, DEFAULT_SEED)
   const cwd = ensureAgentWorkspace(env.INTROSPECT_WORKSPACE_DIR, TEMPLATES_DIR)
+  // Scratch space outside the snapshot/replay system — not seeded, not reset
+  // between sessions, just ensured to exist. See design.md's "No reset-to-seed
+  // for the temp directory" decision.
+  mkdirSync(env.INTROSPECT_TMP_DIR, { recursive: true })
   const modelRuntime = await modelRuntimePromise
   const events = new EventEmitter()
   const recordingWriter = createRecordingWriter(env.RECORDINGS_DIR)
@@ -48,7 +53,10 @@ export async function getOrCreateSession(sessionId: string): Promise<HarnessSess
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir: getAgentDir(),
-    extensionFactories: [introspectionBridge(events, recordingWriter, cwd), createPermissionGateExtension({ cwd })],
+    extensionFactories: [
+      introspectionBridge(events, recordingWriter, cwd),
+      createPermissionGateExtension({ cwd, tempDir: env.INTROSPECT_TMP_DIR }),
+    ],
   })
   await resourceLoader.reload()
 

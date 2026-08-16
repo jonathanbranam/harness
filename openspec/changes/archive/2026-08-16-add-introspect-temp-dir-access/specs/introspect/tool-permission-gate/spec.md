@@ -1,10 +1,4 @@
-# Tool Permission Gate Specification
-
-## Purpose
-
-Confine introspect-harness-server's `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` tools to the session's workspace directory, so a coding-agent turn cannot read, write, list, or search files anywhere else on disk — including through a symlink that already exists inside the workspace, or one the agent tries to create itself — and cannot use `bash` to escape the workspace either.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Path jail for read/write/edit/ls/find/grep
 `read`, `write`, `edit`, `ls`, `find`, and `grep` calls whose target path resolves outside every one of the session's allowed roots (the workspace directory and the harness-defined temporary directory) SHALL be blocked. `ls`/`find`/`grep` calls that omit their optional `path` argument (defaulting to the workspace root) are unaffected.
@@ -40,24 +34,6 @@ A path that resolves lexically inside one of the session's allowed roots (the wo
 - **WHEN** the agent calls `write` to a not-yet-existing path whose parent directory is, or passes through, a symlink resolving outside all allowed roots
 - **THEN** the tool call is blocked with a reason identifying the offending path
 
-### Requirement: Link creation is blocked
-`bash` commands that invoke `ln` (any flags), or `cp` with a symlink-creating flag (`-s`/`--symbolic-link`), SHALL be blocked outright, regardless of whether the link target or destination would themselves resolve inside or outside the workspace. This check runs before the command executes, so a single compound command that creates a symlink and immediately reads through it (e.g. `ln -s /etc /workspace/x && cat /workspace/x/passwd`) is blocked as a whole, not just the read.
-
-#### Scenario: ln blocked
-- **WHEN** the agent runs a `bash` command that invokes `ln`
-- **THEN** the tool call is blocked with a policy reason, before any part of the command runs
-
-#### Scenario: Compound create-and-read blocked
-- **WHEN** the agent runs a single `bash` command that creates a symlink pointing outside the workspace and then reads through it in the same command
-- **THEN** the entire command is blocked before execution
-
-### Requirement: Static bash blocklist
-Bash commands matching known-destructive patterns (`rm -rf`/`-fr`, `mkfs`, `dd` writing to a device, redirecting into a non-null `/dev` device, or `curl`/`wget` piped into a shell) SHALL be blocked outright.
-
-#### Scenario: Destructive rm
-- **WHEN** the agent attempts to run a `bash` command matching the blocklist (e.g. `rm -rf /`)
-- **THEN** the tool call is blocked with a policy reason
-
 ### Requirement: Bash commands confined to the allowed roots
 `bash` tool calls SHALL be confined to the session's allowed roots (the workspace directory and the harness-defined temporary directory): a command SHALL be blocked if it changes the working directory outside both roots (e.g. via `cd`), references an absolute path outside both, or references the home directory via `~` (or `~user`) expansion.
 
@@ -82,13 +58,6 @@ Bash commands matching known-destructive patterns (`rm -rf`/`-fr`, `mkfs`, `dd` 
 - **THEN** the tool call proceeds normally
 
 This confinement is pattern-based, not a kernel-level sandbox — see design.md for the known residual risk and mitigation.
-
-### Requirement: Blocked calls fail without an approval prompt
-introspect-harness-server has no interactive approval channel, so a blocked `read`, `write`, `edit`, `ls`, `find`, `grep`, or `bash` call SHALL fail immediately with a reason instead of waiting on user approval.
-
-#### Scenario: Blocked write fails immediately
-- **WHEN** a `write` call is blocked by the path jail
-- **THEN** the tool call fails immediately with a reason and no approval prompt is shown
 
 ### Requirement: System prompt states the workspace boundary
 The agent's system prompt SHALL include an explicit instruction that its tools are confined to the session's allowed roots — the workspace directory and the harness-defined temporary directory — and that it must not attempt to read, write, list, search, or execute anything outside those roots (via parent-directory traversal, absolute paths, the home directory, symlinks, or otherwise).

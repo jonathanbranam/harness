@@ -52,58 +52,86 @@ describe('checkLinkCreation', () => {
 })
 
 describe('checkBashConfinement', () => {
-  const jail = '/workspace'
+  const roots = ['/workspace']
 
   it.each(['ls -la', 'npm run build', 'cat foo.txt', 'cd sub && ls', 'grep -r foo .'])(
     'allows %s',
     (command) => {
-      expect(checkBashConfinement(command, jail)).toBeUndefined()
+      expect(checkBashConfinement(command, roots)).toBeUndefined()
     },
   )
 
   it('blocks cd outside the workspace root', () => {
-    expect(checkBashConfinement('cd /etc && ls', jail)).toMatch(/cd outside the workspace root/)
+    expect(checkBashConfinement('cd /etc && ls', roots)).toMatch(/cd outside the workspace root/)
   })
 
   it('blocks cd via relative traversal outside the workspace root', () => {
-    expect(checkBashConfinement('cd ../../etc && ls', jail)).toMatch(/cd outside the workspace root/)
+    expect(checkBashConfinement('cd ../../etc && ls', roots)).toMatch(/cd outside the workspace root/)
   })
 
   it('allows cd -', () => {
-    expect(checkBashConfinement('cd -', jail)).toBeUndefined()
+    expect(checkBashConfinement('cd -', roots)).toBeUndefined()
   })
 
   it('blocks an absolute path outside the workspace root', () => {
-    expect(checkBashConfinement('cat /etc/passwd', jail)).toMatch(/path outside the workspace root/)
+    expect(checkBashConfinement('cat /etc/passwd', roots)).toMatch(/path outside the workspace root/)
   })
 
   it('blocks a relative `..` traversal outside the workspace root', () => {
-    expect(checkBashConfinement('cat ../../etc/passwd', jail)).toMatch(/path outside the workspace root/)
+    expect(checkBashConfinement('cat ../../etc/passwd', roots)).toMatch(/path outside the workspace root/)
   })
 
   it('allows an absolute path inside the workspace root', () => {
-    expect(checkBashConfinement('cat /workspace/notes.txt', jail)).toBeUndefined()
+    expect(checkBashConfinement('cat /workspace/notes.txt', roots)).toBeUndefined()
   })
 
   it.each(['~', '~/', '~/.ssh/id_rsa', '~root/.bash_history'])('blocks home-directory expansion in %s', (target) => {
-    expect(checkBashConfinement(`cat ${target}`, jail)).toMatch(/home directory/)
+    expect(checkBashConfinement(`cat ${target}`, roots)).toMatch(/home directory/)
+  })
+
+  describe('with a second allowed root', () => {
+    const multiRoots = ['/workspace', '/tmp/introspect-tmp']
+
+    it('allows cd into the second root', () => {
+      expect(checkBashConfinement('cd /tmp/introspect-tmp && ls', multiRoots)).toBeUndefined()
+    })
+
+    it('allows an absolute path inside the second root', () => {
+      expect(checkBashConfinement('cat /tmp/introspect-tmp/notes.txt', multiRoots)).toBeUndefined()
+    })
+
+    it('still blocks a path outside both roots', () => {
+      expect(checkBashConfinement('cat /etc/passwd', multiRoots)).toMatch(/path outside the workspace root/)
+    })
   })
 })
 
 describe('checkPathJail', () => {
-  const jail = '/workspace'
+  const roots = ['/workspace']
 
   it('allows a path inside the workspace root', () => {
-    expect(checkPathJail('notes.txt', jail)).toBeUndefined()
-    expect(checkPathJail('sub/notes.txt', jail)).toBeUndefined()
+    expect(checkPathJail('notes.txt', roots)).toBeUndefined()
+    expect(checkPathJail('sub/notes.txt', roots)).toBeUndefined()
   })
 
   it('blocks a relative traversal outside the workspace root', () => {
-    expect(checkPathJail('../../etc/passwd', jail)).toMatch(/path outside the workspace root/)
+    expect(checkPathJail('../../etc/passwd', roots)).toMatch(/path outside the workspace root/)
   })
 
   it('blocks an absolute path outside the workspace root', () => {
-    expect(checkPathJail('/etc/passwd', jail)).toMatch(/path outside the workspace root/)
+    expect(checkPathJail('/etc/passwd', roots)).toMatch(/path outside the workspace root/)
+  })
+
+  describe('with a second allowed root', () => {
+    const multiRoots = ['/workspace', '/tmp/introspect-tmp']
+
+    it('allows an absolute path inside the second root', () => {
+      expect(checkPathJail('/tmp/introspect-tmp/notes.txt', multiRoots)).toBeUndefined()
+    })
+
+    it('still blocks a path outside both roots', () => {
+      expect(checkPathJail('/etc/passwd', multiRoots)).toMatch(/path outside the workspace root/)
+    })
   })
 })
 
@@ -111,19 +139,24 @@ describe('symlink escapes (real filesystem)', () => {
   let root: string
   let jail: string
   let outside: string
+  let tempDir: string
 
   beforeAll(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'permission-gate-test-')))
     jail = join(root, 'workspace')
     outside = join(root, 'outside')
+    tempDir = join(root, 'tmp')
     mkdirSync(jail)
     mkdirSync(outside)
+    mkdirSync(tempDir)
     writeFileSync(join(outside, 'secret.txt'), 'top secret')
     writeFileSync(join(jail, 'notes.txt'), 'in workspace')
     // Directory symlink inside the jail pointing outside it.
     symlinkSync(outside, join(jail, 'escape-dir'))
     // File symlink inside the jail pointing outside it.
     symlinkSync(join(outside, 'secret.txt'), join(jail, 'escape-file'))
+    // Directory symlink inside the temp dir pointing outside both roots.
+    symlinkSync(outside, join(tempDir, 'escape-dir'))
   })
 
   afterAll(() => {
@@ -131,28 +164,32 @@ describe('symlink escapes (real filesystem)', () => {
   })
 
   it('allows a real in-workspace file', () => {
-    expect(checkPathJail('notes.txt', jail)).toBeUndefined()
+    expect(checkPathJail('notes.txt', [jail])).toBeUndefined()
   })
 
   it('blocks reading through a directory symlink that points outside the workspace', () => {
-    expect(checkPathJail('escape-dir/secret.txt', jail)).toMatch(/path outside the workspace root/)
+    expect(checkPathJail('escape-dir/secret.txt', [jail])).toMatch(/path outside the workspace root/)
   })
 
   it('blocks reading a file symlink that points outside the workspace', () => {
-    expect(checkPathJail('escape-file', jail)).toMatch(/path outside the workspace root/)
+    expect(checkPathJail('escape-file', [jail])).toMatch(/path outside the workspace root/)
   })
 
   it('blocks writing a not-yet-existing file inside a symlinked directory that points outside the workspace', () => {
-    expect(checkPathJail('escape-dir/newfile.txt', jail)).toMatch(/path outside the workspace root/)
+    expect(checkPathJail('escape-dir/newfile.txt', [jail])).toMatch(/path outside the workspace root/)
   })
 
   it('blocks a bash `cd` into a symlinked directory that points outside the workspace', () => {
-    expect(checkBashConfinement('cd escape-dir && cat secret.txt', jail)).toMatch(/cd outside the workspace root/)
+    expect(checkBashConfinement('cd escape-dir && cat secret.txt', [jail])).toMatch(/cd outside the workspace root/)
+  })
+
+  it('blocks a symlink inside the temp dir that points outside both roots', () => {
+    expect(checkPathJail(join(tempDir, 'escape-dir', 'secret.txt'), [jail, tempDir])).toMatch(/path outside the workspace root/)
   })
 })
 
 describe('createPermissionGateExtension', () => {
-  function setup(cwd: string) {
+  function setup(cwd: string, tempDir = '/tmp/introspect-tmp') {
     let toolCallHandler: ((event: ToolCallEvent) => ToolCallEventResult | void | Promise<ToolCallEventResult | void>) | undefined
     let beforeAgentStartHandler:
       | ((event: BeforeAgentStartEvent) => BeforeAgentStartEventResult | void | Promise<BeforeAgentStartEventResult | void>)
@@ -164,13 +201,14 @@ describe('createPermissionGateExtension', () => {
       },
     } as unknown as ExtensionAPI
 
-    createPermissionGateExtension({ cwd })(api)
+    createPermissionGateExtension({ cwd, tempDir })(api)
     if (!toolCallHandler) throw new Error('tool_call handler was not registered')
     if (!beforeAgentStartHandler) throw new Error('before_agent_start handler was not registered')
     return { handleToolCall: toolCallHandler, handleBeforeAgentStart: beforeAgentStartHandler }
   }
 
   const jail = '/workspace'
+  const tempDir = '/tmp/introspect-tmp'
 
   it('allows read/write/edit inside the workspace', () => {
     const { handleToolCall } = setup(jail)
@@ -321,7 +359,7 @@ describe('createPermissionGateExtension', () => {
     expect(result).toMatchObject({ block: true })
   })
 
-  it('states the workspace boundary in the system prompt', async () => {
+  it('states both allowed roots in the system prompt', async () => {
     const { handleBeforeAgentStart } = setup(jail)
     const result = await handleBeforeAgentStart({
       type: 'before_agent_start',
@@ -331,6 +369,42 @@ describe('createPermissionGateExtension', () => {
     })
     expect(result?.systemPrompt).toContain('You are a helpful assistant.')
     expect(result?.systemPrompt).toContain(jail)
+    expect(result?.systemPrompt).toContain(tempDir)
     expect(result?.systemPrompt).toMatch(/outside/i)
+  })
+
+  it('allows read/write/edit inside the temp directory', () => {
+    const { handleToolCall } = setup(jail)
+    for (const toolName of ['read', 'write', 'edit'] as const) {
+      const result = handleToolCall({
+        type: 'tool_call',
+        toolCallId: '1',
+        toolName,
+        input: { path: `${tempDir}/scratch.txt` },
+      } as unknown as ToolCallEvent)
+      expect(result).toBeUndefined()
+    }
+  })
+
+  it('allows a bash cd into the temp directory', () => {
+    const { handleToolCall } = setup(jail)
+    const result = handleToolCall({
+      type: 'tool_call',
+      toolCallId: '1',
+      toolName: 'bash',
+      input: { command: `cd ${tempDir} && ls` },
+    } as unknown as ToolCallEvent)
+    expect(result).toBeUndefined()
+  })
+
+  it('still blocks a path outside both the workspace and temp directory', () => {
+    const { handleToolCall } = setup(jail)
+    const result = handleToolCall({
+      type: 'tool_call',
+      toolCallId: '1',
+      toolName: 'read',
+      input: { path: '/etc/passwd' },
+    } as unknown as ToolCallEvent)
+    expect(result).toMatchObject({ block: true })
   })
 })
