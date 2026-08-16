@@ -39,6 +39,8 @@ interface DeckCanvasProps {
   deckState: DeckState
   onSelectionChange: (ids: string[]) => void
   onObjectUpdate: (actions: UpdateActionCall[]) => void
+  /** Read-only render for preview mode: no toolbar, no selection highlight, no click/drag/edit interactions. */
+  readOnly?: boolean
 }
 
 const CORNER_CLASSES: Record<Corner, string> = {
@@ -250,7 +252,10 @@ function TextObjectBox({
   )
 }
 
-export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function DeckCanvas({ deckState, onSelectionChange, onObjectUpdate }, canvasRef) {
+export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function DeckCanvas(
+  { deckState, onSelectionChange, onObjectUpdate, readOnly = false },
+  canvasRef,
+) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [liveRects, setLiveRects] = useState<Record<string, Rect>>({})
   const didDragRef = useRef(false)
@@ -438,6 +443,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
   // Delete/Backspace deletes the selection, but only when not actively
   // editing text (where those keys must edit the text itself).
   useEffect(() => {
+    if (readOnly) return
     function onKeyDown(e: KeyboardEvent) {
       if (editingId) return
       if ((e.key === 'Delete' || e.key === 'Backspace') && deckState.selection.length > 0) {
@@ -449,7 +455,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [editingId, deckState.selection, deleteSelection])
+  }, [readOnly, editingId, deckState.selection, deleteSelection])
 
   const selectedObjects = deckState.objects.filter((o) => deckState.selection.includes(o.id))
   const firstSelected = selectedObjects[0]
@@ -470,92 +476,95 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     // DeckPage.tsx's min-h-0 on the grid container itself, which only
     // protects the container — this protects the item within it).
     <div className="h-full min-w-0 min-h-0 flex flex-col">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900 text-sm">
-        <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={addTextBox}>
-          + Text box
-        </button>
-        <button
-          type="button"
-          className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
-          disabled={deckState.selection.length === 0}
-          onClick={deleteSelection}
-        >
-          Delete
-        </button>
-
-        <div className="w-px h-5 bg-gray-700 mx-1" />
-
-        <label className="flex items-center gap-1 text-gray-300">
-          Font size
-          <input
-            type="number"
-            className="w-14 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white disabled:opacity-40"
-            disabled={!firstSelected}
-            value={firstSelected?.fontSize ?? ''}
-            onChange={(e) => {
-              const fontSize = Number(e.target.value)
-              if (Number.isFinite(fontSize) && fontSize > 0) setStyleOnSelection('setFontSize', { fontSize })
-            }}
-          />
-        </label>
-
-        <label className="flex items-center gap-1 text-gray-300">
-          Font
-          <input
-            type="color"
-            className="w-6 h-6 bg-transparent disabled:opacity-40"
-            disabled={!firstSelected}
-            value={firstSelected?.fontColor ?? '#ffffff'}
-            onChange={(e) => setStyleOnSelection('setFontColor', { color: e.target.value })}
-          />
-        </label>
-
-        <label className="flex items-center gap-1 text-gray-300">
-          Fill
-          <input
-            type="color"
-            className="w-6 h-6 bg-transparent disabled:opacity-40"
-            disabled={!firstSelected}
-            value={firstSelected && firstSelected.fillColor !== 'transparent' ? firstSelected.fillColor : '#374151'}
-            onChange={(e) => setStyleOnSelection('setFillColor', { color: e.target.value })}
-          />
+      {!readOnly && (
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900 text-sm">
+          <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={addTextBox}>
+            + Text box
+          </button>
           <button
             type="button"
-            className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
-            disabled={!firstSelected}
-            onClick={() => setStyleOnSelection('setFillColor', { color: 'transparent' })}
+            className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
+            disabled={deckState.selection.length === 0}
+            onClick={deleteSelection}
           >
-            none
+            Delete
           </button>
-        </label>
 
-        <label className="flex items-center gap-1 text-gray-300">
-          Border
-          <input
-            type="color"
-            className="w-6 h-6 bg-transparent disabled:opacity-40"
-            disabled={!firstSelected}
-            value={firstSelected && firstSelected.borderColor !== 'transparent' ? firstSelected.borderColor : '#ffffff'}
-            onChange={(e) => setStyleOnSelection('setBorderColor', { color: e.target.value })}
-          />
-          <button
-            type="button"
-            className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
-            disabled={!firstSelected}
-            onClick={() => setStyleOnSelection('setBorderColor', { color: 'transparent' })}
-          >
-            none
-          </button>
-        </label>
-      </div>
+          <div className="w-px h-5 bg-gray-700 mx-1" />
+
+          <label className="flex items-center gap-1 text-gray-300">
+            Font size
+            <input
+              type="number"
+              className="w-14 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white disabled:opacity-40"
+              disabled={!firstSelected}
+              value={firstSelected?.fontSize ?? ''}
+              onChange={(e) => {
+                const fontSize = Number(e.target.value)
+                if (Number.isFinite(fontSize) && fontSize > 0) setStyleOnSelection('setFontSize', { fontSize })
+              }}
+            />
+          </label>
+
+          <label className="flex items-center gap-1 text-gray-300">
+            Font
+            <input
+              type="color"
+              className="w-6 h-6 bg-transparent disabled:opacity-40"
+              disabled={!firstSelected}
+              value={firstSelected?.fontColor ?? '#ffffff'}
+              onChange={(e) => setStyleOnSelection('setFontColor', { color: e.target.value })}
+            />
+          </label>
+
+          <label className="flex items-center gap-1 text-gray-300">
+            Fill
+            <input
+              type="color"
+              className="w-6 h-6 bg-transparent disabled:opacity-40"
+              disabled={!firstSelected}
+              value={firstSelected && firstSelected.fillColor !== 'transparent' ? firstSelected.fillColor : '#374151'}
+              onChange={(e) => setStyleOnSelection('setFillColor', { color: e.target.value })}
+            />
+            <button
+              type="button"
+              className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
+              disabled={!firstSelected}
+              onClick={() => setStyleOnSelection('setFillColor', { color: 'transparent' })}
+            >
+              none
+            </button>
+          </label>
+
+          <label className="flex items-center gap-1 text-gray-300">
+            Border
+            <input
+              type="color"
+              className="w-6 h-6 bg-transparent disabled:opacity-40"
+              disabled={!firstSelected}
+              value={firstSelected && firstSelected.borderColor !== 'transparent' ? firstSelected.borderColor : '#ffffff'}
+              onChange={(e) => setStyleOnSelection('setBorderColor', { color: e.target.value })}
+            />
+            <button
+              type="button"
+              className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
+              disabled={!firstSelected}
+              onClick={() => setStyleOnSelection('setBorderColor', { color: 'transparent' })}
+            >
+              none
+            </button>
+          </label>
+        </div>
+      )}
 
       <div
         className="relative flex-1 min-w-0 min-h-0 bg-gray-950 overflow-hidden"
         // Objects' own onClick stops propagation before it reaches here (see
         // TextObjectBox's onClick below), so any click that bubbles this far —
         // the margin around the slide or the slide's own background — is by
-        // definition not on an object, and should clear the selection.
-        onClick={() => onSelectionChange([])}
+        // definition not on an object, and should clear the selection. Not
+        // wired at all in readOnly mode — preview never has a selection to clear.
+        onClick={readOnly ? undefined : () => onSelectionChange([])}
       >
         {/* paneRef's padding reserves a minimum margin on every side (excluded
             from ResizeObserver's contentRect, so it isn't counted as fittable
@@ -575,32 +584,48 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
               className="relative bg-white border border-gray-300"
               style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})`, transformOrigin: 'top left' }}
             >
-              {deckState.objects.map((obj) => (
-                <TextObjectBox
-                  key={obj.id}
-                  obj={obj}
-                  selected={deckState.selection.includes(obj.id)}
-                  editing={editingId === obj.id}
-                  liveRect={liveRects[obj.id]}
-                  onObjectUpdate={onObjectUpdate}
-                  onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
-                  onPointerDownResize={(e, corner) => handlePointerDownResize(e, obj, corner)}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    if (didDragRef.current) {
-                      didDragRef.current = false
-                      return
-                    }
-                    toggle(obj.id, e.shiftKey)
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation()
-                    onSelectionChange([obj.id])
-                    setEditingId(obj.id)
-                  }}
-                  onStartEditingCommit={() => setEditingId(null)}
-                />
-              ))}
+              {deckState.objects.map((obj) =>
+                readOnly ? (
+                  <TextObjectBox
+                    key={obj.id}
+                    obj={obj}
+                    selected={false}
+                    editing={false}
+                    liveRect={undefined}
+                    onObjectUpdate={() => {}}
+                    onPointerDownMove={() => {}}
+                    onPointerDownResize={() => {}}
+                    onClick={() => {}}
+                    onDoubleClick={() => {}}
+                    onStartEditingCommit={() => {}}
+                  />
+                ) : (
+                  <TextObjectBox
+                    key={obj.id}
+                    obj={obj}
+                    selected={deckState.selection.includes(obj.id)}
+                    editing={editingId === obj.id}
+                    liveRect={liveRects[obj.id]}
+                    onObjectUpdate={onObjectUpdate}
+                    onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
+                    onPointerDownResize={(e, corner) => handlePointerDownResize(e, obj, corner)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (didDragRef.current) {
+                        didDragRef.current = false
+                        return
+                      }
+                      toggle(obj.id, e.shiftKey)
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      onSelectionChange([obj.id])
+                      setEditingId(obj.id)
+                    }}
+                    onStartEditingCommit={() => setEditingId(null)}
+                  />
+                ),
+              )}
             </div>
           </div>
         </div>
