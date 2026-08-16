@@ -197,6 +197,75 @@ describe('editorStore object CRUD (addObject / removeObject)', () => {
   })
 })
 
+describe('editorStore slide-bounds clamping (960x540)', () => {
+  it('addObject clamps an object placed beyond the slide edge', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 900, y: 500, width: 100, height: 80 })
+    const obj = editorStore.getState().objects.find((o) => o.id === changed[0])!
+    expect(obj.width).toBe(100)
+    expect(obj.height).toBe(80)
+    expect(obj.x).toBe(860) // 960 - 100
+    expect(obj.y).toBe(460) // 540 - 80
+  })
+
+  it('addObject leaves an in-bounds object exactly as requested', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 10, y: 20, width: 100, height: 50 })
+    const obj = editorStore.getState().objects.find((o) => o.id === changed[0])!
+    expect(obj).toMatchObject({ x: 10, y: 20, width: 100, height: 50 })
+  })
+
+  it('setPosition clamps an object moved past each edge without changing its size', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 100, height: 80 })
+    const id = changed[0]
+
+    editorStore.applyUpdate('setPosition', [id], { x: -50, y: -50 })
+    expect(editorStore.getState().objects.find((o) => o.id === id)).toMatchObject({ x: 0, y: 0, width: 100, height: 80 })
+
+    editorStore.applyUpdate('setPosition', [id], { x: 900, y: 500 })
+    const obj = editorStore.getState().objects.find((o) => o.id === id)!
+    expect(obj).toMatchObject({ x: 860, y: 460, width: 100, height: 80 })
+  })
+
+  it('setPosition leaves an in-bounds move exactly as requested', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 100, height: 80 })
+    const id = changed[0]
+    editorStore.applyUpdate('setPosition', [id], { x: 300, y: 200 })
+    expect(editorStore.getState().objects.find((o) => o.id === id)).toMatchObject({ x: 300, y: 200, width: 100, height: 80 })
+  })
+
+  it('setSize clamps an object grown past each edge', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 900, y: 500, width: 10, height: 10 })
+    const id = changed[0]
+    editorStore.applyUpdate('setSize', [id], { width: 200, height: 150 })
+    const obj = editorStore.getState().objects.find((o) => o.id === id)!
+    expect(obj.width).toBe(200)
+    expect(obj.height).toBe(150)
+    expect(obj.x).toBe(760) // 960 - 200
+    expect(obj.y).toBe(390) // 540 - 150
+  })
+
+  it('setSize clamps a requested size larger than the slide itself', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 0, y: 0, width: 10, height: 10 })
+    const id = changed[0]
+    editorStore.applyUpdate('setSize', [id], { width: 2000, height: 1000 })
+    const obj = editorStore.getState().objects.find((o) => o.id === id)!
+    expect(obj).toMatchObject({ x: 0, y: 0, width: 960, height: 540 })
+  })
+
+  it('setSize leaves an in-bounds resize exactly as requested', () => {
+    seedSlide()
+    const { changed } = editorStore.applyUpdate('addObject', [], { x: 10, y: 10, width: 50, height: 50 })
+    const id = changed[0]
+    editorStore.applyUpdate('setSize', [id], { width: 120, height: 90 })
+    expect(editorStore.getState().objects.find((o) => o.id === id)).toMatchObject({ x: 10, y: 10, width: 120, height: 90 })
+  })
+})
+
 describe('editorStore font/border/fill color, including transparent', () => {
   it('setFontColor and setBorderColor update their fields', () => {
     seedSlide()

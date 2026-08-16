@@ -20,6 +20,21 @@ type Corner = (typeof RESIZE_CORNERS)[number]
 
 type Rect = { x: number; y: number; width: number; height: number }
 
+/**
+ * Mirrors editor-state.ts's clampToSlide: size first (so an oversized
+ * request never leaves the far edge off-slide), then position against the
+ * (possibly just-clamped) size. Keeps live drag/resize feedback pinned to
+ * the slide edge instead of visually snapping back after the server's
+ * authoritative clamp on release (constrain-content-to-slide-bounds design.md).
+ */
+function clampRectToSlide(rect: Rect): Rect {
+  const width = Math.min(Math.max(1, rect.width), CANVAS_WIDTH)
+  const height = Math.min(Math.max(1, rect.height), CANVAS_HEIGHT)
+  const x = Math.min(Math.max(0, rect.x), CANVAS_WIDTH - width)
+  const y = Math.min(Math.max(0, rect.y), CANVAS_HEIGHT - height)
+  return { x, y, width, height }
+}
+
 interface DeckCanvasProps {
   deckState: DeckState
   onSelectionChange: (ids: string[]) => void
@@ -339,7 +354,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         const dx = (ev.clientX - startClientX) / scaleRef.current
         const dy = (ev.clientY - startClientY) / scaleRef.current
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragRef.current = true
-        latest = { x: originX + dx, y: originY + dy, width: obj.width, height: obj.height }
+        latest = clampRectToSlide({ x: originX + dx, y: originY + dy, width: obj.width, height: obj.height })
         setLiveRect(obj.id, latest)
       }
       function onUp() {
@@ -384,7 +399,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
           height = Math.max(MIN_SIZE, originHeight - dy)
           y = originY + (originHeight - height)
         }
-        latest = { x, y, width, height }
+        latest = clampRectToSlide({ x, y, width, height })
         setLiveRect(obj.id, latest)
       }
       function onUp() {

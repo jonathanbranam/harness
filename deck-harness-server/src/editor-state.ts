@@ -208,6 +208,24 @@ function applyListTypeToBlocks(blocks: TextBlock[], start: number, end: number, 
   })
 }
 
+const SLIDE_WIDTH = 960
+const SLIDE_HEIGHT = 540
+
+/**
+ * Clamps an object's x/y/width/height to the slide's 0,0-960,540 bounds —
+ * the single source of truth for both UI-driven updates and presentation-bridge
+ * tool calls (see openspec/changes/constrain-content-to-slide-bounds/design.md).
+ * Size is clamped first, then position is clamped against the (possibly
+ * just-clamped) size, so a resize that grows past an edge still lands fully
+ * on-slide and a plain move never alters width/height.
+ */
+function clampToSlide(obj: { x: number; y: number; width: number; height: number }): void {
+  obj.width = Math.min(Math.max(1, obj.width), SLIDE_WIDTH)
+  obj.height = Math.min(Math.max(1, obj.height), SLIDE_HEIGHT)
+  obj.x = Math.min(Math.max(0, obj.x), SLIDE_WIDTH - obj.width)
+  obj.y = Math.min(Math.max(0, obj.y), SLIDE_HEIGHT - obj.height)
+}
+
 function seedObjects(): DeckObject[] {
   return [
     {
@@ -436,14 +454,15 @@ export class EditorStore {
         id,
         x: args.x as number,
         y: args.y as number,
-        width: Math.max(1, args.width as number),
-        height: Math.max(1, args.height as number),
+        width: args.width as number,
+        height: args.height as number,
         text: normalizeText(args.text),
         fillColor: typeof args.fillColor === 'string' ? args.fillColor : '#374151',
         borderColor: typeof args.borderColor === 'string' ? args.borderColor : 'transparent',
         fontColor: typeof args.fontColor === 'string' ? args.fontColor : '#ffffff',
         fontSize: typeof args.fontSize === 'number' ? Math.max(1, args.fontSize) : 16,
       }
+      clampToSlide(newObject)
       slide.objects.push(newObject)
       changed.push(newObject.id)
       this.emit()
@@ -480,10 +499,12 @@ export class EditorStore {
           if (typeof args.y === 'number') obj.y = args.y
           if (typeof args.dx === 'number') obj.x += args.dx
           if (typeof args.dy === 'number') obj.y += args.dy
+          clampToSlide(obj)
           break
         case 'setSize':
-          if (typeof args.width === 'number') obj.width = Math.max(1, args.width)
-          if (typeof args.height === 'number') obj.height = Math.max(1, args.height)
+          if (typeof args.width === 'number') obj.width = args.width
+          if (typeof args.height === 'number') obj.height = args.height
+          clampToSlide(obj)
           break
         case 'setText':
           if (typeof args.text === 'string' || Array.isArray(args.text)) obj.text = normalizeText(args.text)
