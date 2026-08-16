@@ -615,8 +615,9 @@ describe('editorStore undo/redo', () => {
 // Font-size stepper clicks, color-picker drags, and rapid consecutive
 // nudges/resizes on the same object should collapse into a single undo
 // step rather than one entry per intermediate value — see editor-state.ts's
-// HISTORY_MERGE_WINDOW_MS/mergeKeyFor. Uses fake timers so the 250ms window
-// is exercised deterministically without a real wall-clock wait.
+// HISTORY_MERGE_WINDOW_MS/HISTORY_MERGE_MAX_BURST_MS/mergeKeyFor. Uses fake
+// timers so both windows are exercised deterministically without a real
+// wall-clock wait.
 describe('editorStore undo/redo history merging', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -670,9 +671,29 @@ describe('editorStore undo/redo history merging', () => {
   it('edits separated by more than the merge window each get their own entry', () => {
     const store = new EditorStore(null)
     store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
-    vi.advanceTimersByTime(300)
+    vi.advanceTimersByTime(700)
     store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 18 })
     expect(store.getHistory().entries.length).toBe(2)
+  })
+
+  it('forces a new entry once a continuous burst exceeds the max burst duration, even with every gap inside the merge window', () => {
+    const store = new EditorStore(null)
+    const seedFontSize = store.getState().objects.find((o) => o.id === 'title')!.fontSize
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 }) // burst start, t=0
+    for (let i = 0; i < 5; i++) {
+      vi.advanceTimersByTime(500) // < HISTORY_MERGE_WINDOW_MS each time, but t=2500 total exceeds the 2000ms cap
+      store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 18 + i })
+    }
+
+    expect(store.getHistory().entries.length).toBe(2)
+    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(22)
+
+    // First undo reverts only the second burst (back to 21, the value right before it started).
+    store.undo('user')
+    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(21)
+    // Second undo reverts the first burst all the way back to the seed value.
+    store.undo('user')
+    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(seedFontSize)
   })
 
   it('does not merge edits from different actors even within the merge window', () => {

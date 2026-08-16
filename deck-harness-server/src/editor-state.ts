@@ -100,6 +100,8 @@ interface HistoryEntry {
   after: HistorySnapshot
   /** Set only for mergeable applyUpdate actions (see mergeKeyFor) — lets a same-kind, same-target, same-actor edit within HISTORY_MERGE_WINDOW_MS extend this entry instead of pushing a new one. Never exposed via HistoryEntrySummary. */
   mergeKey?: string
+  /** When the current merge burst started (set once, unlike `timestamp` which advances on every merge) — caps how long a continuous run of edits can keep collapsing into one entry, see HISTORY_MERGE_MAX_BURST_MS. */
+  mergeBurstStart?: number
 }
 
 export interface HistoryEntrySummary {
@@ -323,7 +325,15 @@ function describeUpdate(action: UpdateAction, targetIds: string[]): string {
 // actions (setText, applyTextStyle, addObject, removeObject,
 // applyGridLayout) are deliberately excluded: each one is a distinct,
 // intentional edit even when several happen in quick succession.
-const HISTORY_MERGE_WINDOW_MS = 250
+//
+// Two limits, not one: HISTORY_MERGE_WINDOW_MS is a sliding gap check (each
+// new edit must land within this long of the *previous* edit to extend the
+// burst — an edit can keep extending it indefinitely otherwise), while
+// HISTORY_MERGE_MAX_BURST_MS caps the *total* burst duration from its first
+// edit, so a marathon continuous-drag/slider session still gets chunked
+// into a few undo steps instead of collapsing into one giant one.
+const HISTORY_MERGE_WINDOW_MS = 600
+const HISTORY_MERGE_MAX_BURST_MS = 2000
 const MERGEABLE_UPDATE_ACTIONS = new Set<UpdateAction>(['setPosition', 'setSize', 'setFillColor', 'setFontColor', 'setBorderColor', 'setFontSize'])
 
 function mergeKeyFor(action: UpdateAction, targetIds: string[]): string {
@@ -421,24 +431,34 @@ export class EditorStore {
    * entry from an already-captured before/after pair, then emits once.
    *
    * When `mergeKey` is given and matches the current top-of-stack entry's
-   * `mergeKey` (same actor, same action, same target ids) and that entry
-   * was last touched within `HISTORY_MERGE_WINDOW_MS`, this extends that
-   * entry in place (new `after`, refreshed `timestamp`) instead of pushing
-   * a new one — collapsing a burst of rapid same-kind edits (font-size
-   * stepper clicks, a color-picker drag, several quick nudges on the same
-   * object) into a single undo step. The merged entry's original `before`
-   * is left untouched, so one Undo reverts the whole burst.
+   * `mergeKey` (same actor, same action, same target ids), that entry was
+   * last touched within `HISTORY_MERGE_WINDOW_MS`, and the burst it's part
+   * of started no more than `HISTORY_MERGE_MAX_BURST_MS` ago, this extends
+   * that entry in place (new `after`, refreshed `timestamp`) instead of
+   * pushing a new one — collapsing a burst of rapid same-kind edits
+   * (font-size stepper clicks, a color-picker drag, several quick nudges on
+   * the same object) into a single undo step. The merged entry's original
+   * `before` is left untouched, so one Undo reverts the whole burst — up to
+   * the max-burst cap, after which a new burst (and a new entry) starts.
    */
   private commitHistory(actor: Actor, description: string, before: HistorySnapshot, after: HistorySnapshot, mergeKey?: string) {
     const top = this.history[this.history.length - 1]
-    if (mergeKey && top && top.mergeKey === mergeKey && top.actor === actor && Date.now() - top.timestamp <= HISTORY_MERGE_WINDOW_MS) {
+    const now = Date.now()
+    if (
+      mergeKey &&
+      top &&
+      top.mergeKey === mergeKey &&
+      top.actor === actor &&
+      now - top.timestamp <= HISTORY_MERGE_WINDOW_MS &&
+      now - (top.mergeBurstStart ?? top.timestamp) <= HISTORY_MERGE_MAX_BURST_MS
+    ) {
       top.after = after
-      top.timestamp = Date.now()
+      top.timestamp = now
       this.emit()
       return
     }
     this.redoStack = []
-    this.history.push({ id: randomUUID(), actor, timestamp: Date.now(), description, before, after, mergeKey })
+    this.history.push({ id: randomUUID(), actor, timestamp: now, description, before, after, mergeKey, mergeBurstStart: now })
     if (this.history.length > HISTORY_CAP) this.history.shift()
     this.emit()
   }
