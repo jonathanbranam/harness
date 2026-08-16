@@ -1,7 +1,7 @@
 ## 1. Server: rename operation
 
-- [ ] 1.1 Add `renameDeck(deckId, name)` to `EditorStore` in `deck-harness-server/src/editor-state.ts`, alongside `createDeck`/`selectDeck`/`deleteDeck`: return `{ ok: false, error }` for an unknown `deckId`; trim `name` and return `{ ok: false, error }` if the trimmed result is empty; otherwise set the deck's `name` to the trimmed value, `emit()`, and return `{ ok: true }`.
-- [ ] 1.2 Add a `{ type: 'rename_deck'; deckId: string; name: string }` variant to `ClientMessage` in `deck-harness-server/src/websocket.ts`, and a handler case that calls `editorStore.renameDeck(msg.deckId, msg.name)` following the same pattern as the `select_deck`/`delete_deck` cases.
+- [x] 1.1 Add `renameDeck(deckId, name)` to `EditorStore` in `deck-harness-server/src/editor-state.ts`, alongside `createDeck`/`selectDeck`/`deleteDeck`: return `{ ok: false, error }` for an unknown `deckId`; trim `name` and return `{ ok: false, error }` if the trimmed result is empty; otherwise set the deck's `name` to the trimmed value, `emit()`, and return `{ ok: true }`.
+- [x] 1.2 Add a `{ type: 'rename_deck'; deckId: string; name: string }` variant to `ClientMessage` in `deck-harness-server/src/websocket.ts`, and a handler case that calls `editorStore.renameDeck(msg.deckId, msg.name)` following the same pattern as the `select_deck`/`delete_deck` cases.
 - [ ] 1.3 Add unit tests in `deck-harness-server/src/editor-state.test.ts` covering: renaming the active deck, renaming a non-active deck, renaming to an empty/whitespace-only name (rejected, name unchanged), and renaming an unknown deck id (rejected).
 
 ## 2. Agent tool: deck_rename
