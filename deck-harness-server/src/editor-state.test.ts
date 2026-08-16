@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorStore, editorStore, plainTextOf, type TextBlock } from './editor-state'
 
 describe('editorStore', () => {
@@ -609,5 +609,107 @@ describe('editorStore undo/redo', () => {
     expect(limited.entries.length).toBe(2)
     expect(limited.canUndo).toBe(true)
     expect(store.getHistory().entries.length).toBe(3)
+  })
+})
+
+// Font-size stepper clicks, color-picker drags, and rapid consecutive
+// nudges/resizes on the same object should collapse into a single undo
+// step rather than one entry per intermediate value — see editor-state.ts's
+// HISTORY_MERGE_WINDOW_MS/mergeKeyFor. Uses fake timers so the 250ms window
+// is exercised deterministically without a real wall-clock wait.
+describe('editorStore undo/redo history merging', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('rapid setFontSize calls on the same object within the merge window collapse into one entry', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    vi.advanceTimersByTime(50)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 18 })
+    vi.advanceTimersByTime(50)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 19 })
+
+    const history = store.getHistory()
+    expect(history.entries.length).toBe(1)
+    expect(history.entries[0].description).toBe('Changed font size on 1 object')
+    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(19)
+  })
+
+  it('undo after a merged burst reverts all the way back to before the first edit', () => {
+    const store = new EditorStore(null)
+    const seedFontSize = store.getState().objects.find((o) => o.id === 'title')!.fontSize
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    vi.advanceTimersByTime(50)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 19 })
+
+    const result = store.undo('user')
+    expect(result.steppedEntries.length).toBe(1)
+    expect(store.getState().objects.find((o) => o.id === 'title')?.fontSize).toBe(seedFontSize)
+  })
+
+  it('rapid setPosition calls on the same object (e.g. quick consecutive drags) collapse into one entry', () => {
+    const store = new EditorStore(null)
+    const seedX = store.getState().objects.find((o) => o.id === 'title')!.x
+    store.applyUpdate('user', 'setPosition', ['title'], { x: 100, y: 100 })
+    vi.advanceTimersByTime(100)
+    store.applyUpdate('user', 'setPosition', ['title'], { x: 105, y: 100 })
+    vi.advanceTimersByTime(100)
+    store.applyUpdate('user', 'setPosition', ['title'], { x: 110, y: 100 })
+
+    expect(store.getHistory().entries.length).toBe(1)
+    const undoResult = store.undo('user')
+    expect(undoResult.steppedEntries.length).toBe(1)
+    expect(store.getState().objects.find((o) => o.id === 'title')?.x).toBe(seedX)
+  })
+
+  it('edits separated by more than the merge window each get their own entry', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    vi.advanceTimersByTime(300)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 18 })
+    expect(store.getHistory().entries.length).toBe(2)
+  })
+
+  it('does not merge edits from different actors even within the merge window', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    store.applyUpdate('agent', 'setFontSize', ['title'], { fontSize: 18 })
+    expect(store.getHistory().entries.length).toBe(2)
+  })
+
+  it('does not merge edits targeting different objects even within the merge window', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    store.applyUpdate('user', 'setFontSize', ['box-1'], { fontSize: 18 })
+    expect(store.getHistory().entries.length).toBe(2)
+  })
+
+  it('does not merge edits with a different action even on the same target within the window', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    store.applyUpdate('user', 'setPosition', ['title'], { x: 5, y: 5 })
+    expect(store.getHistory().entries.length).toBe(2)
+  })
+
+  it('never merges non-mergeable actions like setText, even for the same target within the window', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setText', ['title'], { text: 'one' })
+    store.applyUpdate('user', 'setText', ['title'], { text: 'two' })
+    expect(store.getHistory().entries.length).toBe(2)
+  })
+
+  it('a merged burst still discards the redo tail on the first edit that starts it', () => {
+    const store = new EditorStore(null)
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 17 })
+    store.undo('user')
+    expect(store.getHistory().canRedo).toBe(true)
+
+    store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 20 })
+    expect(store.getHistory().canRedo).toBe(false)
   })
 })

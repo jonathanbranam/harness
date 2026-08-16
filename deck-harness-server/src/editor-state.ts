@@ -98,6 +98,8 @@ interface HistoryEntry {
   description: string
   before: HistorySnapshot
   after: HistorySnapshot
+  /** Set only for mergeable applyUpdate actions (see mergeKeyFor) — lets a same-kind, same-target, same-actor edit within HISTORY_MERGE_WINDOW_MS extend this entry instead of pushing a new one. Never exposed via HistoryEntrySummary. */
+  mergeKey?: string
 }
 
 export interface HistoryEntrySummary {
@@ -313,6 +315,21 @@ function describeUpdate(action: UpdateAction, targetIds: string[]): string {
   return UPDATE_DESCRIPTIONS[action](targetIds.length)
 }
 
+// History-entry merging: a burst of rapid, same-kind edits to the same
+// target(s) (font-size stepper clicks, a color-picker drag firing many
+// onChange events, several quick nudges/resizes on the same object) should
+// collapse into a single undo step rather than one entry per intermediate
+// value — see commitHistory's mergeKey handling below. Structural/discrete
+// actions (setText, applyTextStyle, addObject, removeObject,
+// applyGridLayout) are deliberately excluded: each one is a distinct,
+// intentional edit even when several happen in quick succession.
+const HISTORY_MERGE_WINDOW_MS = 250
+const MERGEABLE_UPDATE_ACTIONS = new Set<UpdateAction>(['setPosition', 'setSize', 'setFillColor', 'setFontColor', 'setBorderColor', 'setFontSize'])
+
+function mergeKeyFor(action: UpdateAction, targetIds: string[]): string {
+  return `${action}:${[...targetIds].sort().join(',')}`
+}
+
 function seedObjects(): DeckObject[] {
   return [
     {
@@ -398,10 +415,30 @@ export class EditorStore {
     this.selection = [...snapshot.selection]
   }
 
-  /** Centralizes the cap/eviction/redo-invalidation rule (design.md's "History capture centralized in one private wrapper") — pushes one entry from an already-captured before/after pair, then emits once. */
-  private commitHistory(actor: Actor, description: string, before: HistorySnapshot, after: HistorySnapshot) {
+  /**
+   * Centralizes the cap/eviction/redo-invalidation rule (design.md's
+   * "History capture centralized in one private wrapper") — pushes one
+   * entry from an already-captured before/after pair, then emits once.
+   *
+   * When `mergeKey` is given and matches the current top-of-stack entry's
+   * `mergeKey` (same actor, same action, same target ids) and that entry
+   * was last touched within `HISTORY_MERGE_WINDOW_MS`, this extends that
+   * entry in place (new `after`, refreshed `timestamp`) instead of pushing
+   * a new one — collapsing a burst of rapid same-kind edits (font-size
+   * stepper clicks, a color-picker drag, several quick nudges on the same
+   * object) into a single undo step. The merged entry's original `before`
+   * is left untouched, so one Undo reverts the whole burst.
+   */
+  private commitHistory(actor: Actor, description: string, before: HistorySnapshot, after: HistorySnapshot, mergeKey?: string) {
+    const top = this.history[this.history.length - 1]
+    if (mergeKey && top && top.mergeKey === mergeKey && top.actor === actor && Date.now() - top.timestamp <= HISTORY_MERGE_WINDOW_MS) {
+      top.after = after
+      top.timestamp = Date.now()
+      this.emit()
+      return
+    }
     this.redoStack = []
-    this.history.push({ id: randomUUID(), actor, timestamp: Date.now(), description, before, after })
+    this.history.push({ id: randomUUID(), actor, timestamp: Date.now(), description, before, after, mergeKey })
     if (this.history.length > HISTORY_CAP) this.history.shift()
     this.emit()
   }
@@ -562,7 +599,10 @@ export class EditorStore {
   applyUpdate(actor: Actor, action: UpdateAction, targetIds: string[], args: Record<string, unknown>): UpdateResult {
     const before = this.snapshotState()
     const result = this.runUpdate(action, targetIds, args)
-    if (result.changed.length > 0) this.commitHistory(actor, describeUpdate(action, targetIds), before, this.snapshotState())
+    if (result.changed.length > 0) {
+      const mergeKey = MERGEABLE_UPDATE_ACTIONS.has(action) ? mergeKeyFor(action, result.changed) : undefined
+      this.commitHistory(actor, describeUpdate(action, targetIds), before, this.snapshotState(), mergeKey)
+    }
     return result
   }
 
