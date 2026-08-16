@@ -39,6 +39,7 @@ export type TextBlock =
 interface BaseDeckObject {
   id: string
   zIndex: number
+  opacity: number
 }
 
 export interface TextBoxObject extends BaseDeckObject {
@@ -47,6 +48,7 @@ export interface TextBoxObject extends BaseDeckObject {
   y: number
   width: number
   height: number
+  rotation: number
   text: TextBlock[]
   fillColor: string
   borderColor: string
@@ -60,6 +62,7 @@ export interface BoxObject extends BaseDeckObject {
   y: number
   width: number
   height: number
+  rotation: number
   fillColor: string
   borderColor: string
   borderWidth: number
@@ -72,6 +75,7 @@ export interface EllipseObject extends BaseDeckObject {
   y: number
   width: number
   height: number
+  rotation: number
   fillColor: string
   borderColor: string
   borderWidth: number
@@ -99,9 +103,32 @@ export interface ArrowObject extends BaseDeckObject {
   arrowEnd: boolean
 }
 
+/**
+ * A cropped/scaled image: `x/y/width/height` is the destination box on the
+ * slide (participates in boundsOf/translateObject like box/ellipse), while
+ * `cropX/cropY/cropWidth/cropHeight` is an independent rectangle in the
+ * *source* image's own pixel coordinates (design.md's "image joins the
+ * DeckObject union with its own geometry shape"). Every write path must keep
+ * width/height's aspect ratio equal to cropWidth/cropHeight's — see
+ * deriveImageSize/deriveCropSize below.
+ */
+export interface ImageObject extends BaseDeckObject {
+  type: 'image'
+  src: string
+  x: number
+  y: number
+  width: number
+  height: number
+  cropX: number
+  cropY: number
+  cropWidth: number
+  cropHeight: number
+  rotation: number
+}
+
 export type ShapeType = 'line' | 'box' | 'ellipse' | 'arrow'
 export type ShapeObject = BoxObject | EllipseObject | LineObject | ArrowObject
-export type DeckObject = TextBoxObject | ShapeObject
+export type DeckObject = TextBoxObject | ShapeObject | ImageObject
 
 export interface Slide {
   id: string
@@ -213,6 +240,10 @@ export type UpdateAction =
   | 'setBorderWidth'
   | 'setCornerRadius'
   | 'setArrowHeads'
+  | 'setOpacity'
+  | 'setRotation'
+  | 'setImageSource'
+  | 'setCrop'
 
 export interface UpdateResult {
   changed: string[]
@@ -360,8 +391,17 @@ export function isTextBox(obj: DeckObject): obj is TextBoxObject {
   return obj.type === 'textBox'
 }
 
+export function isImage(obj: DeckObject): obj is ImageObject {
+  return obj.type === 'image'
+}
+
 function hasFillStyle(obj: DeckObject): obj is TextBoxObject | BoxObject | EllipseObject {
   return obj.type === 'textBox' || obj.type === 'box' || obj.type === 'ellipse'
+}
+
+/** Bounding-box types that carry an independently settable rotation — deliberately excludes line/arrow (design.md's "rotation stays on the four bounding-box interfaces individually"), so the type system enforces deck-shape-elements' "Lines and arrows do not support rotation" requirement. */
+export function hasRotation(obj: DeckObject): obj is TextBoxObject | ImageObject | BoxObject | EllipseObject {
+  return obj.type === 'textBox' || obj.type === 'image' || obj.type === 'box' || obj.type === 'ellipse'
 }
 
 /**
@@ -411,7 +451,20 @@ function nextZIndex(slide: Slide): number {
  * field, so their bounding box is clamped by translating the whole object.
  */
 function clampToSlide(obj: DeckObject): void {
-  if (!isLineLike(obj)) {
+  if (isImage(obj)) {
+    // Unlike box/ellipse (clamped independently below), an image's
+    // width/height must stay proportional to its crop rect — scale both
+    // dimensions down together by whichever factor is needed to fit within
+    // the slide (deck-object-bounds' "Slide-bounds clamping preserves an
+    // image's aspect ratio").
+    const widthFactor = obj.width > SLIDE_WIDTH ? SLIDE_WIDTH / obj.width : 1
+    const heightFactor = obj.height > SLIDE_HEIGHT ? SLIDE_HEIGHT / obj.height : 1
+    const factor = Math.min(widthFactor, heightFactor)
+    if (factor < 1) {
+      obj.width = Math.max(1, obj.width * factor)
+      obj.height = Math.max(1, obj.height * factor)
+    }
+  } else if (!isLineLike(obj)) {
     obj.width = Math.min(Math.max(1, obj.width), SLIDE_WIDTH)
     obj.height = Math.min(Math.max(1, obj.height), SLIDE_HEIGHT)
   }
@@ -423,10 +476,49 @@ function clampToSlide(obj: DeckObject): void {
   translateObject(obj, dx, dy)
 }
 
+/**
+ * The one place ImageObject.width/.height are computed from a caller's
+ * request (design.md's "Aspect-locked resize and clamping"): a single field
+ * derives the other from the current crop's aspect ratio; both fields with a
+ * mismatched ratio → width wins and height is recomputed. Reused by
+ * createImage, setSize, setImageSource, and the corner-drag resize branch
+ * client-side documents against.
+ */
+export function deriveImageSize(current: ImageObject, requested: { width?: number; height?: number }): { width: number; height: number } {
+  const aspect = current.cropWidth / current.cropHeight
+  if (typeof requested.width === 'number' && typeof requested.height !== 'number') {
+    return { width: requested.width, height: requested.width / aspect }
+  }
+  if (typeof requested.height === 'number' && typeof requested.width !== 'number') {
+    return { width: requested.height * aspect, height: requested.height }
+  }
+  if (typeof requested.width === 'number' && typeof requested.height === 'number') {
+    return { width: requested.width, height: requested.width / aspect }
+  }
+  return { width: current.width, height: current.height }
+}
+
+/** Mirror of deriveImageSize for the crop rectangle's own cropWidth/cropHeight — used by setCrop. */
+export function deriveCropSize(current: ImageObject, requested: { cropWidth?: number; cropHeight?: number }): { cropWidth: number; cropHeight: number } {
+  const aspect = current.cropWidth / current.cropHeight
+  if (typeof requested.cropWidth === 'number' && typeof requested.cropHeight !== 'number') {
+    return { cropWidth: requested.cropWidth, cropHeight: requested.cropWidth / aspect }
+  }
+  if (typeof requested.cropHeight === 'number' && typeof requested.cropWidth !== 'number') {
+    return { cropWidth: requested.cropHeight * aspect, cropHeight: requested.cropHeight }
+  }
+  if (typeof requested.cropWidth === 'number' && typeof requested.cropHeight === 'number') {
+    return { cropWidth: requested.cropWidth, cropHeight: requested.cropWidth / aspect }
+  }
+  return { cropWidth: current.cropWidth, cropHeight: current.cropHeight }
+}
+
 // Shared by getState()/exportSnapshot() (both need an isolated copy so a
 // caller can't mutate live state through the returned objects) and the
 // undo/redo history snapshots below (which need every entry's before/after
 // state to stay independent of subsequent live mutations).
+// image carries no nested arrays/objects (unlike textBox's `text`), so a
+// shallow spread is a safe deep-enough clone — no dedicated branch needed.
 function cloneObject(o: DeckObject): DeckObject {
   if (o.type === 'textBox') return { ...o, text: o.text.map((b) => ({ ...b, runs: b.runs.map((r) => ({ ...r })) })) }
   return { ...o }
@@ -470,6 +562,10 @@ const UPDATE_DESCRIPTIONS: Record<UpdateAction, (targetCount: number) => string>
   setBorderWidth: (n) => `Changed border width on ${n} object${n === 1 ? '' : 's'}`,
   setCornerRadius: (n) => `Changed corner radius on ${n} object${n === 1 ? '' : 's'}`,
   setArrowHeads: (n) => `Changed arrowheads on ${n} object${n === 1 ? '' : 's'}`,
+  setOpacity: (n) => `Changed opacity on ${n} object${n === 1 ? '' : 's'}`,
+  setRotation: (n) => `Rotated ${n} object${n === 1 ? '' : 's'}`,
+  setImageSource: (n) => `Changed image source on ${n} object${n === 1 ? '' : 's'}`,
+  setCrop: (n) => `Changed crop on ${n} object${n === 1 ? '' : 's'}`,
 }
 
 function describeUpdate(action: UpdateAction, targetIds: string[]): string {
@@ -482,9 +578,12 @@ function describeUpdate(action: UpdateAction, targetIds: string[]): string {
 // collapse into a single undo step rather than one entry per intermediate
 // value — see commitHistory's mergeKey handling below. Structural/discrete
 // actions (setText, applyTextStyle, addObject, removeObject,
-// applyGridLayout, the z-order actions, setArrowHeads) are deliberately
-// excluded: each one is a distinct, intentional edit even when several
-// happen in quick succession.
+// applyGridLayout, the z-order actions, setArrowHeads, setImageSource,
+// setCrop) are deliberately excluded: each one is a distinct, intentional
+// edit even when several happen in quick succession — setImageSource/setCrop
+// in particular have no natural rapid-fire burst the way a drag/slider does
+// (design.md's "Undo/redo: setOpacity/setRotation are mergeable; image tool
+// calls are not").
 //
 // Two limits, not one: HISTORY_MERGE_WINDOW_MS is a sliding gap check (each
 // new edit must land within this long of the *previous* edit to extend the
@@ -505,6 +604,8 @@ const MERGEABLE_UPDATE_ACTIONS = new Set<UpdateAction>([
   'setStrokeWidth',
   'setBorderWidth',
   'setCornerRadius',
+  'setOpacity',
+  'setRotation',
 ])
 
 function mergeKeyFor(action: UpdateAction, targetIds: string[]): string {
@@ -517,6 +618,8 @@ function seedObjects(): DeckObject[] {
       id: 'title',
       type: 'textBox',
       zIndex: 0,
+      opacity: 1,
+      rotation: 0,
       x: 40,
       y: 40,
       width: 400,
@@ -531,6 +634,8 @@ function seedObjects(): DeckObject[] {
       id: 'box-1',
       type: 'textBox',
       zIndex: 1,
+      opacity: 1,
+      rotation: 0,
       x: 40,
       y: 160,
       width: 200,
@@ -545,6 +650,8 @@ function seedObjects(): DeckObject[] {
       id: 'box-2',
       type: 'textBox',
       zIndex: 2,
+      opacity: 1,
+      rotation: 0,
       x: 260,
       y: 160,
       width: 200,
@@ -580,8 +687,18 @@ function applyActionToTarget(obj: DeckObject, action: UpdateAction, args: Record
     }
     case 'setSize':
       if (isLineLike(obj)) return `setSize does not apply to type "${obj.type}"`
-      if (typeof args.width === 'number') obj.width = args.width
-      if (typeof args.height === 'number') obj.height = args.height
+      if (isImage(obj)) {
+        const requested = {
+          width: typeof args.width === 'number' ? args.width : undefined,
+          height: typeof args.height === 'number' ? args.height : undefined,
+        }
+        const { width, height } = deriveImageSize(obj, requested)
+        obj.width = width
+        obj.height = height
+      } else {
+        if (typeof args.width === 'number') obj.width = args.width
+        if (typeof args.height === 'number') obj.height = args.height
+      }
       clampToSlide(obj)
       return undefined
     case 'setEndpoint': {
@@ -609,9 +726,11 @@ function applyActionToTarget(obj: DeckObject, action: UpdateAction, args: Record
       if (typeof args.color === 'string') obj.fillColor = args.color
       return undefined
     case 'setBorderColor':
-      // Generic across every type: sets borderColor for text/box/ellipse,
-      // or strokeColor for line/arrow (design.md's "New pi tools vs.
-      // extending presentation_update" decision).
+      // Generic across text/box/ellipse/line/arrow: sets borderColor for
+      // text/box/ellipse, or strokeColor for line/arrow (design.md's "New pi
+      // tools vs. extending presentation_update" decision). image has
+      // neither field — it's the one type with no border-like styling.
+      if (obj.type === 'image') return `setBorderColor does not apply to type "${obj.type}"`
       if (typeof args.color === 'string') {
         if (isLineLike(obj)) obj.strokeColor = args.color
         else obj.borderColor = args.color
@@ -654,6 +773,49 @@ function applyActionToTarget(obj: DeckObject, action: UpdateAction, args: Record
       if (typeof args.arrowStart === 'boolean') obj.arrowStart = args.arrowStart
       if (typeof args.arrowEnd === 'boolean') obj.arrowEnd = args.arrowEnd
       return undefined
+    case 'setOpacity':
+      if (typeof args.opacity !== 'number') return 'setOpacity requires numeric "opacity"'
+      obj.opacity = Math.min(1, Math.max(0, args.opacity))
+      return undefined
+    case 'setRotation':
+      if (!hasRotation(obj)) return `setRotation does not apply to type "${obj.type}"`
+      if (typeof args.rotation !== 'number') return 'setRotation requires numeric "rotation"'
+      obj.rotation = args.rotation
+      return undefined
+    case 'setImageSource': {
+      if (!isImage(obj)) return `setImageSource does not apply to type "${obj.type}"`
+      if (typeof args.src !== 'string' || !args.src.trim()) return 'setImageSource requires non-empty "src"'
+      if (typeof args.naturalWidth !== 'number' || typeof args.naturalHeight !== 'number') {
+        return 'setImageSource requires numeric "naturalWidth"/"naturalHeight" for the new source (the server cannot inspect image bytes itself)'
+      }
+      obj.src = args.src
+      // Crop resets to the new source's full extent (deck-image-elements'
+      // "Agent changes an image's source" scenario) before deriving the new
+      // destination height from the existing width and that crop's aspect ratio.
+      obj.cropX = 0
+      obj.cropY = 0
+      obj.cropWidth = args.naturalWidth
+      obj.cropHeight = args.naturalHeight
+      const { width, height } = deriveImageSize(obj, { width: obj.width })
+      obj.width = width
+      obj.height = height
+      clampToSlide(obj)
+      return undefined
+    }
+    case 'setCrop': {
+      if (!isImage(obj)) return `setCrop does not apply to type "${obj.type}"`
+      if (typeof args.cropX === 'number') obj.cropX = args.cropX
+      if (typeof args.cropY === 'number') obj.cropY = args.cropY
+      if (typeof args.cropWidth === 'number' || typeof args.cropHeight === 'number') {
+        const { cropWidth, cropHeight } = deriveCropSize(obj, {
+          cropWidth: typeof args.cropWidth === 'number' ? args.cropWidth : undefined,
+          cropHeight: typeof args.cropHeight === 'number' ? args.cropHeight : undefined,
+        })
+        obj.cropWidth = cropWidth
+        obj.cropHeight = cropHeight
+      }
+      return undefined
+    }
     case 'setZIndex':
       if (typeof args.zIndex !== 'number') return 'setZIndex requires numeric "zIndex"'
       obj.zIndex = args.zIndex
@@ -1000,13 +1162,15 @@ export class EditorStore {
               id,
               type,
               zIndex,
+              opacity: 1,
+              rotation: 0,
               ...geometry,
               fillColor,
               borderColor,
               borderWidth,
               cornerRadius: typeof args.cornerRadius === 'number' ? Math.max(0, args.cornerRadius) : DEFAULT_CORNER_RADIUS,
             }
-          : { id, type, zIndex, ...geometry, fillColor, borderColor, borderWidth }
+          : { id, type, zIndex, opacity: 1, rotation: 0, ...geometry, fillColor, borderColor, borderWidth }
       clampToSlide(obj)
       slide.objects.push(obj)
       changed.push(obj.id)
@@ -1022,12 +1186,86 @@ export class EditorStore {
     const points = { x1: args.x1 as number, y1: args.y1 as number, x2: args.x2 as number, y2: args.y2 as number }
     const obj: DeckObject =
       type === 'arrow'
-        ? { id, type, zIndex, ...points, strokeColor, strokeWidth, arrowStart: args.arrowStart === true, arrowEnd: args.arrowEnd !== false }
-        : { id, type, zIndex, ...points, strokeColor, strokeWidth }
+        ? { id, type, zIndex, opacity: 1, ...points, strokeColor, strokeWidth, arrowStart: args.arrowStart === true, arrowEnd: args.arrowEnd !== false }
+        : { id, type, zIndex, opacity: 1, ...points, strokeColor, strokeWidth }
     clampToSlide(obj)
     slide.objects.push(obj)
     changed.push(obj.id)
     return { changed, errors }
+  }
+
+  /**
+   * Creates a new `image` object on the active slide, mirroring
+   * `createShape`'s validation + own before/after history-capture pattern
+   * (see `addImage` below). Crop fields default to the full source image's
+   * extent — this requires the *caller* (the tool layer / client, per
+   * design.md) to supply the source's natural dimensions via
+   * naturalWidth/naturalHeight, since the store has no way to inspect image
+   * bytes itself.
+   */
+  private createImage(args: Record<string, unknown>): UpdateResult {
+    const errors: string[] = []
+    const changed: string[] = []
+    if (typeof args.src !== 'string' || !args.src.trim()) errors.push('addImage requires non-empty "src"')
+    for (const key of ['x', 'y'] as const) {
+      if (typeof args[key] !== 'number') errors.push(`addImage requires numeric "${key}"`)
+    }
+    if (typeof args.width !== 'number' && typeof args.height !== 'number') {
+      errors.push('addImage requires numeric "width" and/or "height"')
+    }
+    const hasCropSize = typeof args.cropWidth === 'number' || typeof args.cropHeight === 'number'
+    if (!hasCropSize && (typeof args.naturalWidth !== 'number' || typeof args.naturalHeight !== 'number')) {
+      errors.push('addImage requires "cropWidth"/"cropHeight", or "naturalWidth"/"naturalHeight" to default the crop to the full source image')
+    }
+    if (errors.length > 0) return { changed, errors }
+
+    const slide = this.activeSlide()
+    const id = typeof args.id === 'string' && args.id.trim() ? args.id : randomUUID()
+    if (slide.objects.some((o) => o.id === id)) {
+      errors.push(`Object with id "${id}" already exists on the active slide`)
+      return { changed, errors }
+    }
+
+    const cropX = typeof args.cropX === 'number' ? args.cropX : 0
+    const cropY = typeof args.cropY === 'number' ? args.cropY : 0
+    const cropWidth = typeof args.cropWidth === 'number' ? args.cropWidth : (args.naturalWidth as number)
+    const cropHeight = typeof args.cropHeight === 'number' ? args.cropHeight : (args.naturalHeight as number)
+
+    const obj: ImageObject = {
+      id,
+      type: 'image',
+      zIndex: nextZIndex(slide),
+      opacity: 1,
+      rotation: 0,
+      src: args.src as string,
+      x: args.x as number,
+      y: args.y as number,
+      width: typeof args.width === 'number' ? args.width : (args.height as number) * (cropWidth / cropHeight),
+      height: typeof args.height === 'number' ? args.height : (args.width as number) * (cropHeight / cropWidth),
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+    }
+    clampToSlide(obj)
+    slide.objects.push(obj)
+    changed.push(obj.id)
+    return { changed, errors }
+  }
+
+  /**
+   * Mirrors `addShape`'s own before/after capture: `createImage` can fail
+   * validation (missing src/geometry), and a no-op call must not push a
+   * history entry (deck-undo-redo's "A failed image-creation call is not
+   * captured").
+   */
+  addImage(actor: Actor, args: Record<string, unknown>): UpdateResult {
+    const before = this.snapshotState()
+    const result = this.createImage(args)
+    if (result.changed.length > 0) {
+      this.commitHistory(actor, 'Added image', before, this.snapshotState())
+    }
+    return result
   }
 
   private runUpdate(action: UpdateAction, targetIds: string[], args: Record<string, unknown>): UpdateResult {
@@ -1071,6 +1309,8 @@ export class EditorStore {
         id,
         type: 'textBox',
         zIndex: nextZIndex(slide),
+        opacity: 1,
+        rotation: 0,
         x: args.x as number,
         y: args.y as number,
         width: args.width as number,

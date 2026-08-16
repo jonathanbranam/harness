@@ -19,6 +19,7 @@ export type TextBlock =
 interface BaseDeckObject {
   id: string
   zIndex: number
+  opacity: number
 }
 
 export interface TextBoxObject extends BaseDeckObject {
@@ -27,6 +28,7 @@ export interface TextBoxObject extends BaseDeckObject {
   y: number
   width: number
   height: number
+  rotation: number
   text: TextBlock[]
   fillColor: string
   borderColor: string
@@ -40,6 +42,7 @@ export interface BoxObject extends BaseDeckObject {
   y: number
   width: number
   height: number
+  rotation: number
   fillColor: string
   borderColor: string
   borderWidth: number
@@ -52,6 +55,7 @@ export interface EllipseObject extends BaseDeckObject {
   y: number
   width: number
   height: number
+  rotation: number
   fillColor: string
   borderColor: string
   borderWidth: number
@@ -79,9 +83,23 @@ export interface ArrowObject extends BaseDeckObject {
   arrowEnd: boolean
 }
 
+export interface ImageObject extends BaseDeckObject {
+  type: 'image'
+  src: string
+  x: number
+  y: number
+  width: number
+  height: number
+  cropX: number
+  cropY: number
+  cropWidth: number
+  cropHeight: number
+  rotation: number
+}
+
 export type ShapeType = 'line' | 'box' | 'ellipse' | 'arrow'
 export type ShapeObject = BoxObject | EllipseObject | LineObject | ArrowObject
-export type DeckObject = TextBoxObject | ShapeObject
+export type DeckObject = TextBoxObject | ShapeObject | ImageObject
 
 export type UpdateAction =
   | 'setPosition'
@@ -105,6 +123,10 @@ export type UpdateAction =
   | 'setBorderWidth'
   | 'setCornerRadius'
   | 'setArrowHeads'
+  | 'setOpacity'
+  | 'setRotation'
+  | 'setImageSource'
+  | 'setCrop'
 
 export interface UpdateActionCall {
   action: UpdateAction
@@ -350,6 +372,12 @@ export function useDeckSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'add_shape', args }))
   }, [])
 
+  // Mirrors sendAddShape: image creation isn't an UpdateAction either (same
+  // reasoning as addShape's own doc comment in editor-state.ts).
+  const sendAddImage = useCallback((args: Record<string, unknown>) => {
+    wsRef.current?.send(JSON.stringify({ type: 'add_image', args }))
+  }, [])
+
   const sendSetSlideBackground = useCallback((color: string) => {
     wsRef.current?.send(JSON.stringify({ type: 'set_slide_background', color }))
   }, [])
@@ -405,6 +433,7 @@ export function useDeckSocket() {
     sendSelection,
     sendObjectUpdate,
     sendAddShape,
+    sendAddImage,
     sendSetSlideBackground,
     respondApproval,
     selectDeck,

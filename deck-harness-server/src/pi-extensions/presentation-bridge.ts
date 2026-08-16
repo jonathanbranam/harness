@@ -31,6 +31,10 @@ const ACTIONS = [
   'sendBackward',
   'bringToFront',
   'sendToBack',
+  'setOpacity',
+  'setRotation',
+  'setImageSource',
+  'setCrop',
 ] as const
 
 const SHAPE_TYPES = ['line', 'box', 'ellipse', 'arrow'] as const
@@ -40,7 +44,7 @@ export function presentationBridge(pi: ExtensionAPI) {
     name: 'presentation_get_state',
     label: 'Get Presentation State',
     description:
-      'Get the current presentation state: the active deck and slide identity, the active slide\'s backgroundColor, every object on the active slide, and the current selection. Every object has a `type` ("textBox", "line", "box", "ellipse", or "arrow") and a `zIndex` (paint order — higher paints on top; not necessarily contiguous). `textBox` objects carry bounds (x/y/width/height), structured rich-text `text`, fillColor, borderColor, fontColor, fontSize. `box`/`ellipse` carry bounds, fillColor, borderColor, borderWidth (`box` also cornerRadius). `line`/`arrow` carry endpoints (x1/y1/x2/y2), strokeColor, strokeWidth (`arrow` also arrowStart/arrowEnd booleans). `text` is an array of blocks (paragraph or listItem), each with inline runs carrying optional bold/italic flags. Color fields may be a color value or the literal "transparent" (fillColor/borderColor only — stroke/font colors are always a real color). Call this before making changes so you are reasoning about the live deck, not a stale copy.',
+      'Get the current presentation state: the active deck and slide identity, the active slide\'s backgroundColor, every object on the active slide, and the current selection. Every object has a `type` ("textBox", "line", "box", "ellipse", "arrow", or "image"), a `zIndex` (paint order — higher paints on top; not necessarily contiguous), and an `opacity` (0-1). `textBox`, `image`, `box`, `ellipse` also carry a `rotation` (degrees, about the bounding box\'s center) — `line`/`arrow` do not, since their angle is already fully expressed by their two endpoints. `textBox` objects carry bounds (x/y/width/height), structured rich-text `text`, fillColor, borderColor, fontColor, fontSize. `box`/`ellipse` carry bounds, fillColor, borderColor, borderWidth (`box` also cornerRadius). `line`/`arrow` carry endpoints (x1/y1/x2/y2), strokeColor, strokeWidth (`arrow` also arrowStart/arrowEnd booleans). `image` carries a destination bounding box (x/y/width/height), a `src` reference, and an independent crop rectangle in the source image\'s own pixel coordinates (cropX/cropY/cropWidth/cropHeight) — the cropped region is scaled uniformly to fill the destination box, and every write path keeps width/height proportional to cropWidth/cropHeight so an image can never appear stretched. `text` is an array of blocks (paragraph or listItem), each with inline runs carrying optional bold/italic flags. Color fields may be a color value or the literal "transparent" (fillColor/borderColor only — stroke/font colors are always a real color). Call this before making changes so you are reasoning about the live deck, not a stale copy.',
     promptSnippet: "Read the live deck: active deck/slide identity, the slide's background color, all objects on the active slide, and the current selection",
     parameters: Type.Object({}),
     execute: async () => {
@@ -67,11 +71,15 @@ Available actions:
 - bringForward / sendBackward: {} — swaps an object with the next object above/below it in stacking order.
 - bringToFront / sendToBack: {} — moves an object above/below every other object on the slide.
 - applyGridLayout: { direction: "horizontal" | "vertical", gap?: number } — works on any mix of object types.
-- addObject: { x: number, y: number, width: number, height: number, text?: string | TextBlock[], fillColor?: string, borderColor?: string, fontColor?: string, fontSize?: number } — adds a textBox; targetIds is ignored. For line/box/ellipse/arrow use presentation_add_shape instead. Returns the new object's id in the result's "changed" list.
-- removeObject: {} — removes each object in targetIds from the active slide (any type).
+- addObject: { x: number, y: number, width: number, height: number, text?: string | TextBlock[], fillColor?: string, borderColor?: string, fontColor?: string, fontSize?: number } — adds a textBox; targetIds is ignored. For line/box/ellipse/arrow use presentation_add_shape instead, or presentation_add_image for images. Returns the new object's id in the result's "changed" list.
+- removeObject: {} — removes each object in targetIds from the active slide (any type, including image).
 - applyTextStyle: { start: number, end: number, mark?: "bold" | "italic", value?: boolean } or { start: number, end: number, listType: "bulleted" | "numbered" | null } — textBox only; start/end are character offsets into the target's plain-text content (the same string presentation_select_by_text matches against, with blocks joined by "\\n"); mark+value toggles bold/italic on that range; listType converts the blocks the range touches into that list type, or back to a plain paragraph when null.
+- setOpacity: { opacity: number } (0-1) — works on every object type.
+- setRotation: { rotation: number } (degrees, about the bounding box's center) — textBox/image/box/ellipse only; rejected as a type mismatch for line/arrow, whose angle is already expressed by their endpoints.
+- setImageSource: { src: string, naturalWidth: number, naturalHeight: number } — image only. Changes which image is displayed; naturalWidth/naturalHeight are the *new* source image's actual pixel dimensions (read the file before calling, this tool cannot inspect image bytes itself) and are used to reset the crop rectangle to that image's full extent. The destination position and width are unchanged; height is recalculated from that width and the new crop's aspect ratio.
+- setCrop: { cropX?: number, cropY?: number, cropWidth?: number, cropHeight?: number } — image only, all fields in the source image's own pixel coordinates. cropX/cropY pan the crop (which region is shown) without affecting size. cropWidth/cropHeight zoom (how much of the source is captured); passing only one of them recalculates the other to preserve the crop rectangle's current aspect ratio — passing both with a mismatched ratio makes cropWidth win and recomputes cropHeight, so don't pass both unless you intend the second to be silently overridden. setSize's width/height and setCrop's cropWidth/cropHeight are independent — resizing the destination never touches the crop, and vice versa.
 
-Setting an action's field(s) on a target whose type doesn't support them is reported in the result's "errors" instead of applied. Always prefer the most specific action. If multiple objects are selected and the user asks to lay them out, use applyGridLayout. For shape-specific styling (stroke/border width, corner radius, arrowheads) use presentation_style_shape.`,
+Setting an action's field(s) on a target whose type doesn't support them is reported in the result's "errors" instead of applied. Always prefer the most specific action. If multiple objects are selected and the user asks to lay them out, use applyGridLayout. For shape-specific styling (stroke/border width, corner radius, arrowheads) use presentation_style_shape. On image objects specifically, setSize also derives the omitted destination dimension from the current crop's aspect ratio the same way setCrop does for cropWidth/cropHeight — passing both width and height with a mismatched ratio makes width win.`,
     promptSnippet: 'Move, resize, restyle, or lay out objects in the live deck',
     promptGuidelines: [
       'Use presentation_update on the current selection unless the user names other objects by text or id.',
@@ -127,6 +135,39 @@ fillColor/borderColor accept a hex color or "transparent"; strokeColor must be a
     }),
     execute: async (_id, params) => {
       const result = editorStore.addShape('agent', params as Record<string, unknown>)
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        details: result,
+        isError: result.errors.length > 0 && result.changed.length === 0,
+      }
+    },
+  })
+
+  pi.registerTool({
+    name: 'presentation_add_image',
+    label: 'Add Image',
+    description: `Add a new image object to the active slide. Required: src (a URL — either an http(s):// URL, or a server-local /api/images/:id from an upload the user already made), x, y (destination position), and at least one of width/height (destination size; the other is derived from the crop's aspect ratio if omitted).
+
+The crop rectangle (cropX/cropY/cropWidth/cropHeight, in the source image's own pixel coordinates) defaults to the full source image when omitted — but that requires naturalWidth/naturalHeight (the source image's actual pixel dimensions) so the default can be computed; pass either an explicit cropWidth/cropHeight, or naturalWidth/naturalHeight, not neither.
+
+The new object is placed above every existing object on the slide (highest zIndex). Returns the new object's id in the result's "changed" list; a validation failure (e.g. missing geometry) is reported in "errors" and creates nothing. To edit an existing image's source/crop afterward, use presentation_update's setImageSource/setCrop.`,
+    promptSnippet: 'Add an image to the live deck',
+    parameters: Type.Object({
+      src: Type.String(),
+      id: Type.Optional(Type.String()),
+      x: Type.Number(),
+      y: Type.Number(),
+      width: Type.Optional(Type.Number()),
+      height: Type.Optional(Type.Number()),
+      cropX: Type.Optional(Type.Number()),
+      cropY: Type.Optional(Type.Number()),
+      cropWidth: Type.Optional(Type.Number()),
+      cropHeight: Type.Optional(Type.Number()),
+      naturalWidth: Type.Optional(Type.Number({ description: "The source image's actual pixel width, used to default the crop to its full extent when cropWidth isn't given." })),
+      naturalHeight: Type.Optional(Type.Number({ description: "The source image's actual pixel height, used to default the crop to its full extent when cropHeight isn't given." })),
+    }),
+    execute: async (_id, params) => {
+      const result = editorStore.addImage('agent', params as Record<string, unknown>)
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
         details: result,
@@ -256,7 +297,7 @@ fillColor/borderColor accept a hex color or "transparent"; strokeColor must be a
       message: {
         customType: 'editor_context',
         role: 'user' as const,
-        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, slide backgroundColor: ${state.backgroundColor}, selected: ${state.selection.join(', ') || '(none)'}). Every object has a "type" ("textBox", "line", "box", "ellipse", or "arrow") and a "zIndex" (paint order, higher on top). "textBox" objects' "text" is structured rich text (an array of paragraph/listItem blocks of runs with optional bold/italic); "textBox"/"box"/"ellipse" carry fillColor/borderColor (color value or "transparent"), "textBox" also fontColor; "line"/"arrow" carry strokeColor/strokeWidth instead:\n${JSON.stringify(state, null, 2)}`,
+        content: `Current presentation state (deck: ${state.activeDeckId}, slide: ${state.activeSlideId}, slide backgroundColor: ${state.backgroundColor}, selected: ${state.selection.join(', ') || '(none)'}). Every object has a "type" ("textBox", "line", "box", "ellipse", "arrow", or "image"), a "zIndex" (paint order, higher on top), and an "opacity" (0-1). "textBox"/"image"/"box"/"ellipse" also carry a "rotation" (degrees, about the bounding box's center) — "line"/"arrow" do not. "textBox" objects' "text" is structured rich text (an array of paragraph/listItem blocks of runs with optional bold/italic); "textBox"/"box"/"ellipse" carry fillColor/borderColor (color value or "transparent"), "textBox" also fontColor; "line"/"arrow" carry strokeColor/strokeWidth instead; "image" carries src, a destination box (x/y/width/height), and a crop rectangle (cropX/cropY/cropWidth/cropHeight, in the source image's own pixel coordinates) that's always proportional to the destination box:\n${JSON.stringify(state, null, 2)}`,
         display: false,
       },
     }

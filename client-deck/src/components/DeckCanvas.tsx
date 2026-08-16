@@ -5,6 +5,7 @@ import type {
   DeckObject,
   DeckState,
   EllipseObject,
+  ImageObject,
   LineObject,
   ShapeObject,
   ShapeType,
@@ -12,7 +13,9 @@ import type {
   TextBoxObject,
   UpdateActionCall,
 } from '../hooks/useDeckSocket'
+import { imagesApi } from '../api'
 import { genId } from '../id'
+import { loadNaturalImageSize } from '../image-size'
 import {
   blockMarkers,
   blocksToEditableHtml,
@@ -35,6 +38,10 @@ const NEW_SHAPE_DEFAULTS: Record<ShapeType, Record<string, unknown>> = {
 }
 const RESIZE_CORNERS = ['nw', 'ne', 'sw', 'se'] as const
 type Corner = (typeof RESIZE_CORNERS)[number]
+const NEW_IMAGE_MAX_WIDTH = 300
+const CROP_PANEL_MAX = 420
+const MIN_CROP_SIZE = 10
+const ROTATE_HANDLE_OFFSET = 24
 
 // Selection outline/resize handles/format toolbar (fix-selection-tools-zorder)
 // paint above every object via a fixed z-index rather than relying on DOM
@@ -81,6 +88,23 @@ function isLineLike(obj: DeckObject): obj is LineObject | ArrowObject {
   return obj.type === 'line' || obj.type === 'arrow'
 }
 
+function isImage(obj: DeckObject): obj is ImageObject {
+  return obj.type === 'image'
+}
+
+/** Mirrors editor-state.ts's hasRotation — the four bounding-box types that carry an independently settable rotation. */
+function hasRotation(obj: DeckObject): obj is TextBoxObject | ImageObject | BoxObject | EllipseObject {
+  return obj.type === 'textBox' || obj.type === 'image' || obj.type === 'box' || obj.type === 'ellipse'
+}
+
+/** Rotates a (dx, dy) vector by `degrees` — used to move a raw pointer delta into/out of a rotated object's own local frame (design.md's rotated-resize local-frame transform). */
+function rotateVector(dx: number, dy: number, degrees: number): [number, number] {
+  const rad = (degrees * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  return [dx * cos - dy * sin, dx * sin + dy * cos]
+}
+
 /** Bounding box for any object type — mirrors editor-state.ts's boundsOf, duplicated client-side per CLAUDE.md's "No packages/ tier yet". */
 function boundsOf(obj: DeckObject): Rect {
   if (isLineLike(obj)) {
@@ -122,6 +146,7 @@ interface DeckCanvasProps {
   onSelectionChange: (ids: string[]) => void
   onObjectUpdate: (actions: UpdateActionCall[]) => void
   onAddShape?: (args: Record<string, unknown>) => void
+  onAddImage?: (args: Record<string, unknown>) => void
   onSetSlideBackground?: (color: string) => void
   onUndo: () => void
   onRedo: () => void
@@ -148,13 +173,14 @@ const TextObjectBox = forwardRef<
     editing: boolean
     rect: Rect
     zIndex: number
+    liveRotation?: number
     onPointerDownMove: (e: React.PointerEvent) => void
     onClick: (e: React.MouseEvent) => void
     onDoubleClick: (e: React.MouseEvent) => void
     onStartEditingCommit: () => void
     onObjectUpdate: (actions: UpdateActionCall[]) => void
   }
->(function TextObjectBox({ obj, editing, rect, zIndex, onPointerDownMove, onClick, onDoubleClick, onStartEditingCommit, onObjectUpdate }, ref) {
+>(function TextObjectBox({ obj, editing, rect, zIndex, liveRotation, onPointerDownMove, onClick, onDoubleClick, onStartEditingCommit, onObjectUpdate }, ref) {
   const editableRef = useRef<HTMLDivElement | null>(null)
   const lastKnownTextRef = useRef<string>('')
 
@@ -247,6 +273,9 @@ const TextObjectBox = forwardRef<
         width: rect.width,
         height: rect.height,
         zIndex,
+        opacity: obj.opacity,
+        transform: `rotate(${liveRotation ?? obj.rotation}deg)`,
+        transformOrigin: 'center',
         backgroundColor: obj.fillColor === 'transparent' ? 'transparent' : obj.fillColor,
         borderColor: obj.borderColor === 'transparent' ? undefined : obj.borderColor,
         fontSize: obj.fontSize,
@@ -314,6 +343,7 @@ function ShapeObjectBox({
   liveRect,
   liveEndpoint,
   zIndex,
+  liveRotation,
   onPointerDownMove,
   onClick,
 }: {
@@ -321,6 +351,7 @@ function ShapeObjectBox({
   liveRect?: Rect
   liveEndpoint?: EndpointOverride
   zIndex: number
+  liveRotation?: number
   onPointerDownMove: (e: React.PointerEvent) => void
   onClick: (e: React.MouseEvent) => void
 }) {
@@ -335,6 +366,9 @@ function ShapeObjectBox({
           width: rect.width,
           height: rect.height,
           zIndex,
+          opacity: obj.opacity,
+          transform: `rotate(${liveRotation ?? obj.rotation}deg)`,
+          transformOrigin: 'center',
           backgroundColor: obj.fillColor === 'transparent' ? 'transparent' : obj.fillColor,
           border: `${obj.borderWidth}px solid ${obj.borderColor === 'transparent' ? 'transparent' : obj.borderColor}`,
           borderRadius: obj.type === 'box' ? obj.cornerRadius : '9999px',
@@ -358,7 +392,7 @@ function ShapeObjectBox({
   return (
     <svg
       className="absolute overflow-visible"
-      style={{ left: boundsX, top: boundsY, width: boundsW, height: boundsH, zIndex }}
+      style={{ left: boundsX, top: boundsY, width: boundsW, height: boundsH, zIndex, opacity: obj.opacity }}
       viewBox={`0 0 ${boundsW} ${boundsH}`}
     >
       {isArrow && (
@@ -395,16 +429,112 @@ function ShapeObjectBox({
   )
 }
 
+function ImageObjectBox({
+  obj,
+  liveRect,
+  zIndex,
+  liveRotation,
+  onPointerDownMove,
+  onClick,
+  onDoubleClick,
+}: {
+  obj: ImageObject
+  liveRect?: Rect
+  zIndex: number
+  liveRotation?: number
+  onPointerDownMove: (e: React.PointerEvent) => void
+  onClick: (e: React.MouseEvent) => void
+  onDoubleClick?: (e: React.MouseEvent) => void
+}) {
+  const rect = liveRect ?? { x: obj.x, y: obj.y, width: obj.width, height: obj.height }
+  // Source-pixel-to-destination-pixel scale factor — always uniform since
+  // width/height stays proportional to cropWidth/cropHeight (server-enforced
+  // via deriveImageSize/deriveCropSize).
+  const scale = obj.cropWidth > 0 ? rect.width / obj.cropWidth : 1
+  return (
+    <div
+      className="absolute"
+      style={{
+        left: rect.x,
+        top: rect.y,
+        width: rect.width,
+        height: rect.height,
+        zIndex,
+        opacity: obj.opacity,
+        transform: `rotate(${liveRotation ?? obj.rotation}deg)`,
+        transformOrigin: 'center',
+        overflow: 'hidden',
+        cursor: 'move',
+      }}
+      onPointerDown={onPointerDownMove}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+    >
+      {/* Rendered at its own natural size, then scaled+translated so the crop
+          rectangle's top-left lands at this container's origin and its
+          width/height fills it exactly — this needs no knowledge of the
+          source's natural pixel dimensions to render (only the crop UI needs
+          those, via image-size.ts's loadNaturalImageSize). maxWidth: 'none'
+          overrides Tailwind Preflight's `img { max-width: 100% }`, which
+          otherwise shrinks this img's pre-transform layout box to the
+          container's width instead of the source's natural size, throwing
+          off the scale/translate math above (visible as a too-small or
+          off-position crop, worst for a small container/large source). */}
+      <img
+        src={obj.src}
+        alt=""
+        draggable={false}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          maxWidth: 'none',
+          transformOrigin: '0 0',
+          transform: `scale(${scale}) translate(${-obj.cropX}px, ${-obj.cropY}px)`,
+        }}
+      />
+    </div>
+  )
+}
+
 export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function DeckCanvas(
-  { deckState, onSelectionChange, onObjectUpdate, onAddShape, onSetSlideBackground, onUndo, onRedo, readOnly = false },
+  { deckState, onSelectionChange, onObjectUpdate, onAddShape, onAddImage, onSetSlideBackground, onUndo, onRedo, readOnly = false },
   canvasRef,
 ) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [liveRects, setLiveRects] = useState<Record<string, Rect>>({})
   const [liveEndpoints, setLiveEndpoints] = useState<Record<string, EndpointOverride>>({})
+  const [liveRotations, setLiveRotations] = useState<Record<string, number>>({})
   const didDragRef = useRef(false)
   const pendingEditIdRef = useRef<string | null>(null)
   const editingBoxRef = useRef<TextObjectBoxHandle | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const sourceFileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // A local ref onto the same DOM node as the forwarded canvasRef — needed
+  // so the rotate handle can read the canvas's on-screen bounding rect
+  // (getBoundingClientRect) to convert pointer positions into slide-space
+  // coordinates, without assuming anything about the shape of the forwarded
+  // ref itself (it may be a callback ref or an object ref).
+  const canvasElRef = useRef<HTMLDivElement | null>(null)
+  const setCanvasRefs = useCallback(
+    (node: HTMLDivElement | null) => {
+      canvasElRef.current = node
+      if (typeof canvasRef === 'function') canvasRef(node)
+      else if (canvasRef) canvasRef.current = node
+    },
+    [canvasRef],
+  )
+
+  // Crop-mode local state — parallel to editingId/text-edit's local-only
+  // draft pattern (design.md's "Crop UI is a distinct interaction mode,
+  // entered like text-edit mode"). cropNaturalSize is the *source* image's
+  // actual pixel dimensions (read once via image-size.ts's
+  // loadNaturalImageSize on crop-mode entry), independent of the object's
+  // on-slide destination scale.
+  const [croppingId, setCroppingId] = useState<string | null>(null)
+  const [cropDraft, setCropDraft] = useState<{ cropX: number; cropY: number; cropWidth: number; cropHeight: number } | null>(null)
+  const [cropNaturalSize, setCropNaturalSize] = useState<{ width: number; height: number } | null>(null)
 
   // Scale-to-fit: the slide keeps its fixed 960x540 logical size (so object
   // coordinates and slide_view's screenshot capture are unaffected — see
@@ -438,6 +568,15 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     if (editingId && !deckState.objects.some((o) => o.id === editingId)) setEditingId(null)
   }, [editingId, deckState.objects])
 
+  // Same guard for crop mode — mirrors editingId's effect above.
+  useEffect(() => {
+    if (croppingId && !deckState.objects.some((o) => o.id === croppingId)) {
+      setCroppingId(null)
+      setCropDraft(null)
+      setCropNaturalSize(null)
+    }
+  }, [croppingId, deckState.objects])
+
   // A freshly added box has no text and no visible affordance hinting that
   // it needs a double-click to edit, so "+ Text box" should drop straight
   // into edit mode. The new object only exists once the addObject round
@@ -467,6 +606,10 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
 
   const setLiveEndpoint = useCallback((id: string, endpoint: EndpointOverride) => {
     setLiveEndpoints((e) => ({ ...e, [id]: endpoint }))
+  }, [])
+
+  const setLiveRotation = useCallback((id: string, rotation: number) => {
+    setLiveRotations((r) => ({ ...r, [id]: rotation }))
   }, [])
 
   // Drag/resize release sends the final rect to the server but doesn't
@@ -505,6 +648,24 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         const live = prev[id]
         const committed = obj && isLineLike(obj) ? (live.which === 'start' ? { x: obj.x1, y: obj.y1 } : { x: obj.x2, y: obj.y2 }) : undefined
         if (!obj || !committed || (committed.x === live.x && committed.y === live.y)) {
+          delete next[id]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [deckState.objects])
+
+  // Same reconciliation as liveRects above, for a dragged rotate handle.
+  useEffect(() => {
+    setLiveRotations((prev) => {
+      if (Object.keys(prev).length === 0) return prev
+      let changed = false
+      const next = { ...prev }
+      for (const id of Object.keys(prev)) {
+        const obj = deckState.objects.find((o) => o.id === id)
+        const committed = obj && hasRotation(obj) ? obj.rotation : undefined
+        if (committed === undefined || committed === prev[id]) {
           delete next[id]
           changed = true
         }
@@ -560,23 +721,54 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       const originY = obj.y
       const originWidth = obj.width
       const originHeight = obj.height
+      const rotation = obj.rotation
+      const isImage = obj.type === 'image'
       let latest: Rect = { x: originX, y: originY, width: originWidth, height: originHeight }
 
       function onMove(ev: PointerEvent) {
-        const dx = (ev.clientX - startClientX) / scaleRef.current
-        const dy = (ev.clientY - startClientY) / scaleRef.current
-        let { x, y, width, height } = { x: originX, y: originY, width: originWidth, height: originHeight }
-        if (corner.includes('e')) width = Math.max(MIN_SIZE, originWidth + dx)
-        if (corner.includes('s')) height = Math.max(MIN_SIZE, originHeight + dy)
-        if (corner.includes('w')) {
-          width = Math.max(MIN_SIZE, originWidth - dx)
-          x = originX + (originWidth - width)
+        didDragRef.current = true
+        const rawDx = (ev.clientX - startClientX) / scaleRef.current
+        const rawDy = (ev.clientY - startClientY) / scaleRef.current
+        // Move the raw slide-axis pointer delta into the object's own local
+        // (unrotated) frame before running the per-corner math below, so a
+        // corner drag follows the object's own rotated edges rather than the
+        // slide's axes (design.md's "Drag-to-move needs no rotation-
+        // awareness; resize does").
+        const [dx, dy] = rotateVector(rawDx, rawDy, -rotation)
+
+        let width = originWidth
+        let height = originHeight
+        if (isImage) {
+          // image gets a uniform-scale resize instead of independent
+          // per-axis resize: the larger-magnitude local-frame axis delta
+          // drives a single scale factor applied to both dimensions from the
+          // anchored opposite corner (design.md's "Aspect-locked resize and
+          // clamping" — corner-drag resize).
+          const widthGrow = corner.includes('e') ? dx : -dx
+          const heightGrow = corner.includes('s') ? dy : -dy
+          if (Math.abs(widthGrow) >= Math.abs(heightGrow)) {
+            width = Math.max(MIN_SIZE, originWidth + widthGrow)
+            height = Math.max(MIN_SIZE, (originHeight * width) / originWidth)
+          } else {
+            height = Math.max(MIN_SIZE, originHeight + heightGrow)
+            width = Math.max(MIN_SIZE, (originWidth * height) / originHeight)
+          }
+        } else {
+          if (corner.includes('e')) width = Math.max(MIN_SIZE, originWidth + dx)
+          if (corner.includes('w')) width = Math.max(MIN_SIZE, originWidth - dx)
+          if (corner.includes('s')) height = Math.max(MIN_SIZE, originHeight + dy)
+          if (corner.includes('n')) height = Math.max(MIN_SIZE, originHeight - dy)
         }
-        if (corner.includes('n')) {
-          height = Math.max(MIN_SIZE, originHeight - dy)
-          y = originY + (originHeight - height)
-        }
-        latest = clampRectToSlide({ x, y, width, height })
+        let x = originX
+        let y = originY
+        if (corner.includes('w')) x = originX + (originWidth - width)
+        if (corner.includes('n')) y = originY + (originHeight - height)
+
+        // The position shift above was computed in the object's local frame
+        // (since width/height/x/y were derived from the rotated-into-local
+        // dx/dy) — rotate that shift back into slide-frame before committing.
+        const [slideDx, slideDy] = rotateVector(x - originX, y - originY, rotation)
+        latest = clampRectToSlide({ x: originX + slideDx, y: originY + slideDy, width, height })
         setLiveRect(obj.id, latest)
       }
       function onUp() {
@@ -591,6 +783,56 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       window.addEventListener('pointerup', onUp)
     },
     [onObjectUpdate, setLiveRect],
+  )
+
+  // Dragging the rotate handle computes the pointer's angle relative to the
+  // object's center via atan2 (design.md's rotate-handle decision) and
+  // issues setRotation with the accumulated delta from the drag's start
+  // angle, so grabbing the handle at any point on its circumference doesn't
+  // snap the object to that exact angle.
+  const handlePointerDownRotate = useCallback(
+    (e: React.PointerEvent, obj: DeckObject) => {
+      if (!hasRotation(obj)) return
+      e.stopPropagation()
+      e.preventDefault()
+      const bounds = boundsOf(obj)
+      const centerX = bounds.x + bounds.width / 2
+      const centerY = bounds.y + bounds.height / 2
+      const originRotation = obj.rotation
+
+      function angleFromCenter(clientX: number, clientY: number): number {
+        const canvasRect = canvasElRef.current?.getBoundingClientRect()
+        if (!canvasRect) return 0
+        const slideX = (clientX - canvasRect.left) / scaleRef.current
+        const slideY = (clientY - canvasRect.top) / scaleRef.current
+        // 0deg = straight up from center, clockwise-positive — matches CSS
+        // rotate()'s convention and the handle's "above the top edge" placement.
+        return (Math.atan2(slideX - centerX, -(slideY - centerY)) * 180) / Math.PI
+      }
+
+      const startAngle = angleFromCenter(e.clientX, e.clientY)
+      let latest = originRotation
+
+      function onMove(ev: PointerEvent) {
+        // A rotate drag's release point often lands outside the (now
+        // rotated) object's on-screen footprint, unlike move/resize where
+        // the dragged element tracks the cursor — mark it so the slide
+        // background's click-to-deselect handler below doesn't fire on the
+        // native click that follows such a release.
+        didDragRef.current = true
+        const angle = angleFromCenter(ev.clientX, ev.clientY)
+        latest = originRotation + (angle - startAngle)
+        setLiveRotation(obj.id, latest)
+      }
+      function onUp() {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        onObjectUpdate([{ action: 'setRotation', targetIds: [obj.id], args: { rotation: latest } }])
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [onObjectUpdate, setLiveRotation],
   )
 
   const handlePointerDownEndpoint = useCallback(
@@ -642,6 +884,146 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       onSelectionChange([id])
     },
     [onAddShape, onSelectionChange],
+  )
+
+  // Uploads the chosen file, reads its natural pixel size (needed to default
+  // the crop to the full source extent — the server can't inspect image
+  // bytes itself, design.md), and adds it scaled down to a sensible default
+  // on-slide size.
+  const handleImageFileChosen = useCallback(
+    async (file: File) => {
+      try {
+        const { url } = await imagesApi.upload(file)
+        const natural = await loadNaturalImageSize(url)
+        const id = genId()
+        const width = Math.min(NEW_IMAGE_MAX_WIDTH, natural.width)
+        const height = (natural.height * width) / natural.width
+        onAddImage?.({ id, src: url, x: 40, y: 40, width, height, naturalWidth: natural.width, naturalHeight: natural.height })
+        onSelectionChange([id])
+      } catch (err) {
+        console.error('Image upload failed', err)
+      }
+    },
+    [onAddImage, onSelectionChange],
+  )
+
+  const handleReplaceImageSource = useCallback(
+    async (file: File, targetId: string) => {
+      try {
+        const { url } = await imagesApi.upload(file)
+        const natural = await loadNaturalImageSize(url)
+        onObjectUpdate([{ action: 'setImageSource', targetIds: [targetId], args: { src: url, naturalWidth: natural.width, naturalHeight: natural.height } }])
+      } catch (err) {
+        console.error('Image source replace failed', err)
+      }
+    },
+    [onObjectUpdate],
+  )
+
+  const enterCropMode = useCallback(async (obj: ImageObject) => {
+    try {
+      const natural = await loadNaturalImageSize(obj.src)
+      setCropNaturalSize(natural)
+      setCropDraft({ cropX: obj.cropX, cropY: obj.cropY, cropWidth: obj.cropWidth, cropHeight: obj.cropHeight })
+      setCroppingId(obj.id)
+    } catch (err) {
+      console.error('Failed to load image for cropping', err)
+    }
+  }, [])
+
+  const exitCropMode = useCallback(() => {
+    if (croppingId && cropDraft) {
+      onObjectUpdate([{ action: 'setCrop', targetIds: [croppingId], args: cropDraft }])
+    }
+    setCroppingId(null)
+    setCropDraft(null)
+    setCropNaturalSize(null)
+  }, [croppingId, cropDraft, onObjectUpdate])
+
+  const cropDisplayScale = cropNaturalSize ? Math.min(CROP_PANEL_MAX / cropNaturalSize.width, CROP_PANEL_MAX / cropNaturalSize.height, 1) : 1
+
+  // Drag on the crop rectangle's body pans (cropX/cropY) without changing
+  // its size — clamped to the source image's own bounds.
+  const handleCropPan = useCallback(
+    (e: React.PointerEvent) => {
+      e.stopPropagation()
+      if (!cropNaturalSize || !cropDraft) return
+      const natWidth = cropNaturalSize.width
+      const natHeight = cropNaturalSize.height
+      const { cropX: originCropX, cropY: originCropY, cropWidth, cropHeight } = cropDraft
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+      const scale = cropDisplayScale
+
+      function onMove(ev: PointerEvent) {
+        const dx = (ev.clientX - startClientX) / scale
+        const dy = (ev.clientY - startClientY) / scale
+        setCropDraft({
+          cropX: Math.min(Math.max(0, originCropX + dx), natWidth - cropWidth),
+          cropY: Math.min(Math.max(0, originCropY + dy), natHeight - cropHeight),
+          cropWidth,
+          cropHeight,
+        })
+      }
+      function onUp() {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [cropNaturalSize, cropDraft, cropDisplayScale],
+  )
+
+  // Corner-handle drag zooms (mirrors the server's/image destination's
+  // uniform-scale resize, task 7.2): the larger-magnitude axis delta drives
+  // a single scale factor applied to both cropWidth/cropHeight from the
+  // anchored opposite corner, so a drag can never produce a crop rectangle
+  // with a different aspect ratio than it started with.
+  const handleCropResize = useCallback(
+    (e: React.PointerEvent, corner: Corner) => {
+      e.stopPropagation()
+      e.preventDefault()
+      if (!cropNaturalSize || !cropDraft) return
+      const natWidth = cropNaturalSize.width
+      const natHeight = cropNaturalSize.height
+      const { cropX: originCropX, cropY: originCropY, cropWidth: originCropWidth, cropHeight: originCropHeight } = cropDraft
+      const startClientX = e.clientX
+      const startClientY = e.clientY
+      const scale = cropDisplayScale
+
+      function onMove(ev: PointerEvent) {
+        const dx = (ev.clientX - startClientX) / scale
+        const dy = (ev.clientY - startClientY) / scale
+        const widthGrow = corner.includes('e') ? dx : -dx
+        const heightGrow = corner.includes('s') ? dy : -dy
+        let cropWidth = originCropWidth
+        let cropHeight = originCropHeight
+        if (Math.abs(widthGrow) >= Math.abs(heightGrow)) {
+          cropWidth = Math.max(MIN_CROP_SIZE, originCropWidth + widthGrow)
+          cropHeight = (originCropHeight * cropWidth) / originCropWidth
+        } else {
+          cropHeight = Math.max(MIN_CROP_SIZE, originCropHeight + heightGrow)
+          cropWidth = (originCropWidth * cropHeight) / originCropHeight
+        }
+        cropWidth = Math.min(cropWidth, natWidth)
+        cropHeight = Math.min(cropHeight, natHeight)
+        let cropX = originCropX
+        let cropY = originCropY
+        if (corner.includes('w')) cropX = originCropX + (originCropWidth - cropWidth)
+        if (corner.includes('n')) cropY = originCropY + (originCropHeight - cropHeight)
+        cropX = Math.min(Math.max(0, cropX), natWidth - cropWidth)
+        cropY = Math.min(Math.max(0, cropY), natHeight - cropHeight)
+        setCropDraft({ cropX, cropY, cropWidth, cropHeight })
+      }
+      function onUp() {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+      }
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+    },
+    [cropNaturalSize, cropDraft, cropDisplayScale],
   )
 
   const deleteSelection = useCallback(() => {
@@ -703,6 +1085,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
   }
 
   const zIndexFor = (obj: DeckObject) => (editingId === obj.id ? EDITING_Z_INDEX : obj.zIndex)
+  const rotationFor = (obj: DeckObject) => liveRotations[obj.id] ?? (hasRotation(obj) ? obj.rotation : 0)
 
   return (
     // min-w-0/min-h-0: this is the grid item for DeckPage's `1fr` column and
@@ -732,6 +1115,20 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
           <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={() => addShape('arrow')}>
             + Arrow
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) void handleImageFileChosen(file)
+            }}
+          />
+          <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={() => fileInputRef.current?.click()}>
+            + Image
+          </button>
           <button
             type="button"
             className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:opacity-40 disabled:hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white dark:disabled:hover:bg-gray-700"
@@ -740,6 +1137,37 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
           >
             Delete
           </button>
+
+          {firstSelected && isImage(firstSelected) && (
+            <>
+              <div className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
+              <button
+                type="button"
+                className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white"
+                onClick={() => void enterCropMode(firstSelected)}
+              >
+                Crop
+              </button>
+              <input
+                ref={sourceFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (file) void handleReplaceImageSource(file, firstSelected.id)
+                }}
+              />
+              <button
+                type="button"
+                className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white"
+                onClick={() => sourceFileInputRef.current?.click()}
+              >
+                Replace image
+              </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -852,9 +1280,9 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
               <input
                 type="color"
                 className="w-6 h-6 bg-transparent disabled:opacity-40"
-                disabled={!firstSelected}
+                disabled={!firstSelected || isImage(firstSelected)}
                 value={
-                  firstSelected
+                  firstSelected && !isImage(firstSelected)
                     ? isLineLike(firstSelected)
                       ? firstSelected.strokeColor
                       : firstSelected.borderColor !== 'transparent'
@@ -864,18 +1292,18 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                 }
                 onChange={(e) => setStyleOnSelection('setBorderColor', { color: e.target.value })}
               />
-              {firstSelected && !isLineLike(firstSelected) && firstSelected.borderColor === 'transparent' && (
+              {firstSelected && !isImage(firstSelected) && !isLineLike(firstSelected) && firstSelected.borderColor === 'transparent' && (
                 <span className="pointer-events-none absolute inset-0 rounded-sm" style={NONE_SWATCH_OVERLAY_STYLE} />
               )}
             </span>
             <button
               type="button"
               className={
-                firstSelected && !isLineLike(firstSelected) && firstSelected.borderColor === 'transparent'
+                firstSelected && !isImage(firstSelected) && !isLineLike(firstSelected) && firstSelected.borderColor === 'transparent'
                   ? 'text-xs font-semibold text-red-500 underline disabled:opacity-40'
                   : 'text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40'
               }
-              disabled={!firstSelected || isLineLike(firstSelected)}
+              disabled={!firstSelected || isImage(firstSelected) || isLineLike(firstSelected)}
               onClick={() => setStyleOnSelection('setBorderColor', { color: 'transparent' })}
             >
               none
@@ -942,9 +1370,22 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         // Objects' own onClick stops propagation before it reaches here (see
         // TextObjectBox's onClick below), so any click that bubbles this far —
         // the margin around the slide or the slide's own background — is by
-        // definition not on an object, and should clear the selection. Not
+        // definition not on an object, and should clear the selection —
+        // except immediately after a drag whose release point landed here
+        // rather than back over the (possibly rotated/moved) object itself,
+        // per didDragRef's doc comment at the rotate handler above. Not
         // wired at all in readOnly mode — preview never has a selection to clear.
-        onClick={readOnly ? undefined : () => onSelectionChange([])}
+        onClick={
+          readOnly
+            ? undefined
+            : () => {
+                if (didDragRef.current) {
+                  didDragRef.current = false
+                  return
+                }
+                onSelectionChange([])
+              }
+        }
       >
         {/* paneRef's padding reserves a minimum margin on every side (excluded
             from ResizeObserver's contentRect, so it isn't counted as fittable
@@ -964,7 +1405,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                 stored color with no dark: variant, same as every shape's
                 fill/border/stroke color. */}
             <div
-              ref={canvasRef}
+              ref={setCanvasRefs}
               className="relative border border-gray-300"
               style={{
                 width: CANVAS_WIDTH,
@@ -989,6 +1430,8 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                       onDoubleClick={() => {}}
                       onStartEditingCommit={() => {}}
                     />
+                  ) : obj.type === 'image' ? (
+                    <ImageObjectBox key={obj.id} obj={obj} zIndex={obj.zIndex} onPointerDownMove={() => {}} onClick={() => {}} />
                   ) : (
                     <ShapeObjectBox key={obj.id} obj={obj} zIndex={obj.zIndex} onPointerDownMove={() => {}} onClick={() => {}} />
                   )
@@ -1000,6 +1443,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                     editing={editingId === obj.id}
                     rect={resolvedRects[obj.id]}
                     zIndex={zIndexFor(obj)}
+                    liveRotation={liveRotations[obj.id]}
                     onObjectUpdate={onObjectUpdate}
                     onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
                     onClick={(e) => {
@@ -1017,6 +1461,28 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                     }}
                     onStartEditingCommit={() => setEditingId(null)}
                   />
+                ) : obj.type === 'image' ? (
+                  <ImageObjectBox
+                    key={obj.id}
+                    obj={obj}
+                    liveRect={liveRects[obj.id]}
+                    zIndex={zIndexFor(obj)}
+                    liveRotation={liveRotations[obj.id]}
+                    onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (didDragRef.current) {
+                        didDragRef.current = false
+                        return
+                      }
+                      toggle(obj.id, e.shiftKey)
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation()
+                      onSelectionChange([obj.id])
+                      void enterCropMode(obj)
+                    }}
+                  />
                 ) : (
                   <ShapeObjectBox
                     key={obj.id}
@@ -1024,6 +1490,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                     liveRect={liveRects[obj.id]}
                     liveEndpoint={liveEndpoints[obj.id]}
                     zIndex={zIndexFor(obj)}
+                    liveRotation={liveRotations[obj.id]}
                     onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
                     onClick={(e) => {
                       e.stopPropagation()
@@ -1051,7 +1518,14 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                       <div
                         key={obj.id}
                         className="absolute rounded-md border-2 border-indigo-400 ring-2 ring-indigo-400/40 pointer-events-none"
-                        style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+                        style={{
+                          left: rect.x,
+                          top: rect.y,
+                          width: rect.width,
+                          height: rect.height,
+                          transform: `rotate(${rotationFor(obj)}deg)`,
+                          transformOrigin: 'center',
+                        }}
                       />
                     )
                   })}
@@ -1080,7 +1554,18 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                       }
                       const rect = resolvedRects[obj.id]
                       return (
-                        <div key={obj.id} className="absolute" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
+                        <div
+                          key={obj.id}
+                          className="absolute"
+                          style={{
+                            left: rect.x,
+                            top: rect.y,
+                            width: rect.width,
+                            height: rect.height,
+                            transform: `rotate(${rotationFor(obj)}deg)`,
+                            transformOrigin: 'center',
+                          }}
+                        >
                           {RESIZE_CORNERS.map((corner) => (
                             <div
                               key={corner}
@@ -1088,6 +1573,18 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                               onPointerDown={(e) => handlePointerDownResize(e, obj, corner)}
                             />
                           ))}
+                          {/* Nested inside the same rotated wrapper as the
+                              corner handles, so it inherits the object's
+                              rotation for free and always sits outside the
+                              rotated bounding box's top edge, along the
+                              object's own rotated "up" direction. */}
+                          {hasRotation(obj) && (
+                            <div
+                              className="absolute w-3 h-3 -translate-x-1/2 rounded-full bg-emerald-400 border border-white/70 pointer-events-auto cursor-grab"
+                              style={{ left: '50%', top: -ROTATE_HANDLE_OFFSET }}
+                              onPointerDown={(e) => handlePointerDownRotate(e, obj)}
+                            />
+                          )}
                         </div>
                       )
                     })}
@@ -1152,6 +1649,56 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             </div>
           </div>
         </div>
+
+        {/* Crop-mode overlay: a distinct interaction mode (design.md's "Crop
+            UI is a distinct interaction mode, entered like text-edit mode")
+            rendered against the source image's own natural pixel dimensions,
+            independent of the object's on-slide destination scale. Clicking
+            the backdrop (outside the panel) exits and commits, same as
+            text-edit's commit-on-blur. */}
+        {!readOnly &&
+          croppingId &&
+          cropDraft &&
+          cropNaturalSize &&
+          (() => {
+            const croppingObj = deckState.objects.find((o) => o.id === croppingId)
+            if (!croppingObj || !isImage(croppingObj)) return null
+            const dispW = cropNaturalSize.width * cropDisplayScale
+            const dispH = cropNaturalSize.height * cropDisplayScale
+            return (
+              <div
+                className="absolute inset-0 flex items-center justify-center"
+                style={{ zIndex: SELECTION_OVERLAY_Z_INDEX + 1, background: 'rgba(0,0,0,0.6)' }}
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) exitCropMode()
+                }}
+              >
+                <div className="bg-white dark:bg-gray-900 rounded-md p-3 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                  <div className="relative select-none" style={{ width: dispW, height: dispH }}>
+                    <img src={croppingObj.src} alt="" draggable={false} style={{ width: dispW, height: dispH, display: 'block' }} />
+                    <div
+                      className="absolute border-2 border-indigo-400 bg-indigo-400/10 cursor-move"
+                      style={{ left: cropDraft.cropX * cropDisplayScale, top: cropDraft.cropY * cropDisplayScale, width: cropDraft.cropWidth * cropDisplayScale, height: cropDraft.cropHeight * cropDisplayScale }}
+                      onPointerDown={handleCropPan}
+                    >
+                      {RESIZE_CORNERS.map((corner) => (
+                        <div
+                          key={corner}
+                          className={`absolute w-3 h-3 rounded-full bg-indigo-400 border border-white/70 pointer-events-auto ${CORNER_CLASSES[corner]}`}
+                          onPointerDown={(e) => handleCropResize(e, corner)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex justify-end mt-2">
+                    <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-sm" onClick={exitCropMode}>
+                      Done
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
       </div>
     </div>
   )

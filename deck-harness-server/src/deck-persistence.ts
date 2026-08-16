@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { ArrowObject, BoxObject, Deck, DeckObject, EditorStore, EllipseObject, LineObject, Slide, TextBlock, TextBoxObject, TextRun } from './editor-state'
+import type { ArrowObject, BoxObject, Deck, DeckObject, EditorStore, EllipseObject, ImageObject, LineObject, Slide, TextBlock, TextBoxObject, TextRun } from './editor-state'
 
 export interface DeckSnapshot {
   decks: Deck[]
@@ -64,6 +64,8 @@ function sanitizeTextBoxObject(o: Record<string, unknown>, zIndex: number): Text
     id: sanitizeString(o.id, randomUUID()),
     type: 'textBox',
     zIndex,
+    opacity: sanitizeOpacity(o.opacity),
+    rotation: sanitizeNumber(o.rotation, 0),
     x: sanitizeNumber(o.x, 0),
     y: sanitizeNumber(o.y, 0),
     width: Math.max(1, sanitizeNumber(o.width, 100)),
@@ -80,6 +82,8 @@ function sanitizeBoxLikeObject(o: Record<string, unknown>, type: 'box' | 'ellips
   const base = {
     id: sanitizeString(o.id, randomUUID()),
     zIndex,
+    opacity: sanitizeOpacity(o.opacity),
+    rotation: sanitizeNumber(o.rotation, 0),
     x: sanitizeNumber(o.x, 0),
     y: sanitizeNumber(o.y, 0),
     width: Math.max(1, sanitizeNumber(o.width, 100)),
@@ -97,6 +101,7 @@ function sanitizeLineLikeObject(o: Record<string, unknown>, type: 'line' | 'arro
   const base = {
     id: sanitizeString(o.id, randomUUID()),
     zIndex,
+    opacity: sanitizeOpacity(o.opacity),
     x1: sanitizeNumber(o.x1, 0),
     y1: sanitizeNumber(o.y1, 0),
     x2: sanitizeNumber(o.x2, 100),
@@ -107,14 +112,40 @@ function sanitizeLineLikeObject(o: Record<string, unknown>, type: 'line' | 'arro
   return type === 'arrow' ? { ...base, type: 'arrow', arrowStart: o.arrowStart === true, arrowEnd: o.arrowEnd !== false } : { ...base, type: 'line' }
 }
 
+function sanitizeImageObject(o: Record<string, unknown>, zIndex: number): ImageObject {
+  const cropWidth = Math.max(1, sanitizeNumber(o.cropWidth, 100))
+  const cropHeight = Math.max(1, sanitizeNumber(o.cropHeight, 100))
+  return {
+    id: sanitizeString(o.id, randomUUID()),
+    type: 'image',
+    zIndex,
+    opacity: sanitizeOpacity(o.opacity),
+    rotation: sanitizeNumber(o.rotation, 0),
+    src: sanitizeString(o.src, ''),
+    x: sanitizeNumber(o.x, 0),
+    y: sanitizeNumber(o.y, 0),
+    width: Math.max(1, sanitizeNumber(o.width, 100)),
+    height: Math.max(1, sanitizeNumber(o.height, 100)),
+    cropX: sanitizeNumber(o.cropX, 0),
+    cropY: sanitizeNumber(o.cropY, 0),
+    cropWidth,
+    cropHeight,
+  }
+}
+
+function sanitizeOpacity(input: unknown): number {
+  return typeof input === 'number' && Number.isFinite(input) ? Math.min(1, Math.max(0, input)) : 1
+}
+
 /** Reads `o.type`, defaulting to `'textBox'` when absent (every object saved before this field existed), and dispatches to a per-type sanitizer producing that type's exact field set with defaults — see design.md's "Persistence: type-aware sanitizing, non-breaking for existing decks". `zIndex` defaults to `fallbackZIndex` (the object's position in its slide's array) when absent, so a pre-existing snapshot restores with its current visual stacking preserved. */
 function sanitizeObject(input: unknown, fallbackZIndex: number): DeckObject | null {
   if (!input || typeof input !== 'object') return null
   const o = input as Record<string, unknown>
-  const type = o.type === 'box' || o.type === 'ellipse' || o.type === 'line' || o.type === 'arrow' ? o.type : 'textBox'
+  const type = o.type === 'box' || o.type === 'ellipse' || o.type === 'line' || o.type === 'arrow' || o.type === 'image' ? o.type : 'textBox'
   const zIndex = sanitizeNumber(o.zIndex, fallbackZIndex)
   if (type === 'box' || type === 'ellipse') return sanitizeBoxLikeObject(o, type, zIndex)
   if (type === 'line' || type === 'arrow') return sanitizeLineLikeObject(o, type, zIndex)
+  if (type === 'image') return sanitizeImageObject(o, zIndex)
   return sanitizeTextBoxObject(o, zIndex)
 }
 

@@ -21,6 +21,7 @@ export function DeckPage() {
     sendSelection,
     sendObjectUpdate,
     sendAddShape,
+    sendAddImage,
     sendSetSlideBackground,
     respondApproval,
     selectDeck,
@@ -102,6 +103,7 @@ export function DeckPage() {
           onSelectionChange={sendSelection}
           onObjectUpdate={sendObjectUpdate}
           onAddShape={sendAddShape}
+          onAddImage={sendAddImage}
           onSetSlideBackground={sendSetSlideBackground}
           onUndo={undo}
           onRedo={redo}

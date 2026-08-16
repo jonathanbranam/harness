@@ -16,6 +16,7 @@ export const env = {
   PORT: parseInt(process.env.PORT ?? '4100', 10),
   DECK_WORKSPACE_DIR: process.env.DECK_WORKSPACE_DIR ?? join(import.meta.dirname, '..', 'data', 'workspace'),
   DECK_STATE_FILE: process.env.DECK_STATE_FILE ?? join(import.meta.dirname, '..', 'data', 'decks.json'),
+  DECK_IMAGES_DIR: process.env.DECK_IMAGES_DIR ?? join(import.meta.dirname, '..', 'data', 'images'),
   COOKIE_SECURE: process.env.COOKIE_SECURE === 'true',
   isProd: process.env.NODE_ENV === 'production',
 }

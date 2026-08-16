@@ -25,6 +25,7 @@ type ClientMessage =
   | { type: 'selection'; ids: string[] }
   | { type: 'object_update'; actions: UpdateActionCall[] }
   | { type: 'add_shape'; args: Record<string, unknown> }
+  | { type: 'add_image'; args: Record<string, unknown> }
   | { type: 'set_slide_background'; color: string }
   | { type: 'approval_response'; toolCallId: string; approved: boolean }
   | { type: 'select_deck'; deckId: string }
@@ -148,6 +149,12 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
 
         case 'add_shape': {
           const result = editorStore.addShape('user', msg.args)
+          if (result.errors.length > 0) safeSend(socket, { type: 'error', message: result.errors.join('; ') })
+          return
+        }
+
+        case 'add_image': {
+          const result = editorStore.addImage('user', msg.args)
           if (result.errors.length > 0) safeSend(socket, { type: 'error', message: result.errors.join('; ') })
           return
         }

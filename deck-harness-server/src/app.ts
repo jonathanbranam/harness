@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { requireAuth } from './auth'
+import { imagesRoutes } from './images-route'
 import { authRoutes } from './routes/auth'
 import type { AppEnv } from './types'
 import { createDeckSocketHandlers } from './websocket'
@@ -18,6 +19,7 @@ export function createApp() {
 
   app.get('/api/health', (c) => c.json({ ok: true }))
   app.route('/api/auth', authRoutes)
+  app.route('/api/images', imagesRoutes)
 
   app.get('/ws', requireAuth, upgradeWebSocket((c) => createDeckSocketHandlers(c)))
 

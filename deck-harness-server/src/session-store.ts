@@ -31,6 +31,7 @@ const CUSTOM_TOOL_NAMES = [
   'presentation_get_state',
   'presentation_update',
   'presentation_add_shape',
+  'presentation_add_image',
   'presentation_style_shape',
   'presentation_set_slide_background',
   'presentation_select_by_text',

@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EditorStore, editorStore, plainTextOf, type DeckObject, type TextBlock, type TextBoxObject } from './editor-state'
+import { deriveCropSize, deriveImageSize, EditorStore, editorStore, plainTextOf, type DeckObject, type ImageObject, type TextBlock, type TextBoxObject } from './editor-state'
 
 /** Test-only narrowing helper: most existing tests operate on textBox objects (the seed deck / addObject), so this keeps assertions terse instead of re-deriving a type guard at every call site. */
 function tb(o: DeckObject | undefined): TextBoxObject {
   if (!o || o.type !== 'textBox') throw new Error(`expected a textBox object, got ${JSON.stringify(o)}`)
+  return o
+}
+
+function img(o: DeckObject | undefined): ImageObject {
+  if (!o || o.type !== 'image') throw new Error(`expected an image object, got ${JSON.stringify(o)}`)
   return o
 }
 
@@ -422,6 +427,8 @@ describe('EditorStore construction from a persisted snapshot', () => {
                   id: 'obj-a',
                   type: 'textBox' as const,
                   zIndex: 0,
+                  opacity: 1,
+                  rotation: 0,
                   x: 5,
                   y: 5,
                   width: 50,
@@ -853,6 +860,33 @@ describe('editorStore type-checked action/type mismatches', () => {
     const rejected = store.applyUpdate('user', 'setArrowHeads', [line], { arrowStart: true })
     expect(rejected.changed).toEqual([])
   })
+
+  it('setRotation is rejected on line/arrow but applies to textBox/box/ellipse', () => {
+    const store = new EditorStore(null)
+    const line = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 10, y2: 10 }).changed[0]
+    const arrow = store.addShape('user', { type: 'arrow', x1: 0, y1: 0, x2: 10, y2: 10 }).changed[0]
+    for (const id of [line, arrow]) {
+      const result = store.applyUpdate('user', 'setRotation', [id], { rotation: 45 })
+      expect(result.changed).toEqual([])
+      expect(result.errors[0]).toContain('does not apply to type')
+    }
+
+    const box = store.addShape('user', { type: 'box', x: 0, y: 0, width: 10, height: 10 }).changed[0]
+    const result = store.applyUpdate('user', 'setRotation', [box, 'title'], { rotation: 30 })
+    expect(result.errors).toEqual([])
+    expect(result.changed).toEqual([box, 'title'])
+    expect((store.getState().objects.find((o) => o.id === box) as { rotation: number }).rotation).toBe(30)
+  })
+
+  it('setOpacity applies to and clamps on every object type', () => {
+    const store = new EditorStore(null)
+    const line = store.addShape('user', { type: 'line', x1: 0, y1: 0, x2: 10, y2: 10 }).changed[0]
+    const result = store.applyUpdate('user', 'setOpacity', [line, 'title'], { opacity: 1.5 })
+    expect(result.errors).toEqual([])
+    expect((store.getState().objects.find((o) => o.id === line) as { opacity: number }).opacity).toBe(1)
+    store.applyUpdate('user', 'setOpacity', [line], { opacity: -1 })
+    expect((store.getState().objects.find((o) => o.id === line) as { opacity: number }).opacity).toBe(0)
+  })
 })
 
 describe('editorStore slide background color', () => {
@@ -1040,5 +1074,186 @@ describe('editorStore undo/redo history merging', () => {
 
     store.applyUpdate('user', 'setFontSize', ['title'], { fontSize: 20 })
     expect(store.getHistory().canRedo).toBe(false)
+  })
+})
+
+describe('editorStore addImage', () => {
+  it('creates an image with an explicit crop, deriving nothing', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addImage('user', { src: 'https://example.com/a.png', x: 10, y: 10, width: 200, height: 100, cropX: 5, cropY: 5, cropWidth: 400, cropHeight: 200 })
+    expect(result.errors).toEqual([])
+    const obj = img(store.getState().objects.find((o) => o.id === result.changed[0]))
+    expect(obj).toMatchObject({ type: 'image', src: 'https://example.com/a.png', x: 10, y: 10, width: 200, height: 100, cropX: 5, cropY: 5, cropWidth: 400, cropHeight: 200, opacity: 1, rotation: 0 })
+    expect(store.getHistory().entries.length).toBe(before.entries.length + 1)
+  })
+
+  it('creates an image without an explicit crop, defaulting to the full source extent via naturalWidth/naturalHeight', () => {
+    const store = new EditorStore(null)
+    const result = store.addImage('user', { src: 'https://example.com/a.png', x: 0, y: 0, width: 100, naturalWidth: 800, naturalHeight: 400 })
+    const obj = img(store.getState().objects.find((o) => o.id === result.changed[0]))
+    expect(obj).toMatchObject({ cropX: 0, cropY: 0, cropWidth: 800, cropHeight: 400 })
+    // height derived from width via the crop's 2:1 aspect ratio.
+    expect(obj.height).toBe(50)
+  })
+
+  it('derives the omitted destination dimension from the crop aspect ratio when only one is given', () => {
+    const store = new EditorStore(null)
+    const result = store.addImage('user', { src: 'a.png', x: 0, y: 0, height: 50, cropWidth: 800, cropHeight: 400 })
+    const obj = img(store.getState().objects.find((o) => o.id === result.changed[0]))
+    expect(obj.width).toBe(100)
+  })
+
+  it('rejects a call missing src without pushing a history entry', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addImage('user', { x: 0, y: 0, width: 100, height: 50, cropWidth: 200, cropHeight: 100 })
+    expect(result.changed).toEqual([])
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(store.getHistory()).toEqual(before)
+  })
+
+  it('rejects a call with neither crop size nor natural dimensions without pushing a history entry', () => {
+    const store = new EditorStore(null)
+    const before = store.getHistory()
+    const result = store.addImage('user', { src: 'a.png', x: 0, y: 0, width: 100, height: 50 })
+    expect(result.changed).toEqual([])
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(store.getHistory()).toEqual(before)
+  })
+
+  it('clamps an oversized image by scaling width/height down together, preserving aspect ratio', () => {
+    const store = new EditorStore(null)
+    const result = store.addImage('user', { src: 'a.png', x: 0, y: 0, width: 1920, height: 1080, cropWidth: 1920, cropHeight: 1080 })
+    const obj = img(store.getState().objects.find((o) => o.id === result.changed[0]))
+    expect(obj.width).toBeLessThanOrEqual(960)
+    expect(obj.height).toBeLessThanOrEqual(540)
+    // 1920x1080 is 16:9 — clamped by the height limit (540/1080 = 0.5), so width should be exactly half too.
+    expect(obj.width).toBeCloseTo(960, 5)
+    expect(obj.height).toBeCloseTo(540, 5)
+  })
+})
+
+describe('deriveImageSize / deriveCropSize', () => {
+  const current: ImageObject = {
+    id: 'i1',
+    type: 'image',
+    zIndex: 0,
+    opacity: 1,
+    rotation: 0,
+    src: 'a.png',
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 100,
+    cropX: 0,
+    cropY: 0,
+    cropWidth: 400,
+    cropHeight: 200,
+  }
+
+  it('derives height from width alone, preserving the crop aspect ratio', () => {
+    expect(deriveImageSize(current, { width: 100 })).toEqual({ width: 100, height: 50 })
+  })
+
+  it('derives width from height alone, preserving the crop aspect ratio', () => {
+    expect(deriveImageSize(current, { height: 25 })).toEqual({ width: 50, height: 25 })
+  })
+
+  it('when both width and height are given with a mismatched ratio, width wins and height is recomputed', () => {
+    expect(deriveImageSize(current, { width: 100, height: 999 })).toEqual({ width: 100, height: 50 })
+  })
+
+  it('returns the current size unchanged when neither field is given', () => {
+    expect(deriveImageSize(current, {})).toEqual({ width: 200, height: 100 })
+  })
+
+  it('derives cropHeight from cropWidth alone', () => {
+    expect(deriveCropSize(current, { cropWidth: 200 })).toEqual({ cropWidth: 200, cropHeight: 100 })
+  })
+
+  it('derives cropWidth from cropHeight alone', () => {
+    expect(deriveCropSize(current, { cropHeight: 50 })).toEqual({ cropWidth: 100, cropHeight: 50 })
+  })
+
+  it('when both cropWidth and cropHeight are given with a mismatched ratio, cropWidth wins', () => {
+    expect(deriveCropSize(current, { cropWidth: 200, cropHeight: 999 })).toEqual({ cropWidth: 200, cropHeight: 100 })
+  })
+})
+
+describe('editorStore image-specific update actions', () => {
+  function withImage() {
+    const store = new EditorStore(null)
+    const id = store.addImage('user', { src: 'https://example.com/a.png', x: 10, y: 10, width: 200, height: 100, cropX: 0, cropY: 0, cropWidth: 400, cropHeight: 200 }).changed[0]
+    return { store, id }
+  }
+
+  it('setSize on an image derives the omitted dimension and captures history', () => {
+    const { store, id } = withImage()
+    const before = store.getHistory()
+    const result = store.applyUpdate('user', 'setSize', [id], { width: 100 })
+    expect(result.errors).toEqual([])
+    expect(img(store.getState().objects.find((o) => o.id === id)).height).toBe(50)
+    expect(store.getHistory().entries.length).toBe(before.entries.length + 1)
+  })
+
+  it('setCrop pans without changing size, and zooms without changing position', () => {
+    const { store, id } = withImage()
+    store.applyUpdate('user', 'setCrop', [id], { cropX: 20, cropY: 30 })
+    let obj = img(store.getState().objects.find((o) => o.id === id))
+    expect(obj).toMatchObject({ cropX: 20, cropY: 30, cropWidth: 400, cropHeight: 200 })
+    // Destination is unaffected by a pan.
+    expect(obj).toMatchObject({ width: 200, height: 100 })
+
+    store.applyUpdate('user', 'setCrop', [id], { cropWidth: 200 })
+    obj = img(store.getState().objects.find((o) => o.id === id))
+    expect(obj).toMatchObject({ cropX: 20, cropY: 30, cropWidth: 200, cropHeight: 100 })
+  })
+
+  it('setCrop does not apply to non-image types', () => {
+    const store = new EditorStore(null)
+    const result = store.applyUpdate('user', 'setCrop', ['title'], { cropX: 1 })
+    expect(result.changed).toEqual([])
+    expect(result.errors[0]).toContain('does not apply to type')
+  })
+
+  it('setImageSource resets the crop to the new source full extent and rederives height from the existing width', () => {
+    const { store, id } = withImage()
+    const result = store.applyUpdate('user', 'setImageSource', [id], { src: 'https://example.com/b.png', naturalWidth: 800, naturalHeight: 800 })
+    expect(result.errors).toEqual([])
+    const obj = img(store.getState().objects.find((o) => o.id === id))
+    expect(obj.src).toBe('https://example.com/b.png')
+    expect(obj).toMatchObject({ cropX: 0, cropY: 0, cropWidth: 800, cropHeight: 800 })
+    expect(obj.width).toBe(200)
+    expect(obj.height).toBe(200)
+  })
+
+  it('setImageSource requires naturalWidth/naturalHeight since the server cannot inspect image bytes', () => {
+    const { store, id } = withImage()
+    const result = store.applyUpdate('user', 'setImageSource', [id], { src: 'https://example.com/b.png' })
+    expect(result.changed).toEqual([])
+    expect(result.errors.length).toBeGreaterThan(0)
+  })
+
+  it('undo/redo step through setOpacity, setRotation, setImageSource, and setCrop individually', () => {
+    const { store, id } = withImage()
+    store.applyUpdate('user', 'setOpacity', [id], { opacity: 0.5 })
+    store.applyUpdate('user', 'setRotation', [id], { rotation: 45 })
+    store.applyUpdate('user', 'setImageSource', [id], { src: 'https://example.com/b.png', naturalWidth: 400, naturalHeight: 200 })
+    store.applyUpdate('user', 'setCrop', [id], { cropX: 10 })
+
+    expect(img(store.getState().objects.find((o) => o.id === id)).cropX).toBe(10)
+    store.undo('user')
+    expect(img(store.getState().objects.find((o) => o.id === id)).src).toBe('https://example.com/b.png')
+    store.undo('user')
+    expect(img(store.getState().objects.find((o) => o.id === id)).src).toBe('https://example.com/a.png')
+    expect((store.getState().objects.find((o) => o.id === id) as { rotation: number }).rotation).toBe(45)
+    store.undo('user')
+    expect((store.getState().objects.find((o) => o.id === id) as { rotation: number }).rotation).toBe(0)
+    store.undo('user')
+    expect((store.getState().objects.find((o) => o.id === id) as { opacity: number }).opacity).toBe(1)
+
+    store.redo('user')
+    expect((store.getState().objects.find((o) => o.id === id) as { opacity: number }).opacity).toBe(0.5)
   })
 })
