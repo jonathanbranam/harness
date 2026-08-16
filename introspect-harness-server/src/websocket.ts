@@ -59,6 +59,15 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
   let harnessSession: HarnessSession | undefined
   let unsubscribe: (() => void) | undefined
   let playTimer: ReturnType<typeof setInterval> | undefined
+  // Tracks what's already been emitted to the browser for the current replay
+  // position, so forward progress (step/play/jump-ahead) can send just the
+  // newly-revealed events instead of a reset + the full prefix every tick —
+  // resending everything each tick was blanking the UI on every frame during
+  // playback. `lastEmittedEvents` is the exact array from the previous step,
+  // since `ReplayStep.events` is always the deterministic full filtered
+  // prefix for a given index, so it's always a prefix of any later step's
+  // events too — slicing off its length gives exactly the new ones.
+  let lastEmittedEvents: ReplayStep['events'] | undefined
 
   const forwardEvent = (event: unknown) => {
     if (ws) safeSend(ws, event as ServerMessage)
@@ -78,8 +87,14 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
   }
 
   function emitReplayStep(socket: WSContext, step: ReplayStep) {
-    safeSend(socket, { type: 'replay_reset' })
-    for (const event of step.events) safeSend(socket, event as ServerMessage)
+    const isForwardContinuation = lastEmittedEvents !== undefined && step.events.length >= lastEmittedEvents.length
+    if (isForwardContinuation) {
+      for (const event of step.events.slice(lastEmittedEvents!.length)) safeSend(socket, event as ServerMessage)
+    } else {
+      safeSend(socket, { type: 'replay_reset' })
+      for (const event of step.events) safeSend(socket, event as ServerMessage)
+    }
+    lastEmittedEvents = step.events
     safeSend(socket, { type: 'replay_position', index: step.index, total: step.total })
     if (step.index >= step.total - 1) {
       stopPlayback()
@@ -161,6 +176,7 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
       if (msg.type === 'replay_load') {
         try {
           stopPlayback()
+          lastEmittedEvents = undefined
           const header = await enterReplayMode(token, msg.recordingId)
           safeSend(socket, { type: 'replay_loaded', header })
           const step = await replayJumpToCheckpoint(token, 0)
@@ -216,6 +232,7 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
 
       if (msg.type === 'replay_exit') {
         stopPlayback()
+        lastEmittedEvents = undefined
         exitReplayMode(token)
         safeSend(socket, { type: 'mode', mode: 'live' })
         return

@@ -103,6 +103,11 @@ function ReplayScrubber({
   const index = position?.index ?? -1
   const atStart = index <= 0
   const atEnd = total === 0 || index >= total - 1
+  // `total` counts every low-level protocol event (each streamed response
+  // token is its own event, plus internal bookkeeping) — not chat messages,
+  // so surface the checkpoint (one per turn) as the headline number and keep
+  // the raw count as a secondary detail, to avoid it reading as a bug.
+  const checkpointNumber = header ? header.checkpoints.filter((cp) => cp.index <= index).length : 0
 
   return (
     <div className="space-y-2">
@@ -153,8 +158,8 @@ function ReplayScrubber({
         >
           Next ⏭
         </button>
-        <span className="text-xs text-gray-500 tabular-nums">
-          {total > 0 ? index + 1 : 0} / {total}
+        <span className="text-xs text-gray-500 tabular-nums" title={`Raw event ${total > 0 ? index + 1 : 0} of ${total}`}>
+          Turn {checkpointNumber} / {header?.checkpoints.length ?? 0}
         </span>
       </div>
     </div>
