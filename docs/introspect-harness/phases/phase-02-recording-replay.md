@@ -2,7 +2,7 @@
 
 ## Status
 
-not started
+in progress — OpenSpec change [`introspect-harness-phase-02`](../../../openspec/changes/introspect-harness-phase-02/proposal.md) created (proposal done; specs, design, and tasks not yet drafted).
 
 ## Goal
 

@@ -241,6 +241,32 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
   const didDragRef = useRef(false)
   const pendingEditIdRef = useRef<string | null>(null)
 
+  // Scale-to-fit: the slide keeps its fixed 960x540 logical size (so object
+  // coordinates and slide_view's screenshot capture are unaffected — see
+  // design.md's "Scale via CSS transform" decision) but is displayed scaled
+  // to the largest size that fits the pane. paneRef's padding is excluded
+  // from ResizeObserver's contentRect automatically, so that padding is what
+  // guarantees a non-zero margin on every side even when the pane's aspect
+  // ratio exactly matches the slide's.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const [scale, setScale] = useState(1)
+  const scaleRef = useRef(1)
+
+  useEffect(() => {
+    const node = paneRef.current
+    if (!node) return
+    const observer = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect
+      const next = Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT)
+      if (next > 0 && Number.isFinite(next)) {
+        scaleRef.current = next
+        setScale(next)
+      }
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
   // Exit edit mode if the editing object was removed (e.g. deleted by pi
   // mid-edit) or the active slide changed out from under it.
   useEffect(() => {
@@ -310,8 +336,8 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       let latest: Rect = { x: originX, y: originY, width: obj.width, height: obj.height }
 
       function onMove(ev: PointerEvent) {
-        const dx = ev.clientX - startClientX
-        const dy = ev.clientY - startClientY
+        const dx = (ev.clientX - startClientX) / scaleRef.current
+        const dy = (ev.clientY - startClientY) / scaleRef.current
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragRef.current = true
         latest = { x: originX + dx, y: originY + dy, width: obj.width, height: obj.height }
         setLiveRect(obj.id, latest)
@@ -345,8 +371,8 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       let latest: Rect = { x: originX, y: originY, width: originWidth, height: originHeight }
 
       function onMove(ev: PointerEvent) {
-        const dx = ev.clientX - startClientX
-        const dy = ev.clientY - startClientY
+        const dx = (ev.clientX - startClientX) / scaleRef.current
+        const dy = (ev.clientY - startClientY) / scaleRef.current
         let { x, y, width, height } = { x: originX, y: originY, width: originWidth, height: originHeight }
         if (corner.includes('e')) width = Math.max(MIN_SIZE, originWidth + dx)
         if (corner.includes('s')) height = Math.max(MIN_SIZE, originHeight + dy)
@@ -419,7 +445,14 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
   }
 
   return (
-    <div className="h-full flex flex-col">
+    // min-w-0: this is the grid item for DeckPage's `1fr` column. Without it,
+    // its default overflow:visible min-width:auto resolves to its content's
+    // min-content size — and since a descendant (the scaled canvas wrapper
+    // below) has an explicit pixel width derived from `scale`, that would
+    // ratchet the grid track's minimum width up on every render and never
+    // let it shrink back down, only grow (mirrors DeckPage.tsx's min-h-0 on
+    // the same grid, but for the horizontal axis).
+    <div className="h-full min-w-0 flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900 text-sm">
         <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={addTextBox}>
           + Text box
@@ -500,41 +533,57 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       </div>
 
       <div
-        className="relative flex-1 bg-gray-950 overflow-auto"
+        className="relative flex-1 min-w-0 min-h-0 bg-gray-950 overflow-hidden"
         onClick={(e) => {
           if (e.target === e.currentTarget) onSelectionChange([])
         }}
       >
-        {/* Fixed size (960x540) so slide_view's render always captures a
-            consistent frame regardless of object count — see design.md's
-            "Screenshot dimensions are fixed" decision. */}
-        <div ref={canvasRef} className="relative" style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}>
-          {deckState.objects.map((obj) => (
-            <TextObjectBox
-              key={obj.id}
-              obj={obj}
-              selected={deckState.selection.includes(obj.id)}
-              editing={editingId === obj.id}
-              liveRect={liveRects[obj.id]}
-              onObjectUpdate={onObjectUpdate}
-              onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
-              onPointerDownResize={(e, corner) => handlePointerDownResize(e, obj, corner)}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (didDragRef.current) {
-                  didDragRef.current = false
-                  return
-                }
-                toggle(obj.id, e.shiftKey)
-              }}
-              onDoubleClick={(e) => {
-                e.stopPropagation()
-                onSelectionChange([obj.id])
-                setEditingId(obj.id)
-              }}
-              onStartEditingCommit={() => setEditingId(null)}
-            />
-          ))}
+        {/* paneRef's padding reserves a minimum margin on every side (excluded
+            from ResizeObserver's contentRect, so it isn't counted as fittable
+            space) and flex-centers the scaled slide within whatever's left. */}
+        <div ref={paneRef} className="w-full h-full flex items-center justify-center p-8">
+          {/* Sized to the *scaled* dimensions so it reserves the right layout
+              space — the transform below doesn't affect the inner div's own
+              layout box. */}
+          <div style={{ width: CANVAS_WIDTH * scale, height: CANVAS_HEIGHT * scale }}>
+            {/* Fixed logical size (960x540) so slide_view's render always
+                captures a consistent frame regardless of object count — see
+                design.md's "Screenshot dimensions are fixed" decision. Visual
+                size instead tracks the pane via a CSS transform, which
+                useDeckSocket's toPng capture explicitly neutralizes. */}
+            <div
+              ref={canvasRef}
+              className="relative bg-white border border-gray-300"
+              style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, transform: `scale(${scale})`, transformOrigin: 'top left' }}
+            >
+              {deckState.objects.map((obj) => (
+                <TextObjectBox
+                  key={obj.id}
+                  obj={obj}
+                  selected={deckState.selection.includes(obj.id)}
+                  editing={editingId === obj.id}
+                  liveRect={liveRects[obj.id]}
+                  onObjectUpdate={onObjectUpdate}
+                  onPointerDownMove={(e) => handlePointerDownMove(e, obj)}
+                  onPointerDownResize={(e, corner) => handlePointerDownResize(e, obj, corner)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (didDragRef.current) {
+                      didDragRef.current = false
+                      return
+                    }
+                    toggle(obj.id, e.shiftKey)
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation()
+                    onSelectionChange([obj.id])
+                    setEditingId(obj.id)
+                  }}
+                  onStartEditingCommit={() => setEditingId(null)}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

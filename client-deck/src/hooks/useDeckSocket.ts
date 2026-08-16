@@ -144,7 +144,10 @@ export function useDeckSocket() {
         return
       }
       try {
-        const image = await toPng(node, { width: 960, height: 540 })
+        // Overrides the live scale-to-fit transform (DeckCanvas.tsx) so the
+        // capture always reflects the canvas's fixed 960x540 logical frame,
+        // regardless of how large/small it's currently displayed on screen.
+        const image = await toPng(node, { width: 960, height: 540, style: { transform: 'none' } })
         ws.send(JSON.stringify({ type: 'render_response', requestId, image }))
       } catch (err) {
         ws.send(JSON.stringify({ type: 'render_response', requestId, error: err instanceof Error ? err.message : 'Render failed' }))
