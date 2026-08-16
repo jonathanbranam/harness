@@ -18,10 +18,10 @@ Vite/React/Tailwind, cookie-session auth, Caddy per-subdomain pattern, PM2).
 ```bash
 # Development (run from repo root in separate terminals — or use
 # ./dev-local.sh inside a tmux session to split panes for you)
-npm run dev                  # deck-harness-server (tsx watch)
-npm run dev:client-deck      # client-deck (Vite)
-npm run dev:introspect       # introspect-harness-server (tsx watch)
-npm run dev:client-introspect # client-introspect (Vite)
+npm run dev:deck-server        # deck-harness-server (tsx watch)
+npm run dev:deck-client        # client-deck (Vite)
+npm run dev:introspect-server  # introspect-harness-server (tsx watch)
+npm run dev:introspect-client  # client-introspect (Vite)
 
 # Build (clients only — servers ship via tsx, see below)
 npm run build                # builds both client-deck and client-introspect
@@ -46,6 +46,20 @@ npm run hash-password -w introspect-harness-server -- 'your-password'
 ```
 
 No lint is configured.
+
+## Never kill or restart the dev servers
+
+The user keeps a server + client instance running at all times, each in its
+own terminal, for **every app in this workspace** — `deck-harness-server` +
+`client-deck`, `introspect-harness-server` + `client-introspect`, and any
+future harness server/client pair added to this monorepo (see "Keep in
+sync" below). Do **not** run `lsof -ti:<port> | xargs kill`, `pkill`, or
+otherwise stop these processes, and do not start a second copy of a server
+or client that's already running (check `lsof -i:<port>` first if unsure —
+deck-harness-server defaults to port 4100, client-deck to 5175; see each
+`vite.config.ts`/`.env` for other harnesses' ports). If a server needs to be
+restarted (e.g. to pick up a changed `.env` value that `tsx watch` won't
+hot-reload), **ask the user to restart it** rather than doing it yourself.
 
 ## Why the harness servers ship via `tsx`, not `tsc`
 
@@ -117,12 +131,22 @@ server source tree. Each server has its own workspace:
 
 See each server's `agent-workspace.ts`. The deck harness's permission-gate
 extension's path jail enforces that `write`/`edit` can't escape that
-server's workspace directory.
+server's workspace directory; the introspect harness has an equivalent
+`permission-gate.ts` that also jails `read` (no interactive approval UI to
+fall back on) and pattern-blocks `bash` escapes (`cd`, absolute paths, `..`
+traversal outside the workspace root).
+
+introspect-harness-server's chat sessions persist to disk via
+`SessionManager.create(cwd)`, in the same `.jsonl` layout the pi SDK already
+uses for interactive `pi` CLI sessions: `~/.pi/agent/sessions/<encoded-cwd>/`.
+Session logs survive `disposeSession` and server restarts (no rotation), so
+a sandbox-escape attempt or other unexpected tool behavior can be reviewed
+after the fact by inspecting the relevant `.jsonl` file.
 
 ## Deployment
 
 - **Local dev**: run the server and client for the harness you're working on
-  (e.g. `npm run dev:introspect` + `npm run dev:client-introspect`), or use
+  (e.g. `npm run dev:introspect-server` + `npm run dev:introspect-client`), or use
   `./dev-local.sh` inside tmux to spin up all four panes at once. No Caddy
   needed — Vite proxies `/api` and `/ws` straight to the corresponding
   server.

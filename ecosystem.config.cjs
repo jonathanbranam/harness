@@ -1,4 +1,5 @@
-// Not needed for local iteration (`npm run dev`) — this is for running
+// Not needed for local iteration (`npm run dev:deck-server` /
+// `npm run dev:introspect-server`) — this is for running
 // harness servers unattended on an always-on box (e.g. a NUC), per
 // docs/arch/pi-harness.md. `pm2 start ecosystem.config.cjs`.
 //

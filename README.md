@@ -69,8 +69,8 @@ npm run hash-password -w deck-harness-server -- 'your-password'
 # `pi login`, or a custom ~/.pi/agent/models.json) — see docs/pi-setup.md.
 
 # Run a harness's server + client in separate terminals...
-npm run dev               # deck-harness-server
-npm run dev:client-deck   # client-deck
+npm run dev:deck-server   # deck-harness-server
+npm run dev:deck-client   # client-deck
 
 # ...or use dev-local.sh inside a tmux session to split panes for all of them
 ./dev-local.sh

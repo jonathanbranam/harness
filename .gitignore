@@ -8,3 +8,4 @@ data/
 *.pem
 *.tsbuildinfo
 version.json
+.playwright-cli/

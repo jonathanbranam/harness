@@ -4,6 +4,7 @@ import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, S
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
 import { introspectionBridge } from './pi-extensions/introspection-bridge'
+import { createPermissionGateExtension } from './pi-extensions/permission-gate'
 
 const TEMPLATES_DIR = join(import.meta.dirname, '..', 'templates', 'agent-workspace')
 
@@ -29,13 +30,13 @@ export async function getOrCreateSession(sessionId: string): Promise<HarnessSess
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir: getAgentDir(),
-    extensionFactories: [introspectionBridge(events)],
+    extensionFactories: [introspectionBridge(events), createPermissionGateExtension({ cwd })],
   })
   await resourceLoader.reload()
 
   const { session } = await createAgentSession({
     modelRuntime,
-    sessionManager: SessionManager.inMemory(cwd),
+    sessionManager: SessionManager.create(cwd),
     cwd,
     resourceLoader,
     tools: [...ALLOWED_TOOLS],

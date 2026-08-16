@@ -198,9 +198,7 @@ export function useDeckSocket() {
       if (type === 'message_start') {
         const message = event.message as { id?: string; role?: string } | undefined
         if (message?.role === 'assistant') {
-          const id = message.id ?? genId()
-          streamingIdRef.current = id
-          setTranscript((t) => [...t, { kind: 'message', id, role: 'assistant', text: '', streaming: true }])
+          streamingIdRef.current = message.id ?? genId()
         }
         return
       }
@@ -210,9 +208,18 @@ export function useDeckSocket() {
         if (assistantEvent?.type === 'text_delta' && streamingIdRef.current) {
           const id = streamingIdRef.current
           const delta = assistantEvent.delta ?? ''
-          setTranscript((t) =>
-            t.map((e) => (e.kind === 'message' && e.id === id ? { ...e, text: e.text + delta } : e)),
-          )
+          setTranscript((t) => {
+            const existing = t.find((e) => e.kind === 'message' && e.id === id)
+            if (existing) {
+              return t.map((e) => (e.kind === 'message' && e.id === id ? { ...e, text: e.text + delta } : e))
+            }
+            // Some assistant turns emit whitespace-only text chunks (e.g. a
+            // bare newline) between tool calls with no other text — skip
+            // creating a bubble until a chunk has actual content, so those
+            // don't show up as empty/blank bubbles.
+            if (delta.trim() === '') return t
+            return [...t, { kind: 'message', id, role: 'assistant', text: delta, streaming: true }]
+          })
         }
         return
       }

@@ -9,10 +9,10 @@
     "client-introspect"
   ],
   "scripts": {
-    "dev": "npm run dev -w deck-harness-server",
-    "dev:client-deck": "npm run dev -w client-deck",
-    "dev:introspect": "npm run dev -w introspect-harness-server",
-    "dev:client-introspect": "npm run dev -w client-introspect",
+    "dev:deck-server": "npm run dev -w deck-harness-server",
+    "dev:deck-client": "npm run dev -w client-deck",
+    "dev:introspect-server": "npm run dev -w introspect-harness-server",
+    "dev:introspect-client": "npm run dev -w client-introspect",
     "build:client-deck": "npm run build -w client-deck",
     "build:client-introspect": "npm run build -w client-introspect",
     "build": "npm run build:client-deck && npm run build:client-introspect",

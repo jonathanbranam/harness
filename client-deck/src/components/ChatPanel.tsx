@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { TranscriptEntry } from '../hooks/useDeckSocket'
 
 function ToolBadge({ entry }: { entry: Extract<TranscriptEntry, { kind: 'tool' }> }) {
@@ -39,22 +41,30 @@ export function ChatPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {transcript.map((entry) =>
-          entry.kind === 'tool' ? (
-            <ToolBadge key={entry.id} entry={entry} />
-          ) : (
-            <div key={entry.id} className={`flex ${entry.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                  entry.role === 'user' ? 'bg-indigo-600' : 'bg-gray-800'
-                }`}
-              >
-                {entry.text}
-                {entry.streaming && <span className="animate-pulse">▍</span>}
+        {transcript
+          .filter((entry) => entry.kind === 'tool' || entry.text.trim() !== '')
+          .map((entry) =>
+            entry.kind === 'tool' ? (
+              <ToolBadge key={entry.id} entry={entry} />
+            ) : (
+              <div key={entry.id} className={`flex ${entry.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div
+                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                    entry.role === 'user' ? 'bg-indigo-600 whitespace-pre-wrap' : 'bg-gray-800'
+                  }`}
+                >
+                  {entry.role === 'assistant' ? (
+                    <div className="prose prose-invert prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    entry.text
+                  )}
+                  {entry.streaming && <span className="animate-pulse">▍</span>}
+                </div>
               </div>
-            </div>
-          ),
-        )}
+            ),
+          )}
       </div>
 
       <form onSubmit={submit} className="p-3 border-t border-gray-800 flex gap-2">

@@ -93,8 +93,9 @@ process lifetime (a module-level singleton in `session-store.ts`), and it
 reads `models.json` exactly once, at that moment. Two things commonly make
 an edit appear not to take effect:
 
-1. **`tsx watch` doesn't see it.** Dev mode (`npm run dev`) only watches
-   files inside the harness server's own `src/**`. `~/.pi/agent/models.json`
+1. **`tsx watch` doesn't see it.** Dev mode (`npm run dev:deck-server` /
+   `npm run dev:introspect-server`) only watches files inside the harness
+   server's own `src/**`. `~/.pi/agent/models.json`
    lives entirely outside the repo, so editing it never triggers tsx's
    auto-restart — the already-running process just keeps using the config
    it started with.
@@ -103,8 +104,9 @@ an edit appear not to take effect:
    the backend's `ModelRuntime` at all.
 
 To pick up a `models.json` change you must fully stop and relaunch the
-harness server process (`Ctrl+C` then `npm run dev` / `npm run start` — not
-just a browser refresh). If you're not sure whether a stale process is
+harness server process (`Ctrl+C` then `npm run dev:deck-server` /
+`npm run dev:introspect-server` / `npm run start` — not just a browser
+refresh). If you're not sure whether a stale process is
 still running, compare its start time against the config file's mtime:
 
 ```bash
