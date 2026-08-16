@@ -62,3 +62,10 @@ The apparatus view SHALL render assistant block text as formatted markdown, styl
 #### Scenario: User and system blocks are not markdown-rendered
 - **WHEN** a block has role `user` or `system`
 - **THEN** its text is rendered as plain text, not parsed as markdown
+
+### Requirement: Rendering is agnostic to event source
+The apparatus view SHALL render identically regardless of whether its events originate from a live `AgentSession` or from the replay engine.
+
+#### Scenario: Same events, live vs. replay
+- **WHEN** the apparatus view receives the same sequence of events once during a live session and once during replay of a recording of that session
+- **THEN** it renders the same context window, foundation zone, gauge, and token/cost counter state at each corresponding point
