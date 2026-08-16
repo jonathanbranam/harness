@@ -1,14 +1,18 @@
 # Prompt-Cache Reprocessing in Recorded Introspect Sessions
 
 **Status: root cause identified and confirmed live — `PI_CACHE_RETENTION=long`
-substantially fixes it.** A second pass through this investigation
-(2026-08-16) traced the leading hypothesis all the way into
-`@earendil-works/pi-ai`'s actual request-building code, identified
-`PI_CACHE_RETENTION=long` as the one lever actually wired up to affect this
-in the current SDK, and a live re-recording with that env var set confirms a
-large, measurable improvement. See "Second-pass findings" and "Live test
-results" near the bottom for the full story; the rest of this document is
-the original spike write-up, left intact.
+substantially fixes it; cross-provider follow-up planned but blocked on an
+Anthropic outage.** A second pass through this investigation (2026-08-16)
+traced the leading hypothesis all the way into `@earendil-works/pi-ai`'s
+actual request-building code, identified `PI_CACHE_RETENTION=long` as the
+one lever actually wired up to affect this in the current SDK, and a live
+re-recording with that env var set confirms a large, measurable
+improvement. A follow-up to test a natively-supported provider (Anthropic,
+via the user's Claude Pro/Max subscription) is planned to see if it closes
+the remaining ~20% gap, but is blocked as of 2026-08-16 on an Anthropic
+auth-gateway incident. See "Second-pass findings," "Live test results," and
+"Follow-up: cross-provider comparison" near the bottom for the full story;
+the rest of this document is the original spike write-up, left intact.
 
 ---
 
@@ -524,3 +528,46 @@ one large-outlier boundary are good candidates for avenue 1's other half
 `sessionId` into model calls — worth a note upstream — but are no longer
 blocking or urgent given the size of the improvement already achieved with
 a one-line config change.
+
+## Follow-up: cross-provider comparison (avenue 4, planned, blocked)
+
+The remaining open question is whether the residual ~20% gap and the
+one-outlier-boundary pattern are specific to DeepInfra's serving
+architecture, or would recur on any provider. `pi-ai`'s `detectCompat()`
+has no DeepInfra-specific branch at all — it's treated as a generic
+OpenAI-completions-compatible endpoint, unlike `together`, `deepseek`,
+`zai`, `moonshotai` (native), `nvidia`, `cerebras`, `xai`, and the
+Cloudflare/Ant-Ling providers, which all get hand-tuned `compat` detection.
+
+Reading `anthropic-messages.js`'s `buildParams()`/`getCacheControl()`
+directly shows Anthropic's native API works on a different mechanism
+entirely: `cache_control: { type: "ephemeral" }` markers are applied to the
+system prompt/tools/last message **unconditionally** whenever retention
+isn't explicitly `"none"` (the default `"short"` still caches — it just
+skips the `ttl: "1h"` extension `"long"` would add). This is a
+hash-addressed cache on Anthropic's serving infrastructure, not
+"hope this request lands on the GPU replica that already has your prefix
+warm" — so it doesn't depend on the same `options.sessionId` plumbing gap
+that makes DeepInfra's `prompt_cache_key` and any session-affinity headers
+dead in the current SDK (see above). The expectation, not yet confirmed
+empirically, is that a Claude model run through the same harness code path
+would show near-100% cross-boundary retention with no oscillation, closing
+the gap that `PI_CACHE_RETENTION=long` didn't fully close for DeepInfra.
+
+**Plan**: authenticate pi against the user's Claude Pro/Max subscription
+(`/login` in interactive `pi`, select **Claude Pro/Max** — draws from
+[extra usage](https://claude.ai/settings/usage) billed per-token, not
+against normal plan chat limits, per pi's `providers.md`), add a Claude
+model entry, then re-record the same OpenSpec workflow through
+`introspect-harness-server` and run it through the same analysis as the two
+DeepInfra recordings above (foundation-hash check, intra-run drop count,
+boundary retention table, input/final-context ratio).
+
+**Status: blocked as of 2026-08-16.** Anthropic's OAuth/auth gateway is down
+— see incident
+[qt14v73myyy5](https://status.claude.com/incidents/qt14v73myyy5)
+("investigating," affecting claude.ai, Console, API, Claude Code, and Claude
+Cowork auth as of 21:58–22:02 UTC). `/login` cannot complete until this
+clears. Resume by checking `pi auth check --provider anthropic`, or
+`status.claude.com` for the incident's resolution, then continuing per the
+plan above.
