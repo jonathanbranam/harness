@@ -6,8 +6,8 @@ function ToolBadge({ block }: { block: Extract<ContextBlock, { role: 'tool' }> }
   const color = block.status === 'running' ? 'text-amber-400' : block.status === 'error' ? 'text-red-400' : 'text-emerald-400'
   const dot = block.status === 'running' ? '●' : block.status === 'error' ? '✕' : '✓'
   return (
-    <div className="text-xs font-mono bg-gray-800/60 border border-gray-700 rounded-md px-2 py-1">
-      <span className={color}>{dot}</span> <span className="text-gray-300">{block.toolName}</span>
+    <div className="text-xs font-mono bg-gray-100 dark:bg-gray-800/60 border border-gray-300 dark:border-gray-700 rounded-md px-2 py-1">
+      <span className={color}>{dot}</span> <span className="text-gray-700 dark:text-gray-300">{block.toolName}</span>
       {block.text && <span className="text-gray-500"> — {block.text}</span>}
     </div>
   )
@@ -40,8 +40,8 @@ export function ChatPanel({
   const chatBlocks = [...blocks].reverse().filter((block) => block.role === 'tool' || block.text.trim() !== '')
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
+    <div className="flex flex-col h-full bg-white text-gray-900 dark:bg-gray-900 dark:text-white">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800">
         <span className="text-sm font-medium">Chat with pi</span>
         <span className={`text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}`}>{connected ? 'connected' : 'disconnected'}</span>
       </div>
@@ -54,7 +54,7 @@ export function ChatPanel({
             <div key={block.id} className={`flex ${block.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
                 className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                  block.role === 'user' ? 'bg-indigo-600 whitespace-pre-wrap' : 'bg-gray-800'
+                  block.role === 'user' ? 'bg-indigo-600 text-white whitespace-pre-wrap' : 'bg-gray-100 dark:bg-gray-800'
                 } ${block.role === 'system' ? 'whitespace-pre-wrap' : ''}`}
               >
                 {block.role === 'assistant' ? <MarkdownMessage text={block.text} /> : block.text}
@@ -65,13 +65,13 @@ export function ChatPanel({
         )}
       </div>
 
-      <form onSubmit={submit} className="p-3 border-t border-gray-800 flex gap-2">
+      <form onSubmit={submit} className="p-3 border-t border-gray-200 dark:border-gray-800 flex gap-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           disabled={disabled}
           placeholder={disabled ? 'Replaying — exit replay to chat' : 'Ask pi to explore the workspace…'}
-          className="flex-1 rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
+          className="flex-1 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
         />
         <button
           type="submit"

@@ -7,8 +7,8 @@ function ToolBadge({ entry }: { entry: Extract<TranscriptEntry, { kind: 'tool' }
   const color = entry.status === 'running' ? 'text-amber-400' : entry.status === 'error' ? 'text-red-400' : 'text-emerald-400'
   const dot = entry.status === 'running' ? '●' : entry.status === 'error' ? '✕' : '✓'
   return (
-    <div className="text-xs font-mono bg-gray-800/60 border border-gray-700 rounded-md px-2 py-1">
-      <span className={color}>{dot}</span> <span className="text-gray-300">{entry.toolName}</span>
+    <div className="text-xs font-mono bg-gray-100 dark:bg-gray-800/60 border border-gray-300 dark:border-gray-700 rounded-md px-2 py-1">
+      <span className={color}>{dot}</span> <span className="text-gray-700 dark:text-gray-300">{entry.toolName}</span>
       {entry.resultSummary && <span className="text-gray-500"> — {entry.resultSummary}</span>}
     </div>
   )
@@ -34,8 +34,8 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 text-white">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800">
+    <div className="flex flex-col h-full bg-white text-gray-900 dark:bg-gray-900 dark:text-white">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-800">
         <span className="text-sm font-medium">Chat with pi</span>
         <span className={`text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}`}>{connected ? 'connected' : 'disconnected'}</span>
       </div>
@@ -50,11 +50,11 @@ export function ChatPanel({
               <div key={entry.id} className={`flex ${entry.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div
                   className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                    entry.role === 'user' ? 'bg-indigo-600 whitespace-pre-wrap' : 'bg-gray-800'
+                    entry.role === 'user' ? 'bg-indigo-600 text-white whitespace-pre-wrap' : 'bg-gray-100 dark:bg-gray-800'
                   }`}
                 >
                   {entry.role === 'assistant' ? (
-                    <div className="prose prose-invert prose-sm max-w-none">
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>
                     </div>
                   ) : (
@@ -67,12 +67,12 @@ export function ChatPanel({
           )}
       </div>
 
-      <form onSubmit={submit} className="p-3 border-t border-gray-800 flex gap-2">
+      <form onSubmit={submit} className="p-3 border-t border-gray-200 dark:border-gray-800 flex gap-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Ask pi to edit the deck…"
-          className="flex-1 rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          className="flex-1 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500"
         />
         <button type="submit" disabled={!draft.trim()} className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 text-sm font-medium">
           Send

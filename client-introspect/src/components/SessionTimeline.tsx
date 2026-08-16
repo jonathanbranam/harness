@@ -49,9 +49,12 @@ function RecordToggle({ recording, onStart, onStop }: { recording: boolean; onSt
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Recording name (optional)"
-        className="flex-1 rounded-md bg-gray-800 border border-gray-700 px-2 py-1 text-xs outline-none focus:border-indigo-500"
+        className="flex-1 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-2 py-1 text-xs outline-none focus:border-indigo-500"
       />
-      <button type="submit" className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-medium bg-gray-800 hover:bg-gray-700 text-gray-200">
+      <button
+        type="submit"
+        className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-md font-medium bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-200"
+      >
         <span className="w-2 h-2 rounded-full bg-red-500" />
         Record
       </button>
@@ -61,7 +64,7 @@ function RecordToggle({ recording, onStart, onStop }: { recording: boolean; onSt
 
 function RecordingsList({ recordings, onLoad }: { recordings: RecordingSummary[]; onLoad: (id: string) => void }) {
   if (recordings.length === 0) {
-    return <p className="text-xs text-gray-600">No recordings yet.</p>
+    return <p className="text-xs text-gray-500 dark:text-gray-600">No recordings yet.</p>
   }
   return (
     <div className="space-y-1 max-h-32 overflow-y-auto">
@@ -70,7 +73,7 @@ function RecordingsList({ recordings, onLoad }: { recordings: RecordingSummary[]
           key={r.id}
           type="button"
           onClick={() => onLoad(r.id)}
-          className="w-full text-left text-xs px-2 py-1 rounded bg-gray-800/60 hover:bg-gray-800 text-gray-300 flex justify-between gap-2"
+          className="w-full text-left text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800/60 dark:hover:bg-gray-800 dark:text-gray-300 flex justify-between gap-2"
         >
           <span className="truncate">{r.name}</span>
           <span className="text-gray-500 shrink-0">{r.checkpointCount} checkpoints</span>
@@ -111,7 +114,7 @@ function ReplayScrubber({
 
   return (
     <div className="space-y-2">
-      <div className="relative h-6 bg-gray-800 rounded overflow-hidden">
+      <div className="relative h-6 bg-gray-200 dark:bg-gray-800 rounded overflow-hidden">
         <div
           className="absolute inset-y-0 left-0 bg-indigo-600/40"
           style={{ width: total > 0 ? `${((index + 1) / total) * 100}%` : '0%' }}
@@ -132,12 +135,16 @@ function ReplayScrubber({
           type="button"
           onClick={onStepBackward}
           disabled={atStart}
-          className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40"
+          className="text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-40"
         >
           ⏮ Prev
         </button>
         {playing ? (
-          <button type="button" onClick={onPause} className="text-xs px-3 py-1 rounded bg-gray-800 hover:bg-gray-700">
+          <button
+            type="button"
+            onClick={onPause}
+            className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700"
+          >
             ⏸ Pause
           </button>
         ) : (
@@ -145,7 +152,7 @@ function ReplayScrubber({
             type="button"
             onClick={onPlay}
             disabled={atEnd}
-            className="text-xs px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40"
+            className="text-xs px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-40"
           >
             ▶ Play
           </button>
@@ -154,7 +161,7 @@ function ReplayScrubber({
           type="button"
           onClick={onStepForward}
           disabled={atEnd}
-          className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-40"
+          className="text-xs px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 disabled:opacity-40"
         >
           Next ⏭
         </button>
@@ -179,12 +186,16 @@ export function SessionTimeline(props: SessionTimelineProps) {
 
   if (props.mode === 'replay') {
     return (
-      <div className="border-t border-gray-800 p-3 bg-gray-900/50 space-y-2">
+      <div className="border-t border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-900/50 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider truncate">
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider truncate">
             Replaying: {props.replayHeader?.name ?? '…'}
           </span>
-          <button type="button" onClick={props.onExitReplay} className="text-xs text-gray-400 hover:text-white shrink-0">
+          <button
+            type="button"
+            onClick={props.onExitReplay}
+            className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white shrink-0"
+          >
             Exit replay
           </button>
         </div>
@@ -203,10 +214,10 @@ export function SessionTimeline(props: SessionTimelineProps) {
   }
 
   return (
-    <div className="border-t border-gray-800 p-3 bg-gray-900/50 space-y-2">
+    <div className="border-t border-gray-200 dark:border-gray-800 p-3 bg-gray-50 dark:bg-gray-900/50 space-y-2">
       <RecordToggle recording={props.recording} onStart={props.onStartRecording} onStop={props.onStopRecording} />
       <div>
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Recordings</h4>
+        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Recordings</h4>
         <RecordingsList recordings={props.recordings} onLoad={props.onLoadRecording} />
       </div>
     </div>

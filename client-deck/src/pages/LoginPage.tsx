@@ -21,7 +21,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
+    <div className="flex items-center justify-center h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-white">
       <form onSubmit={onSubmit} className="w-full max-w-xs space-y-4 p-6">
         <h1 className="text-xl font-semibold text-center">Deck Harness</h1>
         <input
@@ -30,9 +30,9 @@ export function LoginPage() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="Password"
-          className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 outline-none focus:border-indigo-500"
+          className="w-full rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 outline-none focus:border-indigo-500"
         />
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
         <button
           type="submit"
           disabled={submitting || !password}

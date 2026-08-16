@@ -14,7 +14,7 @@ export function SlideSwitcher({
   onRemove: (slideId: string) => void
 }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 overflow-x-auto">
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
       <span className="text-xs uppercase tracking-wide text-gray-500 shrink-0">Slides</span>
       {slides.map((slide, i) => (
         <button
@@ -22,20 +22,26 @@ export function SlideSwitcher({
           type="button"
           onClick={() => onSelect(slide.id)}
           className={`px-3 py-1 rounded-md text-sm whitespace-nowrap ${
-            slide.id === activeSlideId ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+            slide.id === activeSlideId
+              ? 'bg-indigo-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
           }`}
         >
           {i + 1}
         </button>
       ))}
-      <button type="button" onClick={onAdd} className="text-sm text-gray-300 hover:text-white px-2 py-1 shrink-0">
+      <button
+        type="button"
+        onClick={onAdd}
+        className="text-sm text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white px-2 py-1 shrink-0"
+      >
         + Slide
       </button>
       {slides.length > 1 && (
         <button
           type="button"
           onClick={() => onRemove(activeSlideId)}
-          className="text-sm text-red-400 hover:text-red-300 px-2 py-1 ml-auto shrink-0"
+          className="text-sm text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 px-2 py-1 ml-auto shrink-0"
         >
           Remove slide
         </button>

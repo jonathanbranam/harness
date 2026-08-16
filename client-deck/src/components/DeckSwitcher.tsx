@@ -31,7 +31,7 @@ export function DeckSwitcher({
   }
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 overflow-x-auto">
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
       <span className="text-xs uppercase tracking-wide text-gray-500 shrink-0">Decks</span>
       {decks.map((deck) =>
         deck.id === activeDeckId && editingId === deck.id ? (
@@ -60,7 +60,9 @@ export function DeckSwitcher({
               setEditingId(deck.id)
             }}
             className={`px-3 py-1 rounded-md text-sm whitespace-nowrap ${
-              deck.id === activeDeckId ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+              deck.id === activeDeckId
+                ? 'bg-indigo-600 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
             }`}
           >
             {deck.name} <span className="text-xs opacity-70">({deck.slideCount})</span>
@@ -81,14 +83,18 @@ export function DeckSwitcher({
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="New deck name"
-          className="bg-gray-800 text-sm text-white rounded-md px-2 py-1 w-32 outline-none placeholder:text-gray-500"
+          className="bg-gray-100 dark:bg-gray-800 text-sm text-gray-900 dark:text-white rounded-md px-2 py-1 w-32 outline-none placeholder:text-gray-500"
         />
-        <button type="submit" className="text-sm text-gray-300 hover:text-white px-2 py-1">
+        <button type="submit" className="text-sm text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white px-2 py-1">
           + Deck
         </button>
       </form>
       {decks.length > 1 && (
-        <button type="button" onClick={() => onDelete(activeDeckId)} className="text-sm text-red-400 hover:text-red-300 px-2 py-1 ml-auto shrink-0">
+        <button
+          type="button"
+          onClick={() => onDelete(activeDeckId)}
+          className="text-sm text-red-600 hover:text-red-500 dark:text-red-400 dark:hover:text-red-300 px-2 py-1 ml-auto shrink-0"
+        >
           Delete deck
         </button>
       )}

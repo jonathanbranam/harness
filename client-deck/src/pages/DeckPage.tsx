@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { useDeckSocket } from '../hooks/useDeckSocket'
+import { useTheme } from '../hooks/useTheme'
 import { ChatPanel } from '../components/ChatPanel'
 import { DeckCanvas } from '../components/DeckCanvas'
 import { DeckSwitcher } from '../components/DeckSwitcher'
@@ -30,11 +31,12 @@ export function DeckPage() {
     undo,
     redo,
   } = useDeckSocket()
+  const { theme, toggleTheme } = useTheme()
   const [isPreviewing, setIsPreviewing] = useState(false)
 
   if (isPreviewing) {
     return (
-      <div className="h-screen flex flex-col bg-gray-950 text-white">
+      <div className="h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
         <PresentationView
           deckState={deckState}
           canvasRef={canvasRef}
@@ -51,8 +53,8 @@ export function DeckPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950 text-white">
-      <header className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
+    <div className="h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
+      <header className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-800">
         <span className="font-semibold">Deck Harness</span>
         <div className="flex items-center gap-3">
           <button
@@ -63,7 +65,19 @@ export function DeckPage() {
           >
             Present
           </button>
-          <button type="button" onClick={() => void logout()} className="text-sm text-gray-400 hover:text-white">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+            aria-label="Toggle theme"
+          >
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+          >
             Sign out
           </button>
         </div>
@@ -81,7 +95,7 @@ export function DeckPage() {
 
       <div className="flex-1 grid grid-cols-[1fr_380px] min-h-0">
         <DeckCanvas ref={canvasRef} deckState={deckState} onSelectionChange={sendSelection} onObjectUpdate={sendObjectUpdate} onUndo={undo} onRedo={redo} />
-        <div className="border-l border-gray-800 min-h-0">
+        <div className="border-l border-gray-200 dark:border-gray-800 min-h-0">
           <ChatPanel transcript={transcript} connected={connected} onSend={sendPrompt} />
         </div>
       </div>

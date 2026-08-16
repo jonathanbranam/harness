@@ -466,13 +466,13 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
     // protects the container — this protects the item within it).
     <div className="h-full min-w-0 min-h-0 flex flex-col">
       {!readOnly && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900 text-sm">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-sm">
           <button type="button" className="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white" onClick={addTextBox}>
             + Text box
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
+            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:opacity-40 disabled:hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white dark:disabled:hover:bg-gray-700"
             disabled={deckState.selection.length === 0}
             onClick={deleteSelection}
           >
@@ -481,7 +481,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
 
           <button
             type="button"
-            className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
+            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:opacity-40 disabled:hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white dark:disabled:hover:bg-gray-700"
             disabled={!deckState.canUndo}
             onClick={onUndo}
             title="Undo (Ctrl/Cmd+Z)"
@@ -490,7 +490,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
           </button>
           <button
             type="button"
-            className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-40 disabled:hover:bg-gray-700"
+            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-900 disabled:opacity-40 disabled:hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-white dark:disabled:hover:bg-gray-700"
             disabled={!deckState.canRedo}
             onClick={onRedo}
             title="Redo (Ctrl/Cmd+Shift+Z)"
@@ -498,13 +498,13 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             Redo
           </button>
 
-          <div className="w-px h-5 bg-gray-700 mx-1" />
+          <div className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
 
-          <label className="flex items-center gap-1 text-gray-300">
+          <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Font size
             <input
               type="number"
-              className="w-14 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-white disabled:opacity-40"
+              className="w-14 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 text-gray-900 dark:text-white disabled:opacity-40"
               disabled={!firstSelected}
               value={firstSelected?.fontSize ?? ''}
               onChange={(e) => {
@@ -514,7 +514,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             />
           </label>
 
-          <label className="flex items-center gap-1 text-gray-300">
+          <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Font
             <input
               type="color"
@@ -525,7 +525,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             />
           </label>
 
-          <label className="flex items-center gap-1 text-gray-300">
+          <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Fill
             <input
               type="color"
@@ -536,7 +536,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             />
             <button
               type="button"
-              className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
+              className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40"
               disabled={!firstSelected}
               onClick={() => setStyleOnSelection('setFillColor', { color: 'transparent' })}
             >
@@ -544,7 +544,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             </button>
           </label>
 
-          <label className="flex items-center gap-1 text-gray-300">
+          <label className="flex items-center gap-1 text-gray-700 dark:text-gray-300">
             Border
             <input
               type="color"
@@ -555,7 +555,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
             />
             <button
               type="button"
-              className="text-xs text-gray-400 hover:text-white disabled:opacity-40"
+              className="text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white disabled:opacity-40"
               disabled={!firstSelected}
               onClick={() => setStyleOnSelection('setBorderColor', { color: 'transparent' })}
             >
@@ -566,7 +566,12 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       )}
 
       <div
-        className="relative flex-1 min-w-0 min-h-0 bg-gray-950 overflow-hidden"
+        // readOnly (presentation view) always keeps the dark backdrop
+        // regardless of theme — deck content and the chrome-free slideshow
+        // are excluded from theming (deck-theme-toggle spec's "Deck content
+        // unaffected by theme"). Only the editor's own pane background is
+        // theme-aware.
+        className={readOnly ? 'relative flex-1 min-w-0 min-h-0 bg-gray-950 overflow-hidden' : 'relative flex-1 min-w-0 min-h-0 bg-gray-100 dark:bg-gray-950 overflow-hidden'}
         // Objects' own onClick stops propagation before it reaches here (see
         // TextObjectBox's onClick below), so any click that bubbles this far —
         // the margin around the slide or the slide's own background — is by
@@ -674,7 +679,7 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                       return (
                         <div className="absolute" style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}>
                           <div
-                            className="absolute -top-9 left-0 flex gap-1 bg-gray-800 border border-gray-700 rounded px-1 py-1 pointer-events-auto"
+                            className="absolute -top-9 left-0 flex gap-1 bg-white border border-gray-300 dark:bg-gray-800 dark:border-gray-700 rounded px-1 py-1 pointer-events-auto shadow-sm"
                             // mousedown (not click) is what the browser uses to move focus /
                             // collapse the current selection by default; preventing it here
                             // keeps the contenteditable's selection intact so applyMark/
@@ -685,35 +690,35 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
                           >
                             <button
                               type="button"
-                              className="px-2 text-xs font-bold text-white hover:bg-gray-700 rounded"
+                              className="px-2 text-xs font-bold text-gray-900 hover:bg-gray-200 dark:text-white dark:hover:bg-gray-700 rounded"
                               onClick={() => editingBoxRef.current?.applyMark('bold')}
                             >
                               B
                             </button>
                             <button
                               type="button"
-                              className="px-2 text-xs italic text-white hover:bg-gray-700 rounded"
+                              className="px-2 text-xs italic text-gray-900 hover:bg-gray-200 dark:text-white dark:hover:bg-gray-700 rounded"
                               onClick={() => editingBoxRef.current?.applyMark('italic')}
                             >
                               I
                             </button>
                             <button
                               type="button"
-                              className="px-2 text-xs text-white hover:bg-gray-700 rounded"
+                              className="px-2 text-xs text-gray-900 hover:bg-gray-200 dark:text-white dark:hover:bg-gray-700 rounded"
                               onClick={() => editingBoxRef.current?.applyListType('bulleted')}
                             >
                               • List
                             </button>
                             <button
                               type="button"
-                              className="px-2 text-xs text-white hover:bg-gray-700 rounded"
+                              className="px-2 text-xs text-gray-900 hover:bg-gray-200 dark:text-white dark:hover:bg-gray-700 rounded"
                               onClick={() => editingBoxRef.current?.applyListType('numbered')}
                             >
                               1. List
                             </button>
                             <button
                               type="button"
-                              className="px-2 text-xs text-gray-300 hover:bg-gray-700 rounded"
+                              className="px-2 text-xs text-gray-600 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-gray-700 rounded"
                               onClick={() => editingBoxRef.current?.applyListType(null)}
                             >
                               Clear list
