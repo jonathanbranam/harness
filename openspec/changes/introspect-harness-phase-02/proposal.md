@@ -20,6 +20,7 @@ Phase 1 proved the live loop: a browser chat driving an in-process `AgentSession
 
 ### Modified Capabilities
 - `introspect/apparatus-view`: Must render identically whether its events originate from a live `AgentSession` or from the replay engine — no new requirements on what it renders, but its event source is no longer assumed to be live-only.
+- `introspect/agent-session`: A new live session now resets the sandbox workspace to a declared seed's file set before creating the `AgentSession`, instead of relying on whatever files happen to already be in the sandbox from a previous session.
 
 ## Impact
 
