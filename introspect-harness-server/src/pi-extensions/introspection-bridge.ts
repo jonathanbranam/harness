@@ -59,8 +59,11 @@ export function introspectionBridge(events: EventEmitter, recordingWriter: Recor
     })
 
     pi.on('resources_discover', (event) => {
-      // Resources are discovered before each agent start; the foundation
-      // payload is refreshed by before_agent_start with the loaded skills.
+      // Per the SDK's lifecycle docs, this fires only at startup, on
+      // /new, /resume, /fork, /clone, or an explicit reload -- not on every
+      // prompt. Per-prompt system-prompt construction is before_agent_start
+      // above, which reads already-discovered resources rather than
+      // re-running discovery.
       return { skillPaths: [] }
     })
   }
