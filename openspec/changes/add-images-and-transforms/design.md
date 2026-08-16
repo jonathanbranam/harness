@@ -189,6 +189,46 @@ the server's `clampToSlide` both keep operating on the final unrotated
 `x/y/width/height`, per the `deck-object-bounds` decision — clamping is
 untouched by any of this.
 
+### Aspect-locked resize and clamping: one derivation helper, reused by every write path
+Per the updated Goals, an image can never end up with a destination size
+whose aspect ratio doesn't match its crop's. Rather than re-deriving this
+in each of `setSize`, `setCrop`, `setImageSource`, `createImage`, the
+corner-drag handler, and `clampToSlide`, all six route through one helper,
+`deriveImageSize(current: ImageObject, requested: { width?: number;
+height?: number })`: if only one of `width`/`height` is given, the other
+is computed from the current crop's aspect ratio (`cropWidth/cropHeight`);
+if both are given and their ratio doesn't match, `width` wins and `height`
+is recomputed — documented in `presentation_update`'s tool description so
+pi isn't surprised by a `setSize` call with both fields silently
+overriding its `height`. A mirror helper, `deriveCropSize`, does the same
+for `cropWidth`/`cropHeight` when `setCrop` is called with only one of
+them.
+
+**Corner-drag resize** (`handlePointerDownResize`) gets an `image`-only
+branch: instead of computing `width`/`height` independently per corner
+(today's box/ellipse behavior), it takes the larger-magnitude of the two
+local-frame axis deltas (per the rotated-resize local-frame transform
+above — this composes with that unchanged) to derive a single scale
+factor, then applies that factor to both `width` and `height` from the
+anchored opposite corner. This is the same "shift-locked" resize familiar
+from other editors, just applied unconditionally for `image` rather than
+behind a modifier key.
+
+**`clampToSlide`** gets the same `image`-only branch: instead of clamping
+`width` to `SLIDE_WIDTH` and `height` to `SLIDE_HEIGHT` independently
+(today's behavior for every other bounding-box type, per
+`deck-object-bounds`'s existing requirements), an oversized image's
+`width`/`height` are scaled down together by whichever factor is needed
+to fit both within bounds, then repositioned by the existing translate
+step — satisfying `deck-object-bounds`'s new "Slide-bounds clamping
+preserves an image's aspect ratio" requirement.
+
+**Why centralize instead of trusting each call site**: this is exactly
+the kind of invariant that's trivial to enforce in one place and easy to
+silently violate by adding a seventh write path later (e.g. a future
+"fit to frame" tool) that sets `width`/`height` directly without going
+through `deriveImageSize` — see the corresponding entry in Risks below.
+
 ### Selection chrome rotates with its object; the rotate handle is a new element in that same overlay
 The per-object selection outline and resize-handle wrapper (currently an
 unrotated `<div>` positioned at `rect.x/y/width/height`, painted in the
@@ -284,6 +324,16 @@ current on-screen appearance.
   rendering/rotate-handle work, and hand-test all four corners at several
   rotation angles (0°, 45°, 90°, 170°) before wiring up the rotate handle
   itself.
+- **[Risk]** The aspect-lock invariant is only as good as every write path
+  actually routing through `deriveImageSize`/`deriveCropSize` — a future
+  addition (a new tool, a canvas shortcut) that sets `width`/`height` or
+  `cropWidth`/`cropHeight` directly would silently reintroduce stretching
+  → Mitigation: `deriveImageSize` is the only place `ImageObject.width`/
+  `.height` are computed from a caller's request across `createImage`,
+  `setSize`, `setImageSource`, and `clampToSlide`'s image branch — a code
+  reviewer checking "does this touch `width`/`height` on an `image`
+  without going through the helper" is a cheap, mechanical check for any
+  future change touching this file.
 - **[Risk]** A rotated object's corners can render outside the visible
   slide bounds (accepted trade-off from the `deck-object-bounds` decision)
   → Mitigation: none needed functionally, but worth a quick manual check
