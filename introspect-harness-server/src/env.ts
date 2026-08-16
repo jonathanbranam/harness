@@ -16,6 +16,7 @@ export const env = {
   SESSION_SECRET: requireEnv('SESSION_SECRET'),
   PORT: parseInt(process.env.PORT ?? '4200', 10),
   INTROSPECT_WORKSPACE_DIR: process.env.INTROSPECT_WORKSPACE_DIR ?? join(import.meta.dirname, '..', 'data', 'workspace'),
+  RECORDINGS_DIR: process.env.RECORDINGS_DIR ?? join(import.meta.dirname, '..', 'data', 'recordings'),
   COOKIE_SECURE: process.env.COOKIE_SECURE === 'true',
   isProd: process.env.NODE_ENV === 'production',
 }

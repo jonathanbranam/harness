@@ -21,6 +21,35 @@ export interface UsageState {
   estimatedCost: number
 }
 
+export type SessionMode = 'live' | 'replay'
+
+export interface RecordingSummary {
+  id: string
+  name: string
+  createdAt: string
+  stoppedAt?: string
+  checkpointCount: number
+}
+
+export interface RecordingCheckpoint {
+  index: number
+  commitHash: string
+  createdAt: string
+}
+
+export interface RecordingHeader {
+  id: string
+  name: string
+  createdAt: string
+  stoppedAt?: string
+  checkpoints: RecordingCheckpoint[]
+}
+
+export interface ReplayPosition {
+  index: number
+  total: number
+}
+
 function summarize(value: unknown): string {
   if (value == null) return ''
   if (typeof value === 'string') return value.slice(0, 200)
@@ -48,6 +77,13 @@ export function useIntrospectSocket() {
     percent: null,
     estimatedCost: 0,
   })
+  const [mode, setMode] = useState<SessionMode>('live')
+  const [recording, setRecording] = useState(false)
+  const [recordingId, setRecordingId] = useState<string | undefined>(undefined)
+  const [recordings, setRecordings] = useState<RecordingSummary[]>([])
+  const [replayHeader, setReplayHeader] = useState<RecordingHeader | undefined>(undefined)
+  const [replayPosition, setReplayPosition] = useState<ReplayPosition | undefined>(undefined)
+  const [replayPlaying, setReplayPlaying] = useState(false)
 
   useEffect(() => {
     // The initial connection can briefly fail/retry (and in dev, React's
@@ -211,6 +247,50 @@ export function useIntrospectSocket() {
       return
     }
 
+    // Replay steps rebuild UI state from scratch each time (see
+    // replay-engine.ts's determinism rationale) — clear accumulated state
+    // before the replayed event prefix arrives.
+    if (type === 'replay_reset') {
+      setBlocks([])
+      setFoundation({ systemPrompt: '', skills: [], guides: [], sensors: [] })
+      setUsage({ tokens: null, contextWindow: 0, percent: null, estimatedCost: 0 })
+      streamingIdRef.current = null
+      return
+    }
+
+    if (type === 'mode') {
+      setMode(event.mode as SessionMode)
+      return
+    }
+
+    if (type === 'recording_status') {
+      setRecording(Boolean(event.recording))
+      setRecordingId(event.recordingId as string | undefined)
+      return
+    }
+
+    if (type === 'recordings_list') {
+      setRecordings((event.recordings as RecordingSummary[]) ?? [])
+      return
+    }
+
+    if (type === 'replay_loaded') {
+      setReplayHeader(event.header as RecordingHeader)
+      setMode('replay')
+      setReplayPlaying(false)
+      return
+    }
+
+    if (type === 'replay_position') {
+      setReplayPosition({ index: event.index as number, total: event.total as number })
+      return
+    }
+
+    if (type === 'replay_ended') {
+      setReplayPlaying(false)
+      return
+    }
+
     if (type === 'error') {
       const message = (event.message as string) || 'Unknown server error'
       setBlocks((b) => [{ id: genId(), role: 'system', text: `Server error: ${message}` }, ...b])
@@ -222,5 +302,71 @@ export function useIntrospectSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'prompt', text }))
   }, [])
 
-  return { connected, blocks, foundation, usage, sendPrompt }
+  const startRecording = useCallback((name?: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'start_recording', name }))
+  }, [])
+
+  const stopRecording = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'stop_recording' }))
+  }, [])
+
+  const refreshRecordings = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'list_recordings' }))
+  }, [])
+
+  const loadRecording = useCallback((id: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'replay_load', recordingId: id }))
+  }, [])
+
+  const replayStepForward = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'replay_step', direction: 'forward' }))
+  }, [])
+
+  const replayStepBackward = useCallback(() => {
+    wsRef.current?.send(JSON.stringify({ type: 'replay_step', direction: 'backward' }))
+  }, [])
+
+  const replayJumpToCheckpoint = useCallback((checkpointIndex: number) => {
+    wsRef.current?.send(JSON.stringify({ type: 'replay_jump', checkpointIndex }))
+  }, [])
+
+  const replayPlay = useCallback(() => {
+    setReplayPlaying(true)
+    wsRef.current?.send(JSON.stringify({ type: 'replay_play' }))
+  }, [])
+
+  const replayPause = useCallback(() => {
+    setReplayPlaying(false)
+    wsRef.current?.send(JSON.stringify({ type: 'replay_pause' }))
+  }, [])
+
+  const exitReplay = useCallback(() => {
+    setReplayPlaying(false)
+    wsRef.current?.send(JSON.stringify({ type: 'replay_exit' }))
+  }, [])
+
+  return {
+    connected,
+    blocks,
+    foundation,
+    usage,
+    sendPrompt,
+    mode,
+    recording,
+    recordingId,
+    recordings,
+    startRecording,
+    stopRecording,
+    refreshRecordings,
+    replayHeader,
+    replayPosition,
+    replayPlaying,
+    loadRecording,
+    replayStepForward,
+    replayStepBackward,
+    replayJumpToCheckpoint,
+    replayPlay,
+    replayPause,
+    exitReplay,
+  }
 }

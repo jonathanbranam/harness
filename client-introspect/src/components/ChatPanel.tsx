@@ -17,15 +17,18 @@ export function ChatPanel({
   blocks,
   connected,
   onSend,
+  disabled,
 }: {
   blocks: ContextBlock[]
   connected: boolean
   onSend: (text: string) => void
+  disabled?: boolean
 }) {
   const [draft, setDraft] = useState('')
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
+    if (disabled) return
     const text = draft.trim()
     if (!text) return
     onSend(text)
@@ -66,10 +69,15 @@ export function ChatPanel({
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Ask pi to explore the workspace…"
-          className="flex-1 rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+          disabled={disabled}
+          placeholder={disabled ? 'Replaying — exit replay to chat' : 'Ask pi to explore the workspace…'}
+          className="flex-1 rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
         />
-        <button type="submit" disabled={!draft.trim()} className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 text-sm font-medium">
+        <button
+          type="submit"
+          disabled={disabled || !draft.trim()}
+          className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 text-sm font-medium"
+        >
           Send
         </button>
       </form>
