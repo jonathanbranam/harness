@@ -290,6 +290,10 @@ export function useDeckSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'delete_deck', deckId }))
   }, [])
 
+  const renameDeck = useCallback((deckId: string, name: string) => {
+    wsRef.current?.send(JSON.stringify({ type: 'rename_deck', deckId, name }))
+  }, [])
+
   const addSlide = useCallback(() => {
     wsRef.current?.send(JSON.stringify({ type: 'add_slide' }))
   }, [])
@@ -315,6 +319,7 @@ export function useDeckSocket() {
     selectDeck,
     createDeck,
     deleteDeck,
+    renameDeck,
     addSlide,
     removeSlide,
     selectSlide,

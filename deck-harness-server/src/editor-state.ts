@@ -344,6 +344,16 @@ export class EditorStore {
     return { ok: true }
   }
 
+  renameDeck(deckId: string, name: string): OpResult {
+    const deck = this.decks.get(deckId)
+    if (!deck) return { ok: false, error: `No deck with id "${deckId}"` }
+    const trimmed = name.trim()
+    if (!trimmed) return { ok: false, error: 'Deck name cannot be empty' }
+    deck.name = trimmed
+    this.emit()
+    return { ok: true }
+  }
+
   deleteDeck(deckId: string): OpResult {
     if (!this.decks.has(deckId)) return { ok: false, error: `No deck with id "${deckId}"` }
     if (this.decks.size === 1) return { ok: false, error: 'Cannot delete the only remaining deck' }

@@ -23,6 +23,7 @@ export function DeckPage() {
     selectDeck,
     createDeck,
     deleteDeck,
+    renameDeck,
     addSlide,
     removeSlide,
     selectSlide,
@@ -66,7 +67,14 @@ export function DeckPage() {
         </div>
       </header>
 
-      <DeckSwitcher decks={deckState.decks} activeDeckId={deckState.activeDeckId} onSelect={selectDeck} onCreate={createDeck} onDelete={deleteDeck} />
+      <DeckSwitcher
+        decks={deckState.decks}
+        activeDeckId={deckState.activeDeckId}
+        onSelect={selectDeck}
+        onCreate={createDeck}
+        onDelete={deleteDeck}
+        onRename={renameDeck}
+      />
       <SlideSwitcher slides={deckState.slides} activeSlideId={deckState.activeSlideId} onSelect={selectSlide} onAdd={addSlide} onRemove={removeSlide} />
 
       <div className="flex-1 grid grid-cols-[1fr_380px] min-h-0">

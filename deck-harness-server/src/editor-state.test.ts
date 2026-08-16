@@ -85,6 +85,34 @@ describe('editorStore deck management', () => {
     expect(result.ok).toBe(true)
     expect(editorStore.getState().activeDeckId).not.toBe(deckId)
   })
+
+  it('renameDeck renames the active deck', () => {
+    const { deckId } = editorStore.createDeck('Old Name')
+    const result = editorStore.renameDeck(deckId, 'New Name')
+    expect(result.ok).toBe(true)
+    expect(editorStore.listDecks().find((d) => d.id === deckId)?.name).toBe('New Name')
+  })
+
+  it('renameDeck renames a deck that is not active without changing the active deck', () => {
+    const { deckId: targetDeck } = editorStore.createDeck('Target Deck')
+    const { deckId: activeDeck } = editorStore.createDeck('Active Deck')
+    const result = editorStore.renameDeck(targetDeck, 'Renamed Target')
+    expect(result.ok).toBe(true)
+    expect(editorStore.listDecks().find((d) => d.id === targetDeck)?.name).toBe('Renamed Target')
+    expect(editorStore.getState().activeDeckId).toBe(activeDeck)
+  })
+
+  it('renameDeck rejects an empty or whitespace-only name, leaving the name unchanged', () => {
+    const { deckId } = editorStore.createDeck('Keep Me')
+    const result = editorStore.renameDeck(deckId, '   ')
+    expect(result.ok).toBe(false)
+    expect(editorStore.listDecks().find((d) => d.id === deckId)?.name).toBe('Keep Me')
+  })
+
+  it('renameDeck rejects an unknown deck id', () => {
+    const result = editorStore.renameDeck('does-not-exist', 'New Name')
+    expect(result.ok).toBe(false)
+  })
 })
 
 describe('editorStore slide management', () => {

@@ -74,6 +74,26 @@ export function deckManagement(pi: ExtensionAPI) {
   })
 
   pi.registerTool({
+    name: 'deck_rename',
+    label: 'Rename Deck',
+    description:
+      "Rename a deck by id, independent of whether it's the active deck. Leading/trailing whitespace is trimmed; rejected if the trimmed name is empty.",
+    promptSnippet: 'Rename a deck',
+    parameters: Type.Object({
+      deckId: Type.String(),
+      name: Type.String({ description: 'New display name for the deck.' }),
+    }),
+    execute: async (_id, params) => {
+      const result = editorStore.renameDeck(params.deckId, params.name)
+      return {
+        content: [{ type: 'text' as const, text: result.ok ? 'OK' : `Error: ${result.error}` }],
+        details: result,
+        isError: !result.ok,
+      }
+    },
+  })
+
+  pi.registerTool({
     name: 'slide_add',
     label: 'Add Slide',
     description: 'Append a new, blank (no objects) slide to the active deck, and make it the active slide.',

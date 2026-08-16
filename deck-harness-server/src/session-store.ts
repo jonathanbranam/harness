@@ -35,6 +35,7 @@ const CUSTOM_TOOL_NAMES = [
   'deck_list',
   'deck_select',
   'deck_delete',
+  'deck_rename',
   'slide_add',
   'slide_remove',
   'slide_select',

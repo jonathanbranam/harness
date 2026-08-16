@@ -28,6 +28,7 @@ type ClientMessage =
   | { type: 'select_deck'; deckId: string }
   | { type: 'create_deck'; name: string }
   | { type: 'delete_deck'; deckId: string }
+  | { type: 'rename_deck'; deckId: string; name: string }
   | { type: 'add_slide' }
   | { type: 'remove_slide'; slideId: string }
   | { type: 'select_slide'; slideId: string }
@@ -166,6 +167,12 @@ export function createDeckSocketHandlers(c: Context): WSEvents {
 
         case 'delete_deck': {
           const result = editorStore.deleteDeck(msg.deckId)
+          if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
+          return
+        }
+
+        case 'rename_deck': {
+          const result = editorStore.renameDeck(msg.deckId, msg.name)
           if (!result.ok) safeSend(socket, { type: 'error', message: result.error! })
           return
         }
