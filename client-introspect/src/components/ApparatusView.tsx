@@ -1,4 +1,5 @@
 import type { ContextBlock, FoundationState, UsageState } from '../hooks/useIntrospectSocket'
+import { MarkdownMessage } from './MarkdownMessage'
 
 function Gauge({ percent }: { percent: number | null }) {
   const value = percent ?? 0
@@ -31,8 +32,16 @@ function Block({ block, muted }: { block: ContextBlock; muted: boolean }) {
   }
 
   return (
-    <div className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap border ${muted ? 'bg-gray-900/50 border-gray-800 text-gray-500' : 'bg-gray-800 border-gray-700 text-gray-100'}`}>
-      {block.text}
+    <div
+      className={`rounded-lg px-3 py-2 text-sm border ${block.role !== 'assistant' ? 'whitespace-pre-wrap' : ''} ${muted ? 'bg-gray-900/50 border-gray-800 text-gray-500' : 'bg-gray-800 border-gray-700 text-gray-100'}`}
+    >
+      {block.role === 'assistant' ? (
+        <div className={muted ? 'opacity-50' : ''}>
+          <MarkdownMessage text={block.text} />
+        </div>
+      ) : (
+        block.text
+      )}
       {block.role === 'assistant' && block.streaming && <span className="animate-pulse">▍</span>}
     </div>
   )
@@ -47,7 +56,8 @@ export function ApparatusView({
   foundation: FoundationState
   usage: UsageState
 }) {
-  const total = blocks.length
+  const visibleBlocks = blocks.filter((block) => block.role === 'tool' || block.text.trim() !== '')
+  const total = visibleBlocks.length
   const lower = Math.floor(total * 0.3)
   const upper = Math.floor(total * 0.7)
 
@@ -65,7 +75,7 @@ export function ApparatusView({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
-        {blocks.map((block, index) => {
+        {visibleBlocks.map((block, index) => {
           const muted = total > 6 && index >= lower && index <= upper
           return <Block key={block.id} block={block} muted={muted} />
         })}

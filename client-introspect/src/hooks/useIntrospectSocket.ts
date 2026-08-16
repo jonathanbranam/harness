@@ -50,15 +50,50 @@ export function useIntrospectSocket() {
   })
 
   useEffect(() => {
+    // The initial connection can briefly fail/retry (and in dev, React's
+    // StrictMode double-mount opens then immediately closes a throwaway
+    // socket, which fires a spurious error/close on that first socket).
+    // Guard every handler against stale sockets via `wsRef.current !== ws`,
+    // and give the connection a few seconds of grace before surfacing an
+    // error, so a quick reconnect never shows a permanent false-positive
+    // banner.
+    let active = true
+    let errorTimer: ReturnType<typeof setTimeout> | null = null
+
+    const clearErrorTimer = () => {
+      if (errorTimer) {
+        clearTimeout(errorTimer)
+        errorTimer = null
+      }
+    }
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${location.host}/ws`)
     wsRef.current = ws
 
-    ws.onopen = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
+    const scheduleErrorReport = () => {
+      if (!active || wsRef.current !== ws || errorTimer) return
+      errorTimer = setTimeout(() => {
+        errorTimer = null
+        if (!active || wsRef.current !== ws) return
+        setBlocks((b) => [{ id: genId(), role: 'system', text: 'WebSocket connection error.' }, ...b])
+      }, 3000)
+    }
+
+    ws.onopen = () => {
+      if (!active || wsRef.current !== ws) return
+      setConnected(true)
+      clearErrorTimer()
+    }
+    ws.onclose = () => {
+      if (!active || wsRef.current !== ws) return
+      setConnected(false)
+      scheduleErrorReport()
+    }
     ws.onerror = (err) => {
+      if (!active || wsRef.current !== ws) return
       console.error('WebSocket error', err)
-      setBlocks((b) => [{ id: genId(), role: 'system', text: 'WebSocket connection error.' }, ...b])
+      scheduleErrorReport()
     }
 
     ws.onmessage = (evt) => {
@@ -72,7 +107,11 @@ export function useIntrospectSocket() {
       handleEvent(msg)
     }
 
-    return () => ws.close()
+    return () => {
+      active = false
+      clearErrorTimer()
+      ws.close()
+    }
   }, [])
 
   const handleEvent = (event: Record<string, unknown>) => {
@@ -81,9 +120,7 @@ export function useIntrospectSocket() {
     if (type === 'message_start') {
       const message = event.message as { id?: string; role?: string } | undefined
       if (message?.role === 'assistant') {
-        const id = message.id ?? genId()
-        streamingIdRef.current = id
-        setBlocks((b) => [{ id, role: 'assistant', text: '', streaming: true }, ...b])
+        streamingIdRef.current = message.id ?? genId()
       }
       return
     }
@@ -93,7 +130,18 @@ export function useIntrospectSocket() {
       if (assistantEvent?.type === 'text_delta' && streamingIdRef.current) {
         const id = streamingIdRef.current
         const delta = assistantEvent.delta ?? ''
-        setBlocks((b) => b.map((block) => (block.id === id ? { ...block, text: block.text + delta } : block)))
+        setBlocks((b) => {
+          const existing = b.find((block) => block.id === id)
+          if (existing) {
+            return b.map((block) => (block.id === id ? { ...block, text: block.text + delta } : block))
+          }
+          // Some assistant turns emit whitespace-only text chunks (e.g. a
+          // bare newline) between tool calls with no other text — skip
+          // creating a block until a chunk has actual content, so those
+          // don't show up as empty/blank bubbles.
+          if (delta.trim() === '') return b
+          return [{ id, role: 'assistant', text: delta, streaming: true }, ...b]
+        })
       }
       return
     }

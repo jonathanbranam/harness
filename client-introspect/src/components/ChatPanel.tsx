@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import type { ContextBlock } from '../hooks/useIntrospectSocket'
+import { MarkdownMessage } from './MarkdownMessage'
 
 function ToolBadge({ block }: { block: Extract<ContextBlock, { role: 'tool' }> }) {
   const color = block.status === 'running' ? 'text-amber-400' : block.status === 'error' ? 'text-red-400' : 'text-emerald-400'
@@ -33,7 +34,7 @@ export function ChatPanel({
 
   // Chat pane shows messages in chronological order (oldest at top), so reverse
   // the context-window array for display here.
-  const chatBlocks = [...blocks].reverse()
+  const chatBlocks = [...blocks].reverse().filter((block) => block.role === 'tool' || block.text.trim() !== '')
 
   return (
     <div className="flex flex-col h-full bg-gray-900 text-white">
@@ -49,11 +50,11 @@ export function ChatPanel({
           ) : (
             <div key={block.id} className={`flex ${block.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                  block.role === 'user' ? 'bg-indigo-600' : 'bg-gray-800'
-                }`}
+                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                  block.role === 'user' ? 'bg-indigo-600 whitespace-pre-wrap' : 'bg-gray-800'
+                } ${block.role === 'system' ? 'whitespace-pre-wrap' : ''}`}
               >
-                {block.text}
+                {block.role === 'assistant' ? <MarkdownMessage text={block.text} /> : block.text}
                 {block.role === 'assistant' && block.streaming && <span className="animate-pulse">▍</span>}
               </div>
             </div>

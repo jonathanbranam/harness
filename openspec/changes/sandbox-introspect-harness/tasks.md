@@ -24,3 +24,14 @@
 - [x] 5.1 `npm run typecheck`
 - [x] 5.2 `npm test`
 - [x] 5.3 Run `npm run dev:introspect` and manually confirm: a prompt that tries to read/write/`bash` a path outside `INTROSPECT_WORKSPACE_DIR` is blocked with a clear reason, and normal in-workspace tool use still works.
+
+## 6. Expanded jail coverage (gap found in manual testing)
+
+- [x] 6.1 Add `ls`, `find`, `grep` to the jailed-tool set in `permission-gate.ts` (same `path` field as `read`/`write`/`edit`; skip the check when `path` is omitted, since those tools default to the workspace root).
+- [x] 6.2 Add `realpath`-based symlink-escape detection: canonicalize both the jail and the resolved candidate path (walking up to the nearest existing ancestor for not-yet-existing targets) and block if the canonical candidate falls outside the canonical jail. Apply to both the path-jailed tools and, as defense-in-depth, `bash` path tokens.
+- [x] 6.3 Extend `checkBashConfinement` to block `~`/`~user` (shell home-directory expansion).
+- [x] 6.4 Hook `before_agent_start` in `permission-gate.ts` to append a system-prompt notice naming the workspace directory and instructing the agent not to access anything outside it.
+- [x] 6.5 Add `checkLinkCreation()`: block any `bash` command invoking `ln` (any flags), or `cp` with a symlink-creating flag (`-s`/`--symbolic-link`), as a static-policy block (same tier as `DANGEROUS_BASH`, checked pre-execution so a compound create-and-read command is rejected as a whole).
+- [x] 6.6 Update `permission-gate.test.ts`: in/out-of-workspace `ls`/`find`/`grep`; a real symlink (created in a temp dir) pointing outside the jail blocked for both a path-jailed tool and a `bash` `cd`; `~` bash escape blocked; `ln`/`cp -s` blocked (including a compound create-and-read command); system-prompt notice includes the workspace path.
+- [x] 6.7 `npm run typecheck` && `npm test`.
+- [x] 6.8 Manually re-verify against the real server: `ls ../../`, `find`/`grep` with an out-of-workspace `path`, a `bash` command referencing `~`, and `ln -s /etc /workspace/x && cat /workspace/x/passwd` are all blocked; in-workspace `ls`/`find`/`grep` still work.

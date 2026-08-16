@@ -11,7 +11,7 @@
 ## Capabilities
 
 ### New Capabilities
-- `introspect/tool-permission-gate`: path jail for `read`/`write`/`edit`/`bash` in `introspect-harness-server`, blocking any resolved path or working directory outside the session's workspace root.
+- `introspect/tool-permission-gate`: path jail for `read`/`write`/`edit`/`ls`/`find`/`grep`/`bash` in `introspect-harness-server`, blocking any resolved path or working directory outside the session's workspace root — including through a symlink, or via `bash` home-directory (`~`) expansion — and stating that boundary explicitly in the agent's system prompt.
 
 ### Modified Capabilities
 - `introspect/agent-session`: session creation persists to disk (`.jsonl`) instead of `SessionManager.inMemory`, so a session's full tool-call history survives disposal/restart and can be inspected later.
