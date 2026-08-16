@@ -56,12 +56,17 @@ export function useIntrospectSocket() {
 
     ws.onopen = () => setConnected(true)
     ws.onclose = () => setConnected(false)
+    ws.onerror = (err) => {
+      console.error('WebSocket error', err)
+      setBlocks((b) => [{ id: genId(), role: 'system', text: 'WebSocket connection error.' }, ...b])
+    }
 
     ws.onmessage = (evt) => {
       let msg: Record<string, unknown>
       try {
         msg = JSON.parse(evt.data)
       } catch {
+        setBlocks((b) => [{ id: genId(), role: 'system', text: 'Received invalid JSON from server.' }, ...b])
         return
       }
       handleEvent(msg)
@@ -155,6 +160,12 @@ export function useIntrospectSocket() {
         setBlocks((b) => b.map((block) => (block.id === id ? { ...block, streaming: false } : block)))
         streamingIdRef.current = null
       }
+      return
+    }
+
+    if (type === 'error') {
+      const message = (event.message as string) || 'Unknown server error'
+      setBlocks((b) => [{ id: genId(), role: 'system', text: `Server error: ${message}` }, ...b])
     }
   }
 

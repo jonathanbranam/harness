@@ -30,6 +30,12 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
     if (ws) safeSend(ws, event as ServerMessage)
   }
 
+  function attachListener(hs: HarnessSession) {
+    if (unsubscribe) return
+    unsubscribe = () => hs.events.off('event', forwardEvent)
+    hs.events.on('event', forwardEvent)
+  }
+
   return {
     onOpen: async (_evt, socket) => {
       ws = socket
@@ -41,9 +47,9 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
 
       try {
         harnessSession = await getOrCreateSession(token)
-        unsubscribe = () => harnessSession?.events.off('event', forwardEvent)
-        harnessSession.events.on('event', forwardEvent)
+        attachListener(harnessSession)
       } catch (err) {
+        console.error('[ws] failed to create session', err)
         safeSend(socket, { type: 'error', message: err instanceof Error ? err.message : 'Failed to start agent session' })
       }
     },
@@ -60,8 +66,10 @@ export function createIntrospectSocketHandlers(c: Context): WSEvents {
         try {
           const hs = harnessSession ?? (await getOrCreateSession(token))
           harnessSession = hs
+          attachListener(hs)
           await hs.session.prompt(msg.text, hs.session.isStreaming ? { streamingBehavior: 'steer' } : undefined)
         } catch (err) {
+          console.error('[ws] prompt failed', err)
           safeSend(socket, { type: 'error', message: err instanceof Error ? err.message : 'Prompt failed' })
         }
       }
