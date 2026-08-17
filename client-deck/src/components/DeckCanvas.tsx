@@ -751,6 +751,10 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
       const originHeight = obj.height
       const rotation = obj.rotation
       let latest: Rect = { x: originX, y: originY, width: originWidth, height: originHeight }
+      // Anchor corner sign: the anchor sits on the side opposite the dragged
+      // corner on each axis (design.md's center-solve step 2).
+      const ax = corner.includes('w') ? 1 : -1
+      const ay = corner.includes('n') ? 1 : -1
 
       function onMove(ev: PointerEvent) {
         didDragRef.current = true
@@ -780,16 +784,24 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         if (ev.shiftKey) {
           ;({ width, height } = applyAspectRatioLock({ width, height }, { originWidth, originHeight, dx, dy, minSize: MIN_SIZE }))
         }
-        let x = originX
-        let y = originY
-        if (corner.includes('w')) x = originX + (originWidth - width)
-        if (corner.includes('n')) y = originY + (originHeight - height)
+        // Pin the anchor corner's on-screen position rather than its
+        // unrotated-local position: rotation pivots about the center, and
+        // the center moves whenever width/height change, so holding a local
+        // offset fixed doesn't hold the anchor's actual screen position
+        // fixed once rotated (design.md's center-solve; see proposal.md's
+        // worked example).
+        const c0x = originX + originWidth / 2
+        const c0y = originY + originHeight / 2
+        const [anchorScreenDx, anchorScreenDy] = rotateVector((ax * originWidth) / 2, (ay * originHeight) / 2, rotation)
+        const anchorScreenX = c0x + anchorScreenDx
+        const anchorScreenY = c0y + anchorScreenDy
+        const [anchorLocal1Dx, anchorLocal1Dy] = rotateVector((ax * width) / 2, (ay * height) / 2, rotation)
+        const c1x = anchorScreenX - anchorLocal1Dx
+        const c1y = anchorScreenY - anchorLocal1Dy
+        const x = c1x - width / 2
+        const y = c1y - height / 2
 
-        // The position shift above was computed in the object's local frame
-        // (since width/height/x/y were derived from the rotated-into-local
-        // dx/dy) — rotate that shift back into slide-frame before committing.
-        const [slideDx, slideDy] = rotateVector(x - originX, y - originY, rotation)
-        latest = clampRectToSlide({ x: originX + slideDx, y: originY + slideDy, width, height })
+        latest = clampRectToSlide({ x, y, width, height })
         setLiveRect(obj.id, latest)
       }
       function onUp() {
