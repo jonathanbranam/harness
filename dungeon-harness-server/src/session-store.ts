@@ -14,6 +14,7 @@ import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, S
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
 import { BoardStore } from './board-state'
+import { createBaselineBridgeExtension } from './pi-extensions/baseline-bridge'
 import { createBoardBridgeExtension } from './pi-extensions/board-bridge'
 import { createPermissionGateExtension, type RequestApproval } from './pi-extensions/permission-gate'
 import { createScenarioBridgeExtension } from './pi-extensions/scenario-bridge'
@@ -42,6 +43,10 @@ const CUSTOM_TOOL_NAMES = [
   'dungeon_read_feature',
   'dungeon_write_feature',
   'dungeon_write_implementation_notes',
+  'dungeon_load_baseline',
+  'dungeon_read_step_catalog',
+  'dungeon_get_changeset',
+  'dungeon_write_changeset',
 ] as const
 
 export interface SessionCallbacks {
@@ -91,7 +96,12 @@ async function getOrCreateSessionRecord(sessionId: string, callbacks: SessionCal
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir: getAgentDir(),
-    extensionFactories: [createPermissionGateExtension({ cwd, requestApproval }), createBoardBridgeExtension({ board }), createScenarioBridgeExtension({ cwd })],
+    extensionFactories: [
+      createPermissionGateExtension({ cwd, requestApproval }),
+      createBoardBridgeExtension({ board }),
+      createScenarioBridgeExtension({ cwd }),
+      createBaselineBridgeExtension({ cwd, trackWebFeaturesDir: env.DUNGEON_TRACKWEB_FEATURES_DIR }),
+    ],
   })
   await resourceLoader.reload()
 

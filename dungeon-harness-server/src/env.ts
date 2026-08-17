@@ -15,6 +15,7 @@ export const env = {
   HARNESS_PASSWORD_HASH: requireEnv('HARNESS_PASSWORD_HASH'),
   PORT: parseInt(process.env.PORT ?? '4300', 10),
   DUNGEON_WORKSPACE_DIR: process.env.DUNGEON_WORKSPACE_DIR ?? join(import.meta.dirname, '..', 'data', 'workspace'),
+  DUNGEON_TRACKWEB_FEATURES_DIR: process.env.DUNGEON_TRACKWEB_FEATURES_DIR,
   COOKIE_SECURE: process.env.COOKIE_SECURE === 'true',
   isProd: process.env.NODE_ENV === 'production',
 }
