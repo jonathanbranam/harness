@@ -2,153 +2,171 @@ import { describe, expect, it } from 'vitest'
 import { BOARD_HEIGHT, BOARD_WIDTH, BoardStore } from './board-state'
 
 describe('BoardStore', () => {
-  it('starts as an empty grid with plains terrain and no units', () => {
+  it('starts as an empty grid with default fill color and no objects', () => {
     const board = new BoardStore()
     const state = board.getState()
     expect(state.width).toBe(BOARD_WIDTH)
     expect(state.height).toBe(BOARD_HEIGHT)
-    expect(state.units).toEqual([])
-    expect(state.cells.every((row) => row.every((cell) => cell.terrain === 'plains'))).toBe(true)
+    expect(state.objects).toEqual([])
+    const defaultColor = state.cells[0][0].fillColor
+    expect(state.cells.every((row) => row.every((cell) => cell.fillColor === defaultColor))).toBe(true)
   })
 
-  it('placeUnit adds a unit with derived stats and a unique id', () => {
+  it('setCellFill updates the target cell and getState reflects it', () => {
     const board = new BoardStore()
-    const result = board.placeUnit('ranger', 'pc', { col: 2, row: 3 })
+    const result = board.setCellFill({ col: 1, row: 1 }, '#ff0000')
     expect(result.ok).toBe(true)
-    expect(result.unitId).toBeTruthy()
+    expect(board.getState().cells[1][1].fillColor).toBe('#ff0000')
+  })
+
+  it('setCellFill rejects an out-of-bounds cell', () => {
+    const board = new BoardStore()
+    const result = board.setCellFill({ col: -1, row: 0 }, '#ff0000')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/out of bounds/)
+  })
+
+  it('drawShape adds a circle with a unique id', () => {
+    const board = new BoardStore()
+    const result = board.drawShape({ shapeType: 'circle', position: { x: 2.5, y: 3.5 }, radius: 0.4, color: 'blue', label: 'SR' })
+    expect(result.ok).toBe(true)
+    expect(result.id).toBeTruthy()
     const state = board.getState()
-    expect(state.units).toHaveLength(1)
-    expect(state.units[0]).toMatchObject({ archetype: 'ranger', faction: 'pc', position: { col: 2, row: 3 } })
-    expect(state.units[0].unitDef.movement.range).toBe(3)
+    expect(state.objects).toHaveLength(1)
+    expect(state.objects[0]).toMatchObject({ kind: 'shape', shapeType: 'circle', color: 'blue', label: 'SR' })
   })
 
-  it('placeUnit rejects an occupied cell', () => {
+  it('drawShape adds a rectangle without a label', () => {
     const board = new BoardStore()
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = board.placeUnit('rogue', 'pc', { col: 0, row: 0 })
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/occupied/)
-    expect(board.getState().units).toHaveLength(1)
-  })
-
-  it('placeUnit rejects an out-of-bounds cell', () => {
-    const board = new BoardStore()
-    const result = board.placeUnit('melee', 'pc', { col: BOARD_WIDTH, row: 0 })
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/out of bounds/)
-  })
-
-  it('placeUnit rejects an unknown archetype and lists valid ones', () => {
-    const board = new BoardStore()
-    const result = board.placeUnit('wizard', 'pc', { col: 0, row: 0 })
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/melee/)
-    expect(board.getState().units).toHaveLength(0)
-  })
-
-  it('setTerrain updates the target cell and getState reflects it', () => {
-    const board = new BoardStore()
-    const result = board.setTerrain({ col: 1, row: 1 }, 'water')
+    const result = board.drawShape({ shapeType: 'rectangle', position: { x: 1, y: 1 }, width: 2, height: 1, color: 'green' })
     expect(result.ok).toBe(true)
-    expect(board.getState().cells[1][1].terrain).toBe('water')
+    const state = board.getState()
+    expect(state.objects[0]).toMatchObject({ kind: 'shape', shapeType: 'rectangle', width: 2, height: 1, color: 'green' })
+    expect((state.objects[0] as { label?: string }).label).toBeUndefined()
   })
 
-  it('setTerrain rejects an out-of-bounds cell', () => {
+  it('drawLine adds a line connecting two or more points', () => {
     const board = new BoardStore()
-    const result = board.setTerrain({ col: -1, row: 0 }, 'water')
+    const result = board.drawLine([{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 2, y: 0 }], 'green', 'dashed')
+    expect(result.ok).toBe(true)
+    const state = board.getState()
+    expect(state.objects[0]).toMatchObject({ kind: 'line', color: 'green', style: 'dashed' })
+    expect((state.objects[0] as { points: unknown[] }).points).toHaveLength(3)
+  })
+
+  it('drawLine rejects fewer than two points', () => {
+    const board = new BoardStore()
+    const result = board.drawLine([{ x: 0, y: 0 }], 'green', 'solid')
+    expect(result.ok).toBe(false)
+    expect(board.getState().objects).toEqual([])
+  })
+
+  it('drawOverlay adds an overlay covering the given cells', () => {
+    const board = new BoardStore()
+    const result = board.drawOverlay([{ col: 0, row: 0 }, { col: 1, row: 0 }], 'red')
+    expect(result.ok).toBe(true)
+    const state = board.getState()
+    expect(state.objects[0]).toMatchObject({ kind: 'overlay', color: 'red' })
+    expect((state.objects[0] as { cells: unknown[] }).cells).toHaveLength(2)
+  })
+
+  it('drawOverlay rejects an out-of-bounds cell', () => {
+    const board = new BoardStore()
+    const result = board.drawOverlay([{ col: 0, row: 0 }, { col: BOARD_WIDTH, row: 0 }], 'red')
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/out of bounds/)
+    expect(board.getState().objects).toEqual([])
+  })
+
+  it('drawLabel adds a standalone text label', () => {
+    const board = new BoardStore()
+    const result = board.drawLabel({ x: 4, y: 4 }, 'Threat zone', 'orange')
+    expect(result.ok).toBe(true)
+    const state = board.getState()
+    expect(state.objects[0]).toMatchObject({ kind: 'label', text: 'Threat zone', color: 'orange' })
+  })
+
+  it('moveObject updates a shape\'s position, leaving color/label unchanged', () => {
+    const board = new BoardStore()
+    const { id } = board.drawShape({ shapeType: 'circle', position: { x: 0, y: 0 }, radius: 0.5, color: 'blue', label: 'SR' })
+    const result = board.moveObject(id!, { kind: 'shape', position: { x: 3, y: 3 } })
+    expect(result.ok).toBe(true)
+    const object = board.getState().objects[0] as { position: { x: number; y: number }; color: string; label?: string }
+    expect(object.position).toEqual({ x: 3, y: 3 })
+    expect(object.color).toBe('blue')
+    expect(object.label).toBe('SR')
+  })
+
+  it('moveObject rejects an unknown object id', () => {
+    const board = new BoardStore()
+    const result = board.moveObject('does-not-exist', { kind: 'shape', position: { x: 0, y: 0 } })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/No drawn object/)
+  })
+
+  it('moveObject rejects a geometry kind mismatched with the object\'s actual kind', () => {
+    const board = new BoardStore()
+    const { id } = board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    const result = board.moveObject(id!, { kind: 'line', points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/label/)
+  })
+
+  it('removeObject removes a drawn object of any kind', () => {
+    const board = new BoardStore()
+    const { id } = board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    const result = board.removeObject(id!)
+    expect(result.ok).toBe(true)
+    expect(board.getState().objects).toEqual([])
+  })
+
+  it('removeObject rejects an unknown object id', () => {
+    const board = new BoardStore()
+    board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    const result = board.removeObject('does-not-exist')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/No drawn object/)
+    expect(board.getState().objects).toHaveLength(1)
   })
 
   it('getState reflects prior mutations across calls', () => {
     const board = new BoardStore()
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    board.setTerrain({ col: 5, row: 5 }, 'forest')
+    board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    board.setCellFill({ col: 5, row: 5 }, '#00ff00')
     const state = board.getState()
-    expect(state.units).toHaveLength(1)
-    expect(state.cells[5][5].terrain).toBe('forest')
+    expect(state.objects).toHaveLength(1)
+    expect(state.cells[5][5].fillColor).toBe('#00ff00')
   })
 
-  it('subscribe is notified on placeUnit and setTerrain', () => {
+  it('subscribe is notified on draw and cell-fill mutations', () => {
     const board = new BoardStore()
     const seen: number[] = []
-    const unsubscribe = board.subscribe((state) => seen.push(state.units.length))
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    board.setTerrain({ col: 1, row: 1 }, 'forest')
+    const unsubscribe = board.subscribe((state) => seen.push(state.objects.length))
+    board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    board.setCellFill({ col: 1, row: 1 }, '#00ff00')
     expect(seen).toEqual([1, 1])
     unsubscribe()
-    board.placeUnit('rogue', 'pc', { col: 2, row: 2 })
+    board.drawLabel({ x: 1, y: 1 }, 'label2', 'red')
     expect(seen).toEqual([1, 1])
   })
 
-  it('removeUnit removes a placed unit', () => {
+  it('clearBoard removes all objects and resets fill colors to default', () => {
     const board = new BoardStore()
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = board.removeUnit(unitId!)
-    expect(result.ok).toBe(true)
-    expect(board.getState().units).toHaveLength(0)
-  })
-
-  it('removeUnit rejects an unknown unit id', () => {
-    const board = new BoardStore()
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = board.removeUnit('does-not-exist')
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/No unit/)
-    expect(board.getState().units).toHaveLength(1)
-  })
-
-  it('moveUnit updates a unit\'s position within range', () => {
-    const board = new BoardStore()
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = board.moveUnit(unitId!, { col: 2, row: 0 })
-    expect(result.ok).toBe(true)
-    expect(board.getState().units[0].position).toEqual({ col: 2, row: 0 })
-  })
-
-  it('moveUnit rejects a destination beyond movement range', () => {
-    const board = new BoardStore()
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = board.moveUnit(unitId!, { col: 10, row: 0 })
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/out of range/)
-    expect(board.getState().units[0].position).toEqual({ col: 0, row: 0 })
-  })
-
-  it('moveUnit rejects a destination blocked by other units', () => {
-    const board = new BoardStore()
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    board.placeUnit('rogue', 'npc', { col: 1, row: 0 })
-    board.placeUnit('rogue', 'npc', { col: 0, row: 1 })
-    const result = board.moveUnit(unitId!, { col: 1, row: 1 })
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/unreachable/)
-    expect(board.getState().units[0].position).toEqual({ col: 0, row: 0 })
-  })
-
-  it('moveUnit rejects an unknown unit id', () => {
-    const board = new BoardStore()
-    const result = board.moveUnit('does-not-exist', { col: 1, row: 1 })
-    expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/No unit/)
-  })
-
-  it('clearBoard removes all units and resets terrain to plains', () => {
-    const board = new BoardStore()
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    board.placeUnit('rogue', 'npc', { col: 1, row: 1 })
-    board.setTerrain({ col: 5, row: 5 }, 'forest')
+    board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    board.drawShape({ shapeType: 'circle', position: { x: 1, y: 1 }, radius: 0.5, color: 'blue' })
+    board.setCellFill({ col: 5, row: 5 }, '#00ff00')
+    const defaultColor = new BoardStore().getState().cells[0][0].fillColor
     const result = board.clearBoard()
     expect(result.ok).toBe(true)
     const state = board.getState()
-    expect(state.units).toEqual([])
-    expect(state.cells.every((row) => row.every((cell) => cell.terrain === 'plains'))).toBe(true)
+    expect(state.objects).toEqual([])
+    expect(state.cells.every((row) => row.every((cell) => cell.fillColor === defaultColor))).toBe(true)
   })
 
   it('clearBoard succeeds on an already-empty board', () => {
     const board = new BoardStore()
     const result = board.clearBoard()
     expect(result.ok).toBe(true)
-    expect(board.getState().units).toEqual([])
+    expect(board.getState().objects).toEqual([])
   })
 })

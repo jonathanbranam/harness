@@ -20,143 +20,121 @@ describe('board-bridge tools', () => {
   it('dungeon_get_board_state reflects prior mutations', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
     const result = await tools.get('dungeon_get_board_state')!('1', {})
-    expect((result.details as { units: unknown[] }).units).toHaveLength(1)
+    expect((result.details as { objects: unknown[] }).objects).toHaveLength(1)
   })
 
-  it('dungeon_place_unit succeeds for a known archetype and in-bounds/unoccupied cell', async () => {
+  it('dungeon_set_cell_fill succeeds for an in-bounds cell', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const result = await tools.get('dungeon_place_unit')!('1', { archetype: 'ranger', faction: 'pc', col: 2, row: 2 })
+    const result = await tools.get('dungeon_set_cell_fill')!('1', { col: 3, row: 3, color: '#ff0000' })
     expect(result.isError).toBeFalsy()
-    expect((result.details as { unitId: string }).unitId).toBeTruthy()
+    expect(board.getState().cells[3][3].fillColor).toBe('#ff0000')
   })
 
-  it('dungeon_place_unit errors on an occupied cell', async () => {
+  it('dungeon_set_cell_fill errors on an out-of-bounds cell', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = await tools.get('dungeon_place_unit')!('1', { archetype: 'rogue', faction: 'pc', col: 0, row: 0 })
-    expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/occupied/)
-  })
-
-  it('dungeon_place_unit errors on an unknown archetype', async () => {
-    const board = new BoardStore()
-    const tools = registerTools(board)
-    const result = await tools.get('dungeon_place_unit')!('1', { archetype: 'wizard', faction: 'pc', col: 0, row: 0 })
-    expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/Unknown archetype/)
-  })
-
-  it('dungeon_set_terrain succeeds for an in-bounds cell', async () => {
-    const board = new BoardStore()
-    const tools = registerTools(board)
-    const result = await tools.get('dungeon_set_terrain')!('1', { col: 3, row: 3, terrain: 'water' })
-    expect(result.isError).toBeFalsy()
-    expect(board.getState().cells[3][3].terrain).toBe('water')
-  })
-
-  it('dungeon_set_terrain errors on an out-of-bounds cell', async () => {
-    const board = new BoardStore()
-    const tools = registerTools(board)
-    const result = await tools.get('dungeon_set_terrain')!('1', { col: 99, row: 0, terrain: 'water' })
+    const result = await tools.get('dungeon_set_cell_fill')!('1', { col: 99, row: 0, color: '#ff0000' })
     expect(result.isError).toBe(true)
     expect((result.details as { error: string }).error).toMatch(/out of bounds/)
   })
 
-  it('dungeon_preview_movement returns a path for a reachable destination', async () => {
+  it('dungeon_draw_shape adds a labeled circle', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = await tools.get('dungeon_preview_movement')!('1', { unitId, col: 2, row: 0 })
+    const result = await tools.get('dungeon_draw_shape')!('1', {
+      shapeType: 'circle',
+      position: { x: 2.5, y: 3.5 },
+      radius: 0.4,
+      color: 'blue',
+      label: 'SR',
+    })
     expect(result.isError).toBeFalsy()
-    expect((result.details as { path: unknown[] }).path).toHaveLength(3)
+    expect((result.details as { id: string }).id).toBeTruthy()
+    expect(board.getState().objects[0]).toMatchObject({ kind: 'shape', shapeType: 'circle', label: 'SR' })
   })
 
-  it('dungeon_preview_movement errors for an out-of-range destination', async () => {
+  it('dungeon_draw_line adds a dashed line and errors with fewer than two points', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = await tools.get('dungeon_preview_movement')!('1', { unitId, col: 10, row: 0 })
-    expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/out of range/)
+    const ok = await tools.get('dungeon_draw_line')!('1', {
+      points: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+      color: 'green',
+      style: 'dashed',
+    })
+    expect(ok.isError).toBeFalsy()
+    expect(board.getState().objects[0]).toMatchObject({ kind: 'line', style: 'dashed' })
+
+    const err = await tools.get('dungeon_draw_line')!('1', { points: [{ x: 0, y: 0 }], color: 'green', style: 'solid' })
+    expect(err.isError).toBe(true)
   })
 
-  it('dungeon_preview_movement errors for an unknown unit id', async () => {
+  it('dungeon_draw_overlay adds a colored overlay and errors on out-of-bounds cells', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const result = await tools.get('dungeon_preview_movement')!('1', { unitId: 'does-not-exist', col: 1, row: 1 })
-    expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/No unit/)
+    const ok = await tools.get('dungeon_draw_overlay')!('1', { cells: [{ col: 0, row: 0 }, { col: 1, row: 0 }], color: 'red' })
+    expect(ok.isError).toBeFalsy()
+    expect(board.getState().objects[0]).toMatchObject({ kind: 'overlay', color: 'red' })
+
+    const err = await tools.get('dungeon_draw_overlay')!('1', { cells: [{ col: 999, row: 0 }], color: 'red' })
+    expect(err.isError).toBe(true)
+    expect((err.details as { error: string }).error).toMatch(/out of bounds/)
   })
 
-  it('dungeon_preview_attack returns footprint and hits for a known unit', async () => {
+  it('dungeon_draw_label adds a standalone text label', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    board.placeUnit('rogue', 'npc', { col: 1, row: 0 })
-    const result = await tools.get('dungeon_preview_attack')!('1', { unitId, direction: 'right' })
+    const result = await tools.get('dungeon_draw_label')!('1', { position: { x: 4, y: 4 }, text: 'Threat zone', color: 'orange' })
     expect(result.isError).toBeFalsy()
-    const details = result.details as { footprint: unknown[]; hits: unknown[] }
-    expect(details.footprint).toEqual([{ col: 1, row: 0 }])
-    expect(details.hits).toEqual([{ col: 1, row: 0 }])
+    expect(board.getState().objects[0]).toMatchObject({ kind: 'label', text: 'Threat zone' })
   })
 
-  it('dungeon_preview_attack errors for an unknown unit id', async () => {
+  it('dungeon_move_object moves a shape and leaves color/label unchanged', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const result = await tools.get('dungeon_preview_attack')!('1', { unitId: 'does-not-exist', direction: 'up' })
-    expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/No unit/)
-  })
-
-  it('dungeon_remove_unit removes a placed unit', async () => {
-    const board = new BoardStore()
-    const tools = registerTools(board)
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = await tools.get('dungeon_remove_unit')!('1', { unitId })
+    const { id } = board.drawShape({ shapeType: 'circle', position: { x: 0, y: 0 }, radius: 0.5, color: 'blue', label: 'SR' })
+    const result = await tools.get('dungeon_move_object')!('1', { id, kind: 'shape', position: { x: 3, y: 3 } })
     expect(result.isError).toBeFalsy()
-    expect(board.getState().units).toHaveLength(0)
+    expect(board.getState().objects[0]).toMatchObject({ position: { x: 3, y: 3 }, color: 'blue', label: 'SR' })
   })
 
-  it('dungeon_remove_unit errors for an unknown unit id', async () => {
+  it('dungeon_move_object errors for an unknown object id', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const result = await tools.get('dungeon_remove_unit')!('1', { unitId: 'does-not-exist' })
+    const result = await tools.get('dungeon_move_object')!('1', { id: 'does-not-exist', kind: 'shape', position: { x: 0, y: 0 } })
     expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/No unit/)
+    expect((result.details as { error: string }).error).toMatch(/No drawn object/)
   })
 
-  it('dungeon_move_unit commits a move within range', async () => {
+  it('dungeon_remove_object removes a drawn object of any kind', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = await tools.get('dungeon_move_unit')!('1', { unitId, col: 2, row: 0 })
+    const { id } = board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    const result = await tools.get('dungeon_remove_object')!('1', { id })
     expect(result.isError).toBeFalsy()
-    expect(board.getState().units[0].position).toEqual({ col: 2, row: 0 })
+    expect(board.getState().objects).toHaveLength(0)
   })
 
-  it('dungeon_move_unit errors for an out-of-range destination and leaves the unit in place', async () => {
+  it('dungeon_remove_object errors for an unknown object id', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    const result = await tools.get('dungeon_move_unit')!('1', { unitId, col: 10, row: 0 })
+    const result = await tools.get('dungeon_remove_object')!('1', { id: 'does-not-exist' })
     expect(result.isError).toBe(true)
-    expect((result.details as { error: string }).error).toMatch(/out of range/)
-    expect(board.getState().units[0].position).toEqual({ col: 0, row: 0 })
+    expect((result.details as { error: string }).error).toMatch(/No drawn object/)
   })
 
-  it('dungeon_clear_board removes all units and resets terrain', async () => {
+  it('dungeon_clear_board removes all objects and resets cell fill colors', async () => {
     const board = new BoardStore()
     const tools = registerTools(board)
-    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
-    board.setTerrain({ col: 3, row: 3 }, 'water')
+    board.drawLabel({ x: 0, y: 0 }, 'label', 'red')
+    board.setCellFill({ col: 3, row: 3 }, '#ff0000')
+    const defaultColor = new BoardStore().getState().cells[0][0].fillColor
     const result = await tools.get('dungeon_clear_board')!('1', {})
     expect(result.isError).toBeFalsy()
     const state = board.getState()
-    expect(state.units).toEqual([])
-    expect(state.cells.every((row) => row.every((cell) => cell.terrain === 'plains'))).toBe(true)
+    expect(state.objects).toEqual([])
+    expect(state.cells.every((row) => row.every((cell) => cell.fillColor === defaultColor))).toBe(true)
   })
 })

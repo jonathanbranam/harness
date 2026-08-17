@@ -1,58 +1,92 @@
-import type { AttackPreviewResult, BoardState, Cell, MovementPreviewResult, PlacedUnit } from '../hooks/useDungeonSocket'
+import type { BoardObject, BoardState, Point } from '../hooks/useDungeonSocket'
 
 const CELL_SIZE = 40
 
-const TERRAIN_COLORS: Record<string, string> = {
-  plains: '#e5e7eb',
-  forest: '#166534',
-  water: '#1d4ed8',
-  stone: '#57534e',
+function toPixel(point: Point): { x: number; y: number } {
+  return { x: point.x * CELL_SIZE, y: point.y * CELL_SIZE }
 }
 
-const FACTION_COLORS: Record<string, string> = {
-  pc: '#4f46e5',
-  npc: '#dc2626',
-}
-
-const ARCHETYPE_LABELS: Record<string, string> = {
-  melee: 'ML',
-  rogue: 'RG',
-  ranger: 'RN',
-  'magic-user': 'MU',
-  'short-range': 'SR',
-  'long-range': 'LR',
-}
-
-function cellCenter(cell: Cell): { x: number; y: number } {
-  return { x: cell.col * CELL_SIZE + CELL_SIZE / 2, y: cell.row * CELL_SIZE + CELL_SIZE / 2 }
-}
-
-function UnitMarker({ unit }: { unit: PlacedUnit }) {
-  const { x, y } = cellCenter(unit.position)
-  const color = FACTION_COLORS[unit.faction] ?? '#6b7280'
+function ShapeMarker({ object }: { object: Extract<BoardObject, { kind: 'shape' }> }) {
+  const { x, y } = toPixel(object.position)
+  const shape =
+    object.shapeType === 'circle' ? (
+      <circle cx={x} cy={y} r={object.radius * CELL_SIZE} fill={object.color} stroke="#ffffff" strokeWidth={2} />
+    ) : (
+      <rect
+        x={x - (object.width * CELL_SIZE) / 2}
+        y={y - (object.height * CELL_SIZE) / 2}
+        width={object.width * CELL_SIZE}
+        height={object.height * CELL_SIZE}
+        fill={object.color}
+        stroke="#ffffff"
+        strokeWidth={2}
+      />
+    )
   return (
     <g>
-      <circle cx={x} cy={y} r={CELL_SIZE * 0.36} fill={color} stroke="#ffffff" strokeWidth={2} />
-      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600} fill="#ffffff">
-        {ARCHETYPE_LABELS[unit.archetype] ?? unit.archetype.slice(0, 2).toUpperCase()}
-      </text>
+      {shape}
+      {object.label && (
+        <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600} fill="#ffffff">
+          {object.label}
+        </text>
+      )}
     </g>
+  )
+}
+
+function LineShape({ object }: { object: Extract<BoardObject, { kind: 'line' }> }) {
+  const points = object.points.map((p) => { const { x, y } = toPixel(p); return `${x},${y}` }).join(' ')
+  return (
+    <polyline
+      points={points}
+      fill="none"
+      stroke={object.color}
+      strokeWidth={4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeDasharray={object.style === 'dashed' ? '2 6' : undefined}
+    />
+  )
+}
+
+function OverlayWash({ object }: { object: Extract<BoardObject, { kind: 'overlay' }> }) {
+  return (
+    <>
+      {object.cells.map((cell) => (
+        <rect
+          key={`${cell.col},${cell.row}`}
+          x={cell.col * CELL_SIZE}
+          y={cell.row * CELL_SIZE}
+          width={CELL_SIZE}
+          height={CELL_SIZE}
+          fill={object.color}
+          fillOpacity={0.45}
+        />
+      ))}
+    </>
+  )
+}
+
+function LabelText({ object }: { object: Extract<BoardObject, { kind: 'label' }> }) {
+  const { x, y } = toPixel(object.position)
+  return (
+    <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600} fill={object.color}>
+      {object.text}
+    </text>
   )
 }
 
 interface BoardCanvasProps {
   boardState: BoardState | null
-  movementPreview?: MovementPreviewResult
-  attackPreview?: AttackPreviewResult
 }
 
 /**
- * Plain SVG rendering of the live board — grid, terrain, unit placements,
- * and the most recent movement/attack preview overlay, if any. Mirrors
- * client-deck's DeckCanvas precedent of plain SVG/Canvas over Phaser for a
- * live-state view (see design.md/proposal.md).
+ * Plain SVG rendering of the live board — grid with per-cell fill color,
+ * plus every drawn object (shape/line/overlay/label) rendered generically by
+ * kind. Mirrors client-deck's DeckCanvas precedent of plain SVG/Canvas over
+ * Phaser for a live-state view (see design.md/proposal.md).
  */
-export function BoardCanvas({ boardState, movementPreview, attackPreview }: BoardCanvasProps) {
+export function BoardCanvas({ boardState }: BoardCanvasProps) {
   if (!boardState) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-gray-400 dark:text-gray-500">Waiting for board state…</div>
@@ -61,7 +95,10 @@ export function BoardCanvas({ boardState, movementPreview, attackPreview }: Boar
 
   const width = boardState.width * CELL_SIZE
   const height = boardState.height * CELL_SIZE
-  const hitKeys = new Set((attackPreview?.hits ?? []).map((c) => `${c.col},${c.row}`))
+  const overlays = boardState.objects.filter((o): o is Extract<BoardObject, { kind: 'overlay' }> => o.kind === 'overlay')
+  const shapes = boardState.objects.filter((o): o is Extract<BoardObject, { kind: 'shape' }> => o.kind === 'shape')
+  const lines = boardState.objects.filter((o): o is Extract<BoardObject, { kind: 'line' }> => o.kind === 'line')
+  const labels = boardState.objects.filter((o): o is Extract<BoardObject, { kind: 'label' }> => o.kind === 'label')
 
   return (
     <div className="flex items-center justify-center h-full overflow-auto p-4">
@@ -74,43 +111,27 @@ export function BoardCanvas({ boardState, movementPreview, attackPreview }: Boar
               y={r * CELL_SIZE}
               width={CELL_SIZE}
               height={CELL_SIZE}
-              fill={TERRAIN_COLORS[cell.terrain] ?? '#e5e7eb'}
+              fill={cell.fillColor}
               stroke="#9ca3af"
               strokeWidth={0.5}
             />
           )),
         )}
 
-        {attackPreview?.footprint.map((cell) => {
-          const hit = hitKeys.has(`${cell.col},${cell.row}`)
-          return (
-            <rect
-              key={`fp-${cell.col},${cell.row}`}
-              x={cell.col * CELL_SIZE}
-              y={cell.row * CELL_SIZE}
-              width={CELL_SIZE}
-              height={CELL_SIZE}
-              fill={hit ? 'rgba(220, 38, 38, 0.55)' : 'rgba(220, 38, 38, 0.2)'}
-              stroke={hit ? '#dc2626' : '#f87171'}
-              strokeWidth={hit ? 2 : 1}
-            />
-          )
-        })}
+        {overlays.map((object) => (
+          <OverlayWash key={object.id} object={object} />
+        ))}
 
-        {movementPreview && movementPreview.path.length > 1 && (
-          <polyline
-            points={movementPreview.path.map((cell) => { const { x, y } = cellCenter(cell); return `${x},${y}` }).join(' ')}
-            fill="none"
-            stroke="#f59e0b"
-            strokeWidth={4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray="2 6"
-          />
-        )}
+        {lines.map((object) => (
+          <LineShape key={object.id} object={object} />
+        ))}
 
-        {boardState.units.map((unit) => (
-          <UnitMarker key={unit.id} unit={unit} />
+        {shapes.map((object) => (
+          <ShapeMarker key={object.id} object={object} />
+        ))}
+
+        {labels.map((object) => (
+          <LabelText key={object.id} object={object} />
         ))}
       </svg>
     </div>

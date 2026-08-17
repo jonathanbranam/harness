@@ -19,11 +19,13 @@ import { diffFeature, type FeatureChangeset } from '../gherkin/diff'
 import type { WorkingFeature } from '../gherkin/model'
 import { parseFeature } from '../gherkin/parse'
 
-// Player-controlled units only — the same subset of board-bridge.ts's
-// ARCHETYPES that round one's design sessions cover (see design.md's
-// "One canonical file per unit" decision). This enum doubles as the
-// path-safety mechanism for dungeon_load_baseline: there's no user-suppliable
-// path component, so no jail check is needed for it.
+// Player-controlled units only — the subset that round one's design sessions
+// cover (see design.md's "One canonical file per unit" decision). This enum
+// doubles as the path-safety mechanism for dungeon_load_baseline: there's no
+// user-suppliable path component, so no jail check is needed for it. Not
+// tied to board-bridge.ts's drawing primitives — dungeon_load_baseline takes
+// a unit name only as a plain string key into track-web's feature corpus
+// (see dungeon-board-tool-enhancements/proposal.md - Impact).
 const UNITS = ['melee', 'rogue', 'ranger', 'magic-user'] as const
 type Unit = (typeof UNITS)[number]
 

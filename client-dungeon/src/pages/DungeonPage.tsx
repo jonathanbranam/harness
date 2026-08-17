@@ -1,8 +1,7 @@
-import { useMemo } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { ChatPanel, PaneHeader, PaneRail, usePaneManager } from '@harness/ui'
 import { useAuth } from '../hooks/useAuth'
-import { findLatestPreview, useDungeonSocket, type AttackPreviewResult, type MovementPreviewResult } from '../hooks/useDungeonSocket'
+import { useDungeonSocket } from '../hooks/useDungeonSocket'
 import { useTheme } from '../hooks/useTheme'
 import { BoardCanvas } from '../components/BoardCanvas'
 import { ApprovalDialog } from '../components/ApprovalDialog'
@@ -25,15 +24,6 @@ export function DungeonPage() {
   const { connected, transcript, pendingApproval, boardState, sendPrompt, respondApproval } = useDungeonSocket()
   const { theme, toggleTheme } = useTheme()
   const { paneModes, panelRefs, minimizePane, maximizePane, restorePane, handleLayoutChanged } = usePaneManager(PANE_IDS, DEFAULT_SIZES)
-
-  const movementPreview = useMemo(
-    () => findLatestPreview(transcript, 'dungeon_preview_movement') as MovementPreviewResult | undefined,
-    [transcript],
-  )
-  const attackPreview = useMemo(
-    () => findLatestPreview(transcript, 'dungeon_preview_attack') as AttackPreviewResult | undefined,
-    [transcript],
-  )
 
   return (
     <div className="h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
@@ -86,7 +76,7 @@ export function DungeonPage() {
                   onRestore={() => restorePane(BOARD_PANE)}
                 />
                 <div className="flex-1 min-h-0">
-                  <BoardCanvas boardState={boardState} movementPreview={movementPreview} attackPreview={attackPreview} />
+                  <BoardCanvas boardState={boardState} />
                 </div>
               </div>
             )}

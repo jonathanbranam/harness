@@ -15,7 +15,7 @@ import type { Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import type { WSContext, WSEvents } from 'hono/ws'
 import { SESSION_COOKIE } from './auth'
-import type { BoardState } from './board-engine/types'
+import type { BoardState } from './board-state'
 import type { ApprovalRequest, RequestApproval } from './pi-extensions/permission-gate'
 import { getOrCreateBoardStore, getOrCreateSession } from './session-store'
 

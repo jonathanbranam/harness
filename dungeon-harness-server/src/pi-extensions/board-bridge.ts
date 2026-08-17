@@ -5,18 +5,18 @@
 // "instantiated per session" decision), so this is a per-session extension
 // *factory* — session-store.ts calls createBoardBridgeExtension() with that
 // session's own BoardStore, mirroring permission-gate.ts's factory pattern.
+//
+// The tools here are generic drawing primitives (shape/line/overlay/label/
+// cell-fill, all id-based list/move/remove), not game-rule tools — the
+// harness draws whatever the agent describes without computing movement
+// range, pathing, or attack footprints. See proposal.md - Why.
 
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
-import { computeFootprint, resolveHits } from '../board-engine/attack'
-import { findPath } from '../board-engine/movement'
-import { ARCHETYPES } from '../board-engine/unit-catalog'
-import type { Cell } from '../board-engine/types'
 import type { BoardStore } from '../board-state'
 
-const DIRECTIONS = ['up', 'down', 'left', 'right'] as const
-const FACTIONS = ['pc', 'npc'] as const
-const TERRAIN_TYPES = ['plains', 'forest', 'water', 'stone'] as const
+const point = Type.Object({ x: Type.Number(), y: Type.Number() })
+const cell = Type.Object({ col: Type.Number(), row: Type.Number() })
 
 export function createBoardBridgeExtension(opts: { board: BoardStore }): ExtensionFactory {
   const { board } = opts
@@ -26,8 +26,8 @@ export function createBoardBridgeExtension(opts: { board: BoardStore }): Extensi
       name: 'dungeon_get_board_state',
       label: 'Get Board State',
       description:
-        'Get the current board state: dimensions, every cell\'s terrain, and every placed unit (id, archetype, faction, position, and derived stats: maxHp, movement range, attack damage, targeting, and propagation). Call this before previewing movement/attacks or placing units so you are reasoning about the live board, not a stale copy.',
-      promptSnippet: 'Read the live board: dimensions, terrain, and every placed unit with its derived stats',
+        "Get the current board state: dimensions, every cell's fill color, and every drawn object (id, kind, geometry, color, label if applicable, and style if applicable). Call this before drawing/moving/removing so you are reasoning about the live board, not a stale copy.",
+      promptSnippet: 'Read the live board: dimensions, cell fill colors, and every drawn object',
       parameters: Type.Object({}),
       execute: async () => {
         const state = board.getState()
@@ -36,65 +36,129 @@ export function createBoardBridgeExtension(opts: { board: BoardStore }): Extensi
     })
 
     pi.registerTool({
-      name: 'dungeon_place_unit',
-      label: 'Place Unit',
-      description: `Place a unit on the board from the fixed archetype catalog: ${ARCHETYPES.join(', ')} (melee/rogue/ranger/magic-user are player-controlled; short-range/long-range are NPC-controlled). Requires an in-bounds, unoccupied cell. Returns the new unit's server-assigned id.`,
-      promptSnippet: 'Place a unit on the board at a given cell',
-      parameters: Type.Object({
-        archetype: Type.String({ description: `One of: ${ARCHETYPES.join(', ')}` }),
-        faction: Type.Union(FACTIONS.map((f) => Type.Literal(f))),
-        col: Type.Number(),
-        row: Type.Number(),
-      }),
-      execute: async (_id, params) => {
-        const result = board.placeUnit(params.archetype, params.faction, { col: params.col, row: params.row })
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
-      },
-    })
-
-    pi.registerTool({
-      name: 'dungeon_set_terrain',
-      label: 'Set Terrain',
-      description: `Set a cell's terrain, one of: ${TERRAIN_TYPES.join(', ')}. Terrain is for visual/scenario context only — it never affects movement or attack calculations.`,
-      promptSnippet: "Set a cell's terrain",
-      parameters: Type.Object({
-        col: Type.Number(),
-        row: Type.Number(),
-        terrain: Type.Union(TERRAIN_TYPES.map((t) => Type.Literal(t))),
-      }),
-      execute: async (_id, params) => {
-        const result = board.setTerrain({ col: params.col, row: params.row }, params.terrain)
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
-      },
-    })
-
-    pi.registerTool({
-      name: 'dungeon_remove_unit',
-      label: 'Remove Unit',
-      description: 'Remove a placed unit from the board by id. Errors if no placed unit has that id.',
-      promptSnippet: 'Remove a placed unit from the board by id',
-      parameters: Type.Object({
-        unitId: Type.String(),
-      }),
-      execute: async (_id, params) => {
-        const result = board.removeUnit(params.unitId)
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
-      },
-    })
-
-    pi.registerTool({
-      name: 'dungeon_move_unit',
-      label: 'Move Unit',
+      name: 'dungeon_set_cell_fill',
+      label: 'Set Cell Fill',
       description:
-        "Commit a placed unit's movement to a destination cell, using the same range-limited, occupancy-aware pathing dungeon_preview_movement computes. On success the unit's position is updated; on failure (out of range, blocked, or unknown unit id) the unit's position is left unchanged.",
-      promptSnippet: "Move a placed unit to a destination cell, committing the move",
+        "Set a cell's fill color to any caller-chosen color (e.g. a CSS color name or hex string). The harness does not interpret the color as terrain or attach any other meaning to it — one color per cell, latest call wins.",
+      promptSnippet: "Set a cell's fill color",
       parameters: Type.Object({
-        unitId: Type.String(),
         col: Type.Number(),
         row: Type.Number(),
+        color: Type.String(),
       }),
       execute: async (_id, params) => {
-        const result = board.moveUnit(params.unitId, { col: params.col, row: params.row })
+        const result = board.setCellFill({ col: params.col, row: params.row }, params.color)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_draw_shape',
+      label: 'Draw Shape',
+      description:
+        'Draw a labeled circle or rectangle at a position on the board (a caller-labeled visual marker — the harness attaches no game meaning, like unit type or faction, to it). Position is in continuous point coordinates where cell (col,row) spans (col,row)-(col+1,row+1), so a cell\'s center is (col+0.5, row+0.5). Returns the new object\'s server-assigned id.',
+      promptSnippet: 'Draw a labeled circle or rectangle at a position',
+      parameters: Type.Union([
+        Type.Object({
+          shapeType: Type.Literal('circle'),
+          position: point,
+          radius: Type.Number(),
+          color: Type.String(),
+          label: Type.Optional(Type.String()),
+        }),
+        Type.Object({
+          shapeType: Type.Literal('rectangle'),
+          position: point,
+          width: Type.Number(),
+          height: Type.Number(),
+          color: Type.String(),
+          label: Type.Optional(Type.String()),
+        }),
+      ]),
+      execute: async (_id, params) => {
+        const result = board.drawShape(params)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_draw_line',
+      label: 'Draw Line',
+      description:
+        'Draw a solid or dashed line/path connecting two or more points, in order. Covers movement-path and connector annotations. Errors if fewer than two points are given.',
+      promptSnippet: 'Draw a line or multi-point path through given points',
+      parameters: Type.Object({
+        points: Type.Array(point),
+        color: Type.String(),
+        style: Type.Union([Type.Literal('solid'), Type.Literal('dashed')]),
+      }),
+      execute: async (_id, params) => {
+        const result = board.drawLine(params.points, params.color, params.style)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_draw_overlay',
+      label: 'Draw Overlay',
+      description:
+        "Draw a semi-transparent color wash over one or more cells, rendered above each covered cell's fill color. Covers attack-footprint/movement-range/threat-range highlighting, or any other \"highlight this area\" need. Errors if any given cell is out of bounds.",
+      promptSnippet: 'Draw a semi-transparent overlay over one or more cells',
+      parameters: Type.Object({
+        cells: Type.Array(cell),
+        color: Type.String(),
+      }),
+      execute: async (_id, params) => {
+        const result = board.drawOverlay(params.cells, params.color)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_draw_label',
+      label: 'Draw Label',
+      description: 'Draw a standalone text label at a position, independent of any shape.',
+      promptSnippet: 'Draw a freestanding text label at a position',
+      parameters: Type.Object({
+        position: point,
+        text: Type.String(),
+        color: Type.String(),
+      }),
+      execute: async (_id, params) => {
+        const result = board.drawLabel(params.position, params.text, params.color)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_move_object',
+      label: 'Move Object',
+      description:
+        "Move a drawn object to new geometry appropriate to its kind (a position for a shape or label, an ordered point list for a line, a cell list for an overlay), leaving its color, label, and style unchanged. Errors if the id is unknown or the given geometry kind doesn't match the object's actual kind.",
+      promptSnippet: "Move a drawn object to new geometry, by id",
+      parameters: Type.Union([
+        Type.Object({ id: Type.String(), kind: Type.Literal('shape'), position: point }),
+        Type.Object({ id: Type.String(), kind: Type.Literal('label'), position: point }),
+        Type.Object({ id: Type.String(), kind: Type.Literal('line'), points: Type.Array(point) }),
+        Type.Object({ id: Type.String(), kind: Type.Literal('overlay'), cells: Type.Array(cell) }),
+      ]),
+      execute: async (_id, params) => {
+        const { id, ...geometry } = params
+        const result = board.moveObject(id, geometry)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_remove_object',
+      label: 'Remove Object',
+      description: 'Remove a drawn object from the board by id, regardless of kind (shape, line, overlay, or label). Errors if no drawn object has that id.',
+      promptSnippet: 'Remove a drawn object from the board by id',
+      parameters: Type.Object({
+        id: Type.String(),
+      }),
+      execute: async (_id, params) => {
+        const result = board.removeObject(params.id)
         return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
       },
     })
@@ -102,55 +166,12 @@ export function createBoardBridgeExtension(opts: { board: BoardStore }): Extensi
     pi.registerTool({
       name: 'dungeon_clear_board',
       label: 'Clear Board',
-      description: 'Remove every placed unit and reset every cell\'s terrain to "plains", leaving the board in the same state as a fresh session.',
-      promptSnippet: 'Clear the board: remove all units and reset all terrain to plains',
+      description: "Remove every drawn object and reset every cell's fill color to the default, leaving the board in the same state as a fresh session.",
+      promptSnippet: 'Clear the board: remove all drawn objects and reset all cell fill colors',
       parameters: Type.Object({}),
       execute: async () => {
         const result = board.clearBoard()
         return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
-      },
-    })
-
-    pi.registerTool({
-      name: 'dungeon_preview_movement',
-      label: 'Preview Movement',
-      description:
-        "Preview a placed unit's shortest path to a destination cell, 4-directionally connected, treating other placed units' cells as impassable. Errors (rather than returning a path) if the destination is out of the unit's movement range, or every route within range is blocked by other units.",
-      promptSnippet: "Preview a unit's movement path to a destination cell",
-      parameters: Type.Object({
-        unitId: Type.String(),
-        col: Type.Number(),
-        row: Type.Number(),
-      }),
-      execute: async (_id, params) => {
-        const result = findPath(board.getState(), params.unitId, { col: params.col, row: params.row })
-        const isError = !Array.isArray(result)
-        const details = isError ? result : { path: result }
-        return { content: [{ type: 'text' as const, text: JSON.stringify(details, null, 2) }], details, isError }
-      },
-    })
-
-    pi.registerTool({
-      name: 'dungeon_preview_attack',
-      label: 'Preview Attack',
-      description:
-        "Preview a placed unit's attack in a cardinal direction: returns the candidate footprint (every cell the unit's propagation shape covers from its position, per its targeting range) and which of those cells are actually hit given current unit occupancy and the archetype's penetration rule. The full footprint is always returned even when only some of it is hit (e.g. a stop-at-first line attack still reports the whole line so you can judge range).",
-      promptSnippet: "Preview a unit's attack footprint and hit cells in a cardinal direction",
-      parameters: Type.Object({
-        unitId: Type.String(),
-        direction: Type.Union(DIRECTIONS.map((d) => Type.Literal(d))),
-      }),
-      execute: async (_id, params) => {
-        const state = board.getState()
-        const unit = state.units.find((u) => u.id === params.unitId)
-        let details: { error?: string; footprint?: Cell[]; hits?: Cell[] }
-        if (unit) {
-          const footprint = computeFootprint(state, unit, params.direction)
-          details = { footprint, hits: resolveHits(footprint, state, unit.unitDef.attack.propagation.penetration) }
-        } else {
-          details = { error: `No unit with id "${params.unitId}"` }
-        }
-        return { content: [{ type: 'text' as const, text: JSON.stringify(details, null, 2) }], details, isError: !unit }
       },
     })
   }
