@@ -17,6 +17,10 @@ The introspection extension SHALL subscribe to pi lifecycle events and forward t
 - **WHEN** a tool call starts or finishes
 - **THEN** the extension forwards `tool_execution_start` and `tool_execution_end` events to the server
 
+#### Scenario: Tool call produces a result
+- **WHEN** a tool call's result is finalized and about to be inserted into the conversation
+- **THEN** the extension forwards a `tool_result` event containing that result's exact content (and usage, when the provider reports it) to the server
+
 ### Requirement: Broadcast events to all connected clients
 The server SHALL forward every captured event to every WebSocket client connected to the same harness session.
 
