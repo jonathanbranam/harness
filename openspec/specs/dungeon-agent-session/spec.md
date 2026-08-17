@@ -49,9 +49,9 @@ When a WebSocket connection closes while one or more tool-call approvals it orig
 - **WHEN** a client disconnects while a `bash`/`write`/`edit` approval it triggered is still awaiting a response
 - **THEN** that approval is resolved as denied and the corresponding tool call is blocked
 
-### Requirement: Only Gherkin-authoring tools registered
-The `AgentSession` SHALL be created with pi's built-in tools (`bash`, `write`, `edit`, `read`, `grep`, `find`, `ls`) plus the `dungeon-scenario-authoring` tools (`dungeon_read_feature`, `dungeon_write_feature`, `dungeon_write_implementation_notes`), with no board-manipulation or track-web-access tools registered.
+### Requirement: Board-manipulation and Gherkin-authoring tools registered, no track-web access
+The `AgentSession` SHALL be created with pi's built-in tools (`bash`, `write`, `edit`, `read`, `grep`, `find`, `ls`) plus the `dungeon-board-bridge` tools (`dungeon_get_board_state`, `dungeon_preview_movement`, `dungeon_preview_attack`, `dungeon_place_unit`, `dungeon_set_terrain`) and the `dungeon-scenario-authoring` tools (`dungeon_read_feature`, `dungeon_write_feature`, `dungeon_write_implementation_notes`), with no track-web-access tools registered.
 
-#### Scenario: Agent has Gherkin-authoring tools but no board or track-web tools
+#### Scenario: Agent has board and Gherkin-authoring tools but no track-web tools
 - **WHEN** the agent lists its available tools
-- **THEN** pi's built-in tools and `dungeon_read_feature`/`dungeon_write_feature`/`dungeon_write_implementation_notes` are present; no board-manipulation or track-web-access tools exist yet
+- **THEN** pi's built-in tools, the five `dungeon_*` board tools, and `dungeon_read_feature`/`dungeon_write_feature`/`dungeon_write_implementation_notes` are all present; no track-web-access tools exist yet
