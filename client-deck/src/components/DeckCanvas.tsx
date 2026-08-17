@@ -84,6 +84,30 @@ function clampRectToSlide(rect: Rect): Rect {
   return { x, y, width, height }
 }
 
+/**
+ * Overrides whichever of width/height the drag's dominant axis (the one
+ * whose pointer delta is proportionally larger relative to its own origin
+ * size) does not already determine, deriving it from originWidth/
+ * originHeight's ratio instead (design.md's dominant-axis decision for
+ * Shift-held aspect-ratio-locked resize). `dx`/`dy` are the same deltas the
+ * caller already used to compute `width`/`height` per axis, so the "driving"
+ * axis here matches whichever one the drag is actually following. `minSize`
+ * mirrors the caller's own per-axis floor, since overriding a dimension can
+ * push it below that floor again.
+ */
+function applyAspectRatioLock(
+  { width, height }: { width: number; height: number },
+  { originWidth, originHeight, dx, dy, minSize }: { originWidth: number; originHeight: number; dx: number; dy: number; minSize: number },
+): { width: number; height: number } {
+  if (originWidth <= 0 || originHeight <= 0) return { width, height }
+  const ratio = originWidth / originHeight
+  const drivenByWidth = Math.abs(dx) / originWidth >= Math.abs(dy) / originHeight
+  if (drivenByWidth) {
+    return { width, height: Math.max(minSize, width / ratio) }
+  }
+  return { width: Math.max(minSize, height * ratio), height }
+}
+
 function isLineLike(obj: DeckObject): obj is LineObject | ArrowObject {
   return obj.type === 'line' || obj.type === 'arrow'
 }
@@ -749,6 +773,13 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         if (corner.includes('w')) width = Math.max(MIN_SIZE, originWidth - dx)
         if (corner.includes('s')) height = Math.max(MIN_SIZE, originHeight + dy)
         if (corner.includes('n')) height = Math.max(MIN_SIZE, originHeight - dy)
+        // Shift held (checked live on every move event, not latched from
+        // pointer-down, so pressing/releasing mid-drag takes effect
+        // immediately) locks the resize to the object's aspect ratio at drag
+        // start (deck-canvas-display's aspect-ratio-lock requirement).
+        if (ev.shiftKey) {
+          ;({ width, height } = applyAspectRatioLock({ width, height }, { originWidth, originHeight, dx, dy, minSize: MIN_SIZE }))
+        }
         let x = originX
         let y = originY
         if (corner.includes('w')) x = originX + (originWidth - width)
@@ -992,6 +1023,16 @@ export const DeckCanvas = forwardRef<HTMLDivElement, DeckCanvasProps>(function D
         if (corner.includes('w')) cropWidth = Math.max(MIN_CROP_SIZE, originCropWidth - dx)
         if (corner.includes('s')) cropHeight = Math.max(MIN_CROP_SIZE, originCropHeight + dy)
         if (corner.includes('n')) cropHeight = Math.max(MIN_CROP_SIZE, originCropHeight - dy)
+        // Same Shift-held aspect-ratio lock as the destination-box resize
+        // above, but against the crop rectangle's own origin ratio — the
+        // crop and destination are independent rectangles, so this doesn't
+        // touch the destination box's ratio.
+        if (ev.shiftKey) {
+          ;({ width: cropWidth, height: cropHeight } = applyAspectRatioLock(
+            { width: cropWidth, height: cropHeight },
+            { originWidth: originCropWidth, originHeight: originCropHeight, dx, dy, minSize: MIN_CROP_SIZE },
+          ))
+        }
         cropWidth = Math.min(cropWidth, natWidth)
         cropHeight = Math.min(cropHeight, natHeight)
         let cropX = originCropX
