@@ -111,4 +111,52 @@ describe('board-bridge tools', () => {
     expect(result.isError).toBe(true)
     expect((result.details as { error: string }).error).toMatch(/No unit/)
   })
+
+  it('dungeon_remove_unit removes a placed unit', async () => {
+    const board = new BoardStore()
+    const tools = registerTools(board)
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = await tools.get('dungeon_remove_unit')!('1', { unitId })
+    expect(result.isError).toBeFalsy()
+    expect(board.getState().units).toHaveLength(0)
+  })
+
+  it('dungeon_remove_unit errors for an unknown unit id', async () => {
+    const board = new BoardStore()
+    const tools = registerTools(board)
+    const result = await tools.get('dungeon_remove_unit')!('1', { unitId: 'does-not-exist' })
+    expect(result.isError).toBe(true)
+    expect((result.details as { error: string }).error).toMatch(/No unit/)
+  })
+
+  it('dungeon_move_unit commits a move within range', async () => {
+    const board = new BoardStore()
+    const tools = registerTools(board)
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = await tools.get('dungeon_move_unit')!('1', { unitId, col: 2, row: 0 })
+    expect(result.isError).toBeFalsy()
+    expect(board.getState().units[0].position).toEqual({ col: 2, row: 0 })
+  })
+
+  it('dungeon_move_unit errors for an out-of-range destination and leaves the unit in place', async () => {
+    const board = new BoardStore()
+    const tools = registerTools(board)
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = await tools.get('dungeon_move_unit')!('1', { unitId, col: 10, row: 0 })
+    expect(result.isError).toBe(true)
+    expect((result.details as { error: string }).error).toMatch(/out of range/)
+    expect(board.getState().units[0].position).toEqual({ col: 0, row: 0 })
+  })
+
+  it('dungeon_clear_board removes all units and resets terrain', async () => {
+    const board = new BoardStore()
+    const tools = registerTools(board)
+    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    board.setTerrain({ col: 3, row: 3 }, 'water')
+    const result = await tools.get('dungeon_clear_board')!('1', {})
+    expect(result.isError).toBeFalsy()
+    const state = board.getState()
+    expect(state.units).toEqual([])
+    expect(state.cells.every((row) => row.every((cell) => cell.terrain === 'plains'))).toBe(true)
+  })
 })

@@ -69,6 +69,49 @@ export function createBoardBridgeExtension(opts: { board: BoardStore }): Extensi
     })
 
     pi.registerTool({
+      name: 'dungeon_remove_unit',
+      label: 'Remove Unit',
+      description: 'Remove a placed unit from the board by id. Errors if no placed unit has that id.',
+      promptSnippet: 'Remove a placed unit from the board by id',
+      parameters: Type.Object({
+        unitId: Type.String(),
+      }),
+      execute: async (_id, params) => {
+        const result = board.removeUnit(params.unitId)
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_move_unit',
+      label: 'Move Unit',
+      description:
+        "Commit a placed unit's movement to a destination cell, using the same range-limited, occupancy-aware pathing dungeon_preview_movement computes. On success the unit's position is updated; on failure (out of range, blocked, or unknown unit id) the unit's position is left unchanged.",
+      promptSnippet: "Move a placed unit to a destination cell, committing the move",
+      parameters: Type.Object({
+        unitId: Type.String(),
+        col: Type.Number(),
+        row: Type.Number(),
+      }),
+      execute: async (_id, params) => {
+        const result = board.moveUnit(params.unitId, { col: params.col, row: params.row })
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_clear_board',
+      label: 'Clear Board',
+      description: 'Remove every placed unit and reset every cell\'s terrain to "plains", leaving the board in the same state as a fresh session.',
+      promptSnippet: 'Clear the board: remove all units and reset all terrain to plains',
+      parameters: Type.Object({}),
+      execute: async () => {
+        const result = board.clearBoard()
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result, isError: !result.ok }
+      },
+    })
+
+    pi.registerTool({
       name: 'dungeon_preview_movement',
       label: 'Preview Movement',
       description:

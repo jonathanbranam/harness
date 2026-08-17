@@ -7,6 +7,7 @@
 // survive a restart).
 
 import { randomUUID } from 'node:crypto'
+import { findPath } from './board-engine/movement'
 import { ARCHETYPES, UNIT_CATALOG } from './board-engine/unit-catalog'
 import type { Archetype, BoardCell, BoardState, Cell, Faction, PlacedUnit, TerrainType } from './board-engine/types'
 
@@ -90,6 +91,33 @@ export class BoardStore {
       return { ok: false, error: `Unknown terrain "${terrain}". Valid terrain types: ${TERRAIN_TYPES.join(', ')}` }
     }
     this.cells[position.row][position.col] = { terrain: terrain as TerrainType }
+    this.emit()
+    return { ok: true }
+  }
+
+  removeUnit(unitId: string): OpResult {
+    if (!this.units.some((u) => u.id === unitId)) {
+      return { ok: false, error: `No unit with id "${unitId}"` }
+    }
+    this.units = this.units.filter((u) => u.id !== unitId)
+    this.emit()
+    return { ok: true }
+  }
+
+  moveUnit(unitId: string, dest: Cell): OpResult {
+    const result = findPath(this.getState(), unitId, dest)
+    if (!Array.isArray(result)) {
+      return { ok: false, error: result.error }
+    }
+    const unit = this.units.find((u) => u.id === unitId)!
+    unit.position = { ...dest }
+    this.emit()
+    return { ok: true }
+  }
+
+  clearBoard(): OpResult {
+    this.units = []
+    this.cells = emptyCells()
     this.emit()
     return { ok: true }
   }

@@ -80,4 +80,75 @@ describe('BoardStore', () => {
     board.placeUnit('rogue', 'pc', { col: 2, row: 2 })
     expect(seen).toEqual([1, 1])
   })
+
+  it('removeUnit removes a placed unit', () => {
+    const board = new BoardStore()
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = board.removeUnit(unitId!)
+    expect(result.ok).toBe(true)
+    expect(board.getState().units).toHaveLength(0)
+  })
+
+  it('removeUnit rejects an unknown unit id', () => {
+    const board = new BoardStore()
+    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = board.removeUnit('does-not-exist')
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/No unit/)
+    expect(board.getState().units).toHaveLength(1)
+  })
+
+  it('moveUnit updates a unit\'s position within range', () => {
+    const board = new BoardStore()
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = board.moveUnit(unitId!, { col: 2, row: 0 })
+    expect(result.ok).toBe(true)
+    expect(board.getState().units[0].position).toEqual({ col: 2, row: 0 })
+  })
+
+  it('moveUnit rejects a destination beyond movement range', () => {
+    const board = new BoardStore()
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    const result = board.moveUnit(unitId!, { col: 10, row: 0 })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/out of range/)
+    expect(board.getState().units[0].position).toEqual({ col: 0, row: 0 })
+  })
+
+  it('moveUnit rejects a destination blocked by other units', () => {
+    const board = new BoardStore()
+    const { unitId } = board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    board.placeUnit('rogue', 'npc', { col: 1, row: 0 })
+    board.placeUnit('rogue', 'npc', { col: 0, row: 1 })
+    const result = board.moveUnit(unitId!, { col: 1, row: 1 })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/unreachable/)
+    expect(board.getState().units[0].position).toEqual({ col: 0, row: 0 })
+  })
+
+  it('moveUnit rejects an unknown unit id', () => {
+    const board = new BoardStore()
+    const result = board.moveUnit('does-not-exist', { col: 1, row: 1 })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/No unit/)
+  })
+
+  it('clearBoard removes all units and resets terrain to plains', () => {
+    const board = new BoardStore()
+    board.placeUnit('melee', 'pc', { col: 0, row: 0 })
+    board.placeUnit('rogue', 'npc', { col: 1, row: 1 })
+    board.setTerrain({ col: 5, row: 5 }, 'forest')
+    const result = board.clearBoard()
+    expect(result.ok).toBe(true)
+    const state = board.getState()
+    expect(state.units).toEqual([])
+    expect(state.cells.every((row) => row.every((cell) => cell.terrain === 'plains'))).toBe(true)
+  })
+
+  it('clearBoard succeeds on an already-empty board', () => {
+    const board = new BoardStore()
+    const result = board.clearBoard()
+    expect(result.ok).toBe(true)
+    expect(board.getState().units).toEqual([])
+  })
 })
