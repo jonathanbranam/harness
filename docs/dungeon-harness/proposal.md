@@ -375,3 +375,17 @@ This doc has pivoted three times as the actual boundary got clearer:
    units on purpose — a bounded, partially-throwaway pass that proves the
    whole pipeline and seeds the step library before the harder archetype
    design work starts.
+7. **Post-draft phase split (08 → 08a/08b):** the original single phase 08
+   routed all of round one — including the 4 existing units' first-ever
+   scenarios — through a harness design session. But those units' behavior
+   is already fully pinned down by `pc-archetypes`/`npc-archetypes`'s
+   existing prose scenarios and the passing implementation; writing their
+   `.feature` files is extraction/format-conversion, not a decision a
+   designer session needs to make, and diffing against track-web's empty
+   `.feature` baseline can only ever produce `added` classifications
+   anyway. Split into 08a (agent-driven extraction, no harness session,
+   seeds a real baseline) and 08b (the actual first live harness session,
+   now diffing against 08a's real baseline instead of an empty one — which
+   is what actually exercises `modified` classification for the first
+   time). See `phases/phase-08a-trackweb-existing-unit-extraction.md` and
+   `phases/phase-08b-trackweb-pipeline-proof.md`.

@@ -2,7 +2,7 @@
 
 **Repo:** `track-web`
 **Depends on:** 02 (hard); 06 (recommended — see note below)
-**Blocks:** 08
+**Blocks:** 08a
 
 ## Goal
 

@@ -39,7 +39,7 @@ built and verified standalone.
   each scenario as added/modified/removed relative to baseline; for a
   modified scenario, which steps changed. Match by the `@scenario-id` tag
   from phase 05; title-matching is a fallback not expected to matter for
-  round one (phase 08 starts the `.feature` corpus from zero, so nothing
+  round one (phase 08a starts the `.feature` corpus from zero, so nothing
   predates the tagging convention).
 - **Session lifecycle is strictly sequential, gated by sign-off.** One unit
   has at most one live thread of work: load baseline → work (changeset
@@ -57,7 +57,7 @@ built and verified standalone.
   default — see `env.ts`/`.env.example`.)
 - [x] `dungeon_load_baseline`: load a unit's current canonical `.feature`
   file(s) from that path into a baseline held apart from the working model
-  (empty baseline if none exist — the expected case for phase 08's first
+  (empty baseline if none exist — the expected case for phase 08a's first
   units). Call once per session, before editing starts.
 - [x] `dungeon_read_step_catalog`: read `steps-catalog.json` from the
   read-only path.
