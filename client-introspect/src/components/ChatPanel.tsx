@@ -1,10 +1,6 @@
-import { useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { useRef } from 'react'
+import { ChatInput, MarkdownMessage, useStickToBottom } from '@harness/ui'
 import type { ContextBlock } from '../hooks/useIntrospectSocket'
-import { MarkdownMessage } from './MarkdownMessage'
-
-/** Only snap back to the bottom if the user was already within this many px of it
- * before the update — otherwise leave their scroll position undisturbed. */
-const STICK_TO_BOTTOM_THRESHOLD_PX = 48
 
 function ToolBadge({ block }: { block: Extract<ContextBlock, { role: 'tool' }> }) {
   const color = block.status === 'running' ? 'text-amber-400' : block.status === 'error' ? 'text-red-400' : 'text-emerald-400'
@@ -28,36 +24,8 @@ export function ChatPanel({
   onSend: (text: string) => void
   disabled?: boolean
 }) {
-  const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement>(null)
-  // Distance-from-bottom as of the last scroll (user- or programmatic-driven).
-  // Appending content doesn't itself fire a scroll event, so by the time the
-  // layout effect below runs post-append, this still holds the *pre-append*
-  // value — exactly what "was the user already at the bottom" needs to check.
-  const distanceFromBottomRef = useRef(0)
-
-  const handleScroll = () => {
-    const el = scrollRef.current
-    if (!el) return
-    distanceFromBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight
-  }
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    if (distanceFromBottomRef.current <= STICK_TO_BOTTOM_THRESHOLD_PX) {
-      el.scrollTop = el.scrollHeight
-    }
-  }, [blocks])
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    if (disabled) return
-    const text = draft.trim()
-    if (!text) return
-    onSend(text)
-    setDraft('')
-  }
+  const { handleScroll } = useStickToBottom(scrollRef, [blocks])
 
   // Chat pane shows messages in chronological order (oldest at top), so reverse
   // the context-window array for display here.
@@ -89,22 +57,7 @@ export function ChatPanel({
         )}
       </div>
 
-      <form onSubmit={submit} className="p-3 border-t border-gray-200 dark:border-gray-800 flex gap-2">
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={disabled}
-          placeholder={disabled ? 'Replaying — exit replay to chat' : 'Ask pi to explore the workspace…'}
-          className="flex-1 rounded-md bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={disabled || !draft.trim()}
-          className="rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-4 text-sm font-medium"
-        >
-          Send
-        </button>
-      </form>
+      <ChatInput onSend={onSend} disabled={disabled} placeholder={disabled ? 'Replaying — exit replay to chat' : 'Ask pi to explore the workspace…'} />
     </div>
   )
 }

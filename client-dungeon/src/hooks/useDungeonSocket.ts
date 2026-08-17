@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChatMessageEntry, ToolCallEntry as SharedToolCallEntry } from '@harness/ui'
 import { genId } from '../id'
+
+export type { ChatMessageEntry }
 
 export interface ApprovalRequest {
   toolCallId: string
@@ -51,21 +54,7 @@ export interface BoardState {
   units: PlacedUnit[]
 }
 
-export interface ChatMessageEntry {
-  kind: 'message'
-  id: string
-  role: 'user' | 'assistant'
-  text: string
-  streaming?: boolean
-}
-
-export interface ToolCallEntry {
-  kind: 'tool'
-  id: string
-  toolCallId: string
-  toolName: string
-  status: 'running' | 'done' | 'error'
-  resultSummary?: string
+export interface ToolCallEntry extends SharedToolCallEntry {
   /** The tool's raw `details` value (event.result), not just resultSummary's truncated string — BoardCanvas's movement/attack preview overlay reads dungeon_preview_movement/dungeon_preview_attack results from here (see findLatestPreview below). */
   result?: unknown
 }

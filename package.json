@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "workspaces": [
+    "packages/ui",
     "deck-harness-server",
     "client-deck",
     "introspect-harness-server",
@@ -24,7 +25,7 @@
     "start": "npm run start -w deck-harness-server",
     "start:introspect": "npm run start -w introspect-harness-server",
     "start:dungeon": "npm run start -w dungeon-harness-server",
-    "typecheck": "npm run typecheck -w deck-harness-server && npm run typecheck -w introspect-harness-server && npm run typecheck -w dungeon-harness-server && tsc -b client-deck --noEmit && tsc -b client-introspect --noEmit && tsc -b client-dungeon --noEmit",
+    "typecheck": "tsc -b packages/ui --noEmit && npm run typecheck -w deck-harness-server && npm run typecheck -w introspect-harness-server && npm run typecheck -w dungeon-harness-server && tsc -b client-deck --noEmit && tsc -b client-introspect --noEmit && tsc -b client-dungeon --noEmit",
     "hash-password": "npm run hash-password -w deck-harness-server",
     "hash-password:introspect": "npm run hash-password -w introspect-harness-server",
     "hash-password:dungeon": "npm run hash-password -w dungeon-harness-server",
