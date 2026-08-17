@@ -3,6 +3,7 @@
 **Repo:** `harness`
 **Depends on:** 05 (harness); 02 and 04 (track-web, cross-repo)
 **Blocks:** 07 (recommended), 08
+**Status:** ✅ Implemented — `openspec/changes/dungeon-baseline-changeset`
 
 ## Goal
 
@@ -10,6 +11,14 @@ The core mechanism that makes handoff reviewable: read-only track-web
 access, session baselines, and the structural changeset diff, per
 `proposal.md`'s "Delta vs. canonical" and "Baseline and changeset"
 sections. This is the first point the two repos actually have to converge.
+
+Implemented despite phases 02 and 04 (track-web side) not having landed
+yet: the "Depends on" above reflects the eventual convergence point, not a
+hard implementation blocker. The read-only path and its tools are
+deliberately tolerant of the configured directory/file not existing —
+empty baseline / empty catalog is the expected state until track-web's
+corpus and step catalog actually land — so this phase could be, and was,
+built and verified standalone.
 
 ## Decisions carried over from `proposal.md`
 
@@ -42,33 +51,46 @@ sections. This is the first point the two repos actually have to converge.
 
 ## Concrete steps
 
-- Configure a read-only path (env var) from `dungeon-harness-server` to the
-  real track-web checkout's `features/` directory and `steps-catalog.json`.
-- `dungeon_load_baseline`: load a unit's current canonical `.feature`
+- [x] Configure a read-only path (env var) from `dungeon-harness-server` to
+  the real track-web checkout's `features/` directory and
+  `steps-catalog.json`. (`DUNGEON_TRACKWEB_FEATURES_DIR`, optional/unset by
+  default — see `env.ts`/`.env.example`.)
+- [x] `dungeon_load_baseline`: load a unit's current canonical `.feature`
   file(s) from that path into a baseline held apart from the working model
   (empty baseline if none exist — the expected case for phase 08's first
   units). Call once per session, before editing starts.
-- `dungeon_read_step_catalog`: read `steps-catalog.json` from the read-only
-  path.
-- Structural diff engine: baseline vs. working model, tag-keyed, producing
+- [x] `dungeon_read_step_catalog`: read `steps-catalog.json` from the
+  read-only path.
+- [x] Structural diff engine: baseline vs. working model, tag-keyed, producing
   added/modified/removed classification down to the step level for
-  modified scenarios.
-- `dungeon_get_changeset` (mid-session review) / `dungeon_write_changeset`
+  modified scenarios (`gherkin/diff.ts`, LCS sequence alignment for steps).
+- [x] `dungeon_get_changeset` (mid-session review) / `dungeon_write_changeset`
   (handoff artifact) tools.
-- Sign-off flow: a deliberate action (not an autosave point) that finalizes
+- [ ] Sign-off flow: a deliberate action (not an autosave point) that finalizes
   `dungeon_write_feature` + `dungeon_write_changeset` +
   `dungeon_write_implementation_notes` output as the handoff bundle.
   Enforce, at least by convention/prompting, that a new session for the
   same unit doesn't open until that unit's prior handoff has actually
-  landed in track-web.
+  landed in track-web. **Not built in this phase** — the
+  `dungeon-baseline-changeset` change scoped sign-off as "a workflow
+  convention, not new machinery" (see its proposal.md) and introduced no
+  session-locking mechanism; the three write tools exist standalone with
+  no bundling/finalization step around them.
 
 ## Deliverable
 
-Reopening a session on a unit that already has canonical scenarios loads
-them as baseline. Mid-session, the designer can ask "what have I changed"
-and get an accurate added/modified/removed list. Sign-off produces a clean
-handoff bundle (`.feature` + changeset + notes) in the harness's own
-workspace, ready for phase 07's skill to consume.
+- [x] Reopening a session on a unit that already has canonical scenarios loads
+  them as baseline. Mid-session, the designer can ask "what have I changed"
+  and get an accurate added/modified/removed list. (Verified live against
+  the running dev instance: loaded a hand-written `melee.feature` as
+  baseline, then confirmed `dungeon_get_changeset` correctly reported a
+  title change and an added step against it.)
+- [~] Sign-off producing a clean handoff bundle (`.feature` + changeset +
+  notes) — the three write tools (`dungeon_write_feature`,
+  `dungeon_write_changeset`, `dungeon_write_implementation_notes`) exist and
+  each writes correctly, but there is no bundling/finalization action tying
+  them together into one handoff step; see the unchecked "Sign-off flow"
+  item above.
 
 ## Suggested OpenSpec capability
 
