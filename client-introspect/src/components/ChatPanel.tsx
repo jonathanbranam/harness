@@ -1,6 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import type { ContextBlock } from '../hooks/useIntrospectSocket'
 import { MarkdownMessage } from './MarkdownMessage'
+
+/** Only snap back to the bottom if the user was already within this many px of it
+ * before the update — otherwise leave their scroll position undisturbed. */
+const STICK_TO_BOTTOM_THRESHOLD_PX = 48
 
 function ToolBadge({ block }: { block: Extract<ContextBlock, { role: 'tool' }> }) {
   const color = block.status === 'running' ? 'text-amber-400' : block.status === 'error' ? 'text-red-400' : 'text-emerald-400'
@@ -25,6 +29,26 @@ export function ChatPanel({
   disabled?: boolean
 }) {
   const [draft, setDraft] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // Distance-from-bottom as of the last scroll (user- or programmatic-driven).
+  // Appending content doesn't itself fire a scroll event, so by the time the
+  // layout effect below runs post-append, this still holds the *pre-append*
+  // value — exactly what "was the user already at the bottom" needs to check.
+  const distanceFromBottomRef = useRef(0)
+
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    distanceFromBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight
+  }
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (distanceFromBottomRef.current <= STICK_TO_BOTTOM_THRESHOLD_PX) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [blocks])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -46,7 +70,7 @@ export function ChatPanel({
         <span className={`text-xs ${connected ? 'text-emerald-400' : 'text-red-400'}`}>{connected ? 'connected' : 'disconnected'}</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 space-y-2">
         {chatBlocks.map((block) =>
           block.role === 'tool' ? (
             <ToolBadge key={block.id} block={block} />

@@ -47,6 +47,7 @@ export function introspectionBridge(events: EventEmitter, recordingWriter: Recor
 
     pi.on('tool_execution_start', (event) => emit({ ...event }))
     pi.on('tool_execution_end', (event) => emit({ ...event }))
+    pi.on('tool_result', (event) => emit({ ...event }))
 
     pi.on('before_agent_start', (event) => {
       emit({
