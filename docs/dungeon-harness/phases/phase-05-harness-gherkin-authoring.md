@@ -3,6 +3,7 @@
 **Repo:** `harness`
 **Depends on:** 01
 **Parallel with:** 02, 03, 04
+**Status:** ✅ Implemented — `openspec/changes/harness-gherkin-authoring`
 
 ## Goal
 
@@ -30,17 +31,17 @@ that's phase 06.
 
 ## Concrete steps
 
-- Add a Gherkin parser dependency to `dungeon-harness-server` — the
+- [x] Add a Gherkin parser dependency to `dungeon-harness-server` — the
   standard AST-producing libraries (`@cucumber/gherkin` +
   `@cucumber/messages`) are the natural choice.
-- Internal working model: a TS type for a parsed Feature/Scenario/Step
+- [x] Internal working model: a TS type for a parsed Feature/Scenario/Step
   tree, plus a renderer back to Gherkin text. Round-trip test: parse →
   internal model → render → re-parse should be stable (no drift) for
   content the harness itself produced.
-- Scenario-id tag assignment: generate a stable slug when a new `Scenario`
+- [x] Scenario-id tag assignment: generate a stable slug when a new `Scenario`
   is created in the working model; leave it untouched on later title/step
   edits.
-- `pi-extensions/scenario-bridge.ts`: register
+- [x] `pi-extensions/scenario-bridge.ts`: register
   - `dungeon_read_feature` — parse a `.feature` file from the harness's
     own workspace into the working model.
   - `dungeon_write_feature` — render the working model to Gherkin, written
@@ -48,14 +49,16 @@ that's phase 06.
   - `dungeon_write_implementation_notes` — advisory suggestions
     (step-consolidation/refactor ideas), also workspace-local, never read
     back by `dungeon_read_feature`.
-- No track-web filesystem access anywhere in this phase.
+- [x] No track-web filesystem access anywhere in this phase.
 
 ## Deliverable
 
-Within a single session, the designer builds up a Feature's Scenarios via
-chat + board (phase 03), has them written as real Gherkin in the harness's
-workspace, closes the session, reopens it, and `dungeon_read_feature`
-correctly reloads exactly what was written.
+- [x] Within a single session, the designer builds up a Feature's Scenarios via
+  chat, has them written as real Gherkin in the harness's workspace,
+  closes the session, reopens it, and `dungeon_read_feature` correctly
+  reloads exactly what was written. (Verified live against the running dev
+  instance; board (phase 03) is a separate, not-yet-integrated input into
+  scenario authoring — this phase's tools operate standalone via chat.)
 
 ## Suggested OpenSpec capability
 

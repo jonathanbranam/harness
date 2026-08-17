@@ -1,28 +1,30 @@
 // Per-connection WebSocket protocol: forwards pi's AgentSessionEvent stream
-// to the browser, and routes browser messages back to session.prompt() /
-// the permission-gate approval flow. Mirrors deck-harness-server's
-// websocket.ts, minus deck_state/selection/object_update/shape/image/
-// deck/slide/undo/redo/render-request handling — this harness has no
-// domain state to broadcast yet (see design.md's "no domain-state
-// broadcast" decision).
+// and board-state changes to the browser, and routes browser messages back
+// to session.prompt() / the permission-gate approval flow. Mirrors
+// deck-harness-server's websocket.ts's deck_state broadcast, except the
+// board being broadcast is per-session (getOrCreateBoardStore), not a
+// module-level singleton — see design.md's "instantiated per session"
+// decision.
 //
 // createDungeonSocketHandlers() is called once per upgraded connection (see
 // @hono/node-ws: the function passed to upgradeWebSocket runs per request),
-// so all state closed over here (pendingApprovals, the unsubscribe handle)
+// so all state closed over here (pendingApprovals, the unsubscribe handles)
 // is naturally scoped to that one connection.
 
 import type { Context } from 'hono'
 import { getCookie } from 'hono/cookie'
 import type { WSContext, WSEvents } from 'hono/ws'
 import { SESSION_COOKIE } from './auth'
+import type { BoardState } from './board-engine/types'
 import type { ApprovalRequest, RequestApproval } from './pi-extensions/permission-gate'
-import { getOrCreateSession } from './session-store'
+import { getOrCreateBoardStore, getOrCreateSession } from './session-store'
 
 type ClientMessage = { type: 'prompt'; text: string } | { type: 'approval_response'; toolCallId: string; approved: boolean }
 
 type ServerMessage =
   | { type: 'history'; messages: unknown }
   | { type: 'agent_event'; event: unknown }
+  | { type: 'board_state'; state: BoardState }
   | { type: 'approval_required'; request: ApprovalRequest }
   | { type: 'error'; message: string }
 
@@ -46,6 +48,7 @@ export function createDungeonSocketHandlers(c: Context): WSEvents {
   const pendingApprovals = new Map<string, (approved: boolean) => void>()
   let ws: WSContext | undefined
   let unsubscribeAgent: (() => void) | undefined
+  let unsubscribeBoard: (() => void) | undefined
 
   const requestApproval: RequestApproval = (request) =>
     new Promise((resolve) => {
@@ -65,6 +68,14 @@ export function createDungeonSocketHandlers(c: Context): WSEvents {
       }
 
       try {
+        // getOrCreateBoardStore creates the session (and its board) if
+        // needed, same as getOrCreateSession below would — calling it first
+        // means a reconnecting client gets current board state immediately,
+        // without waiting for the next mutation.
+        const board = await getOrCreateBoardStore(token, { requestApproval })
+        unsubscribeBoard = board.subscribe((state) => safeSend(socket, { type: 'board_state', state }))
+        safeSend(socket, { type: 'board_state', state: board.getState() })
+
         const session = await getOrCreateSession(token, { requestApproval })
         safeSend(socket, { type: 'history', messages: session.messages })
         unsubscribeAgent = session.subscribe((event) => safeSend(socket, { type: 'agent_event', event }))
@@ -104,6 +115,7 @@ export function createDungeonSocketHandlers(c: Context): WSEvents {
 
     onClose: () => {
       unsubscribeAgent?.()
+      unsubscribeBoard?.()
       // Deny anything still pending so the agent doesn't hang forever
       // waiting on a browser tab that just went away.
       for (const resolve of pendingApprovals.values()) resolve(false)

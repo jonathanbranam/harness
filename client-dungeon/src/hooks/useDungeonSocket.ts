@@ -7,6 +7,50 @@ export interface ApprovalRequest {
   input: unknown
 }
 
+// Duplicated from dungeon-harness-server/src/board-engine/types.ts (no
+// shared `packages/` tier yet — see CLAUDE.md's "No packages/ tier yet");
+// keep this shape in sync with the server's BoardState/PlacedUnit types by
+// hand.
+
+export type Archetype = 'melee' | 'rogue' | 'ranger' | 'magic-user' | 'short-range' | 'long-range'
+export type Faction = 'pc' | 'npc'
+export type Direction = 'up' | 'down' | 'left' | 'right'
+export type TerrainType = 'plains' | 'forest' | 'water' | 'stone'
+
+export interface UnitDef {
+  maxHp: number
+  movement: { range: number }
+  attack: {
+    damage: number
+    targeting: { mode: 'direction'; arc: 'cardinal'; minRange: number; maxRange: number }
+    propagation: { shape: 'single' | 'line' | 'plus'; penetration: 'none' | 'stop_at_first' }
+  }
+}
+
+export interface Cell {
+  col: number
+  row: number
+}
+
+export interface PlacedUnit {
+  id: string
+  archetype: Archetype
+  faction: Faction
+  position: Cell
+  unitDef: UnitDef
+}
+
+export interface BoardCell {
+  terrain: TerrainType
+}
+
+export interface BoardState {
+  width: number
+  height: number
+  cells: BoardCell[][]
+  units: PlacedUnit[]
+}
+
 export interface ChatMessageEntry {
   kind: 'message'
   id: string
@@ -22,9 +66,31 @@ export interface ToolCallEntry {
   toolName: string
   status: 'running' | 'done' | 'error'
   resultSummary?: string
+  /** The tool's raw `details` value (event.result), not just resultSummary's truncated string — BoardCanvas's movement/attack preview overlay reads dungeon_preview_movement/dungeon_preview_attack results from here (see findLatestPreview below). */
+  result?: unknown
 }
 
 export type TranscriptEntry = ChatMessageEntry | ToolCallEntry
+
+export interface MovementPreviewResult {
+  path: Cell[]
+}
+
+export interface AttackPreviewResult {
+  footprint: Cell[]
+  hits: Cell[]
+}
+
+/** Scans the transcript backwards for the most recent successful dungeon_preview_movement/dungeon_preview_attack result, so BoardCanvas can overlay whichever preview the agent (or a direct tool call) computed last. */
+export function findLatestPreview(transcript: TranscriptEntry[], toolName: 'dungeon_preview_movement' | 'dungeon_preview_attack'): unknown {
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const entry = transcript[i]
+    if (entry.kind !== 'tool' || entry.toolName !== toolName || entry.status !== 'done') continue
+    if (!entry.result || typeof entry.result !== 'object' || 'error' in entry.result) continue
+    return entry.result
+  }
+  return undefined
+}
 
 function summarize(value: unknown): string {
   if (value == null) return ''
@@ -51,6 +117,7 @@ export function useDungeonSocket() {
   const [connected, setConnected] = useState(false)
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
+  const [boardState, setBoardState] = useState<BoardState | null>(null)
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -70,6 +137,11 @@ export function useDungeonSocket() {
 
       if (msg.type === 'approval_required') {
         setPendingApproval(msg.request as ApprovalRequest)
+        return
+      }
+
+      if (msg.type === 'board_state') {
+        setBoardState(msg.state as BoardState)
         return
       }
 
@@ -142,8 +214,12 @@ export function useDungeonSocket() {
         const toolCallId = event.toolCallId as string
         const isError = event.isError as boolean | undefined
         const resultSummary = summarize(event.result)
+        // event.result is the tool's full AgentToolResult ({ content, details,
+        // ... }) — the JSON-serializable value board-bridge.ts's execute()
+        // functions return is its "details" field.
+        const result = (event.result as { details?: unknown } | undefined)?.details
         setTranscript((t) =>
-          t.map((e) => (e.kind === 'tool' && e.toolCallId === toolCallId ? { ...e, status: isError ? 'error' : 'done', resultSummary } : e)),
+          t.map((e) => (e.kind === 'tool' && e.toolCallId === toolCallId ? { ...e, status: isError ? 'error' : 'done', resultSummary, result } : e)),
         )
       }
     }
@@ -165,6 +241,7 @@ export function useDungeonSocket() {
     connected,
     transcript,
     pendingApproval,
+    boardState,
     sendPrompt,
     respondApproval,
   }

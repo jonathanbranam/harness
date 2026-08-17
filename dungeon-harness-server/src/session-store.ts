@@ -4,16 +4,19 @@
 // AgentSession, reused across WebSocket reconnects (page reloads, dropped
 // connections) until logout disposes it.
 //
-// Unlike deck-harness-server's session-store.ts, there's no requestRender
-// callback and no custom tool names — this phase registers no
-// dungeon-tactics tools and has no board state to broadcast yet. See
-// design.md's "Session-store has no domain-state broadcast" decision.
+// Each session also gets its own BoardStore (design.md's "instantiated per
+// session, not a module-level singleton" decision) — a board belongs to one
+// design session's scenario work, the same way the AgentSession itself is
+// already per-session rather than shared.
 
 import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, type AgentSession } from '@earendil-works/pi-coding-agent'
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
+import { BoardStore } from './board-state'
+import { createBoardBridgeExtension } from './pi-extensions/board-bridge'
 import { createPermissionGateExtension, type RequestApproval } from './pi-extensions/permission-gate'
+import { createScenarioBridgeExtension } from './pi-extensions/scenario-bridge'
 
 const TEMPLATES_DIR = join(import.meta.dirname, '..', 'templates', 'agent-workspace')
 
@@ -23,12 +26,23 @@ const modelRuntimePromise = ModelRuntime.create()
 
 interface SessionRecord {
   session: AgentSession
+  board: BoardStore
   callbacks: SessionCallbacks
 }
 
 const sessions = new Map<string, SessionRecord>()
 
 const BUILTIN_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const
+const CUSTOM_TOOL_NAMES = [
+  'dungeon_get_board_state',
+  'dungeon_preview_movement',
+  'dungeon_preview_attack',
+  'dungeon_place_unit',
+  'dungeon_set_terrain',
+  'dungeon_read_feature',
+  'dungeon_write_feature',
+  'dungeon_write_implementation_notes',
+] as const
 
 export interface SessionCallbacks {
   requestApproval: RequestApproval
@@ -47,25 +61,37 @@ export interface SessionCallbacks {
  *   create the session originally.
  */
 export async function getOrCreateSession(sessionId: string, callbacks: SessionCallbacks, opts: { rebind?: boolean } = {}): Promise<AgentSession> {
+  const record = await getOrCreateSessionRecord(sessionId, callbacks, opts)
+  return record.session
+}
+
+/** The session's BoardStore, creating the session (and its board) first if it doesn't exist yet — used by websocket.ts to subscribe/broadcast board state alongside the agent-event stream. */
+export async function getOrCreateBoardStore(sessionId: string, callbacks: SessionCallbacks, opts: { rebind?: boolean } = {}): Promise<BoardStore> {
+  const record = await getOrCreateSessionRecord(sessionId, callbacks, opts)
+  return record.board
+}
+
+async function getOrCreateSessionRecord(sessionId: string, callbacks: SessionCallbacks, opts: { rebind?: boolean } = {}): Promise<SessionRecord> {
   const existing = sessions.get(sessionId)
   if (existing) {
     if (opts.rebind) existing.callbacks = callbacks
-    return existing.session
+    return existing
   }
 
   const cwd = ensureAgentWorkspace(env.DUNGEON_WORKSPACE_DIR, TEMPLATES_DIR)
   const modelRuntime = await modelRuntimePromise
+  const board = new BoardStore()
 
   // record.callbacks can be mutated by a later rebind (see above), so route
   // through it indirectly instead of closing over this call's callbacks by
   // value.
-  const record: SessionRecord = { session: undefined as unknown as AgentSession, callbacks }
+  const record: SessionRecord = { session: undefined as unknown as AgentSession, board, callbacks }
   const requestApproval: RequestApproval = (request) => record.callbacks.requestApproval(request)
 
   const resourceLoader = new DefaultResourceLoader({
     cwd,
     agentDir: getAgentDir(),
-    extensionFactories: [createPermissionGateExtension({ cwd, requestApproval })],
+    extensionFactories: [createPermissionGateExtension({ cwd, requestApproval }), createBoardBridgeExtension({ board }), createScenarioBridgeExtension({ cwd })],
   })
   await resourceLoader.reload()
 
@@ -74,7 +100,7 @@ export async function getOrCreateSession(sessionId: string, callbacks: SessionCa
     sessionManager: SessionManager.inMemory(cwd),
     cwd,
     resourceLoader,
-    tools: [...BUILTIN_TOOLS],
+    tools: [...BUILTIN_TOOLS, ...CUSTOM_TOOL_NAMES],
   })
 
   // A reconnect racing this same async setup would otherwise create two
@@ -84,11 +110,11 @@ export async function getOrCreateSession(sessionId: string, callbacks: SessionCa
   if (raced) {
     session.dispose()
     if (opts.rebind) raced.callbacks = callbacks
-    return raced.session
+    return raced
   }
   record.session = session
   sessions.set(sessionId, record)
-  return session
+  return record
 }
 
 export function disposeSession(sessionId: string) {
