@@ -1,0 +1,69 @@
+## Purpose
+
+Defines how the dungeon harness's "Chat with pi" panel renders the agent transcript — turning the underlying agent event stream into message bubbles and tool badges that stay legible across turns with multiple tool calls and markdown-formatted replies.
+
+## ADDED Requirements
+
+### Requirement: No empty message bubbles
+The chat transcript SHALL NOT display a message bubble for an assistant turn that produced no text content.
+
+#### Scenario: Assistant turn is tool-only
+- **WHEN** the agent starts an assistant message, makes one or more tool calls, and ends the message without ever emitting non-whitespace text
+- **THEN** the transcript shows the tool call badge(s) for that turn but no empty message bubble before, between, or after them
+
+#### Scenario: Assistant turn mixes text and tool calls
+- **WHEN** the agent emits at least one non-whitespace text delta as part of an assistant message that also includes tool calls
+- **THEN** the transcript shows a message bubble containing that text, alongside the tool call badge(s)
+
+#### Scenario: Multiple tool calls in one turn
+- **WHEN** the agent makes several tool calls in a row within a single turn, with no non-whitespace text emitted between them
+- **THEN** the transcript shows each tool call's badge consecutively with no blank bubble separating them
+
+### Requirement: Assistant markdown rendering
+The chat transcript SHALL render assistant message text as formatted markdown, styled to match the panel's theme, rather than as raw unformatted text.
+
+#### Scenario: Assistant reply contains markdown formatting
+- **WHEN** an assistant message's text includes markdown syntax (e.g. headings, bold/italic emphasis, bullet or numbered lists, inline code, fenced code blocks, links)
+- **THEN** the transcript renders that syntax as its corresponding styled HTML element (e.g. a bold run renders bold, a fenced code block renders in a monospace block) instead of showing the raw markdown characters
+
+#### Scenario: Assistant reply is still streaming
+- **WHEN** an assistant message is actively streaming text deltas
+- **THEN** the partially-received text is rendered as markdown on each update, without waiting for the message to finish
+
+#### Scenario: User messages are not markdown-rendered
+- **WHEN** a transcript entry is a user-authored message
+- **THEN** its text is rendered as plain text, not parsed as markdown
+
+### Requirement: Stick-to-bottom auto-scroll
+The chat panel's scroll region SHALL automatically scroll to the newest content only when the user's scroll position was already near the bottom before new content arrived.
+
+#### Scenario: User is at the bottom when a new entry arrives
+- **WHEN** the chat panel's scroll position is within a small threshold of the bottom and a new entry is appended
+- **THEN** the panel scrolls to show the new entry
+
+#### Scenario: User has scrolled up to read history
+- **WHEN** the chat panel's scroll position is not near the bottom and a new entry is appended
+- **THEN** the panel's scroll position does not change, leaving the user's view undisturbed
+
+### Requirement: Auto-growing chat input
+The chat input SHALL grow vertically to fit typed content up to a maximum height of approximately six lines, beyond which it becomes internally scrollable, and SHALL return to single-line height after a message is submitted.
+
+#### Scenario: User types a multi-line prompt
+- **WHEN** the user types or pastes text that wraps to more lines than the input's current height shows
+- **THEN** the input grows taller to fit the additional lines, up to the maximum height
+
+#### Scenario: Typed content exceeds the maximum height
+- **WHEN** the user's typed content would require more than approximately six lines of height
+- **THEN** the input stops growing at its maximum height and becomes internally scrollable, keeping the line the user is actively editing in view
+
+#### Scenario: Message is submitted
+- **WHEN** the user submits a message from an input that has grown beyond one line
+- **THEN** the input's text is cleared and its height returns to single-line size
+
+#### Scenario: Enter submits, Shift+Enter inserts a newline
+- **WHEN** the user presses Enter without Shift held while the input is focused and not composing IME text
+- **THEN** the message is submitted rather than a newline being inserted
+
+#### Scenario: Shift+Enter inserts a newline
+- **WHEN** the user presses Shift+Enter while the input is focused
+- **THEN** a newline is inserted into the input and the message is not submitted
