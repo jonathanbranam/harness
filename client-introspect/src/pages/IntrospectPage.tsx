@@ -81,7 +81,6 @@ export function IntrospectPage() {
   const {
     connected,
     blocks,
-    foundation,
     foundationTokens,
     apparatusEntries,
     usage,
@@ -269,7 +268,7 @@ export function IntrospectPage() {
                   onRestore={() => restorePane(APPARATUS_PANE)}
                 />
                 <div className="flex-1 min-h-0">
-                  <ApparatusView entries={apparatusEntries} foundation={foundation} foundationTokens={foundationTokens} usage={usage} />
+                  <ApparatusView entries={apparatusEntries} foundationTokens={foundationTokens} usage={usage} />
                 </div>
               </div>
             )}

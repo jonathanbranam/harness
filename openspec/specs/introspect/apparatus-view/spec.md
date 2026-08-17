@@ -17,6 +17,21 @@ The apparatus view SHALL display a fixed-size grid representing 0-100% of the mo
 - **WHEN** cumulative context usage would require more grid cells than the fixed grid provides
 - **THEN** the apparatus view continues to represent the same fixed 0-100% extent (never scrolling or growing), with usage approaching the forced-compaction zone signaling the limit instead
 
+### Requirement: Grid cells maintain a square aspect ratio
+The apparatus view's grid SHALL scale to fill whichever of its pane's width or height is the binding constraint while keeping every cell square, rather than independently stretching cell width and height to exactly fill a non-matching pane shape.
+
+#### Scenario: Pane is wider than the grid's aspect ratio
+- **WHEN** the apparatus pane's available width, at the grid's fixed row/column count, would produce a wider-than-tall shape relative to the grid's aspect ratio
+- **THEN** the grid's height fills the available height, its width is derived from that height to preserve square cells, and the grid is centered horizontally in the remaining space
+
+#### Scenario: Pane is taller than the grid's aspect ratio
+- **WHEN** the apparatus pane's available height, at the grid's fixed row/column count, would produce a taller-than-wide shape relative to the grid's aspect ratio
+- **THEN** the grid's width fills the available width, its height is derived from that width to preserve square cells, and the grid is centered vertically in the remaining space
+
+#### Scenario: Pane is resized
+- **WHEN** the apparatus pane is resized to a new width or height
+- **THEN** the grid rescales to the largest size that both fits the new available space and keeps its cells square, without ever cropping or overflowing the pane
+
 ### Requirement: Context-window zone bands
 The apparatus view SHALL divide the grid into three labeled zones — "smart zone," "dumb zone," and "forced compaction" — as tunable percentage boundaries of the model's real context window, and SHALL visually distinguish each zone.
 
@@ -70,15 +85,15 @@ The apparatus view SHALL show at most one tool-call indicator per grid cell, reg
 - **THEN** that cell's indicator uses a color visually distinct from both the completed-success color and the error color, so an in-progress call is not mistaken for a failure
 
 ### Requirement: Pinned foundation zone
-The apparatus view SHALL show a pinned foundation zone that always remains visible and displays the system prompt, loaded skills, and active guides/sensors, positioned at the start of the grid's chronological fill order so it is never obscured by later content.
+The apparatus view SHALL pin the foundation's token contribution (system prompt, loaded skills, and active guides/sensors) at the start of the grid's chronological fill order, representing its share of context usage in the grid's cell coloring and in the composition breakdown, without rendering the foundation's textual contents (system prompt text or skill names) anywhere in the view.
 
 #### Scenario: Foundation update arrives
 - **WHEN** a `foundation_update` event arrives during a session
-- **THEN** the pinned zone updates to show the new skills, guides, and sensors
+- **THEN** the grid's foundation-colored cells and the composition breakdown's foundation total update to reflect the new token count, without displaying the updated system prompt, skill, or guide/sensor content as text
 
 #### Scenario: Grid fills with later content
 - **WHEN** later session content fills additional grid cells
-- **THEN** the foundation zone remains visible and is not scrolled away or overwritten
+- **THEN** the foundation zone's cells remain visible at the start of the grid and are not scrolled away or overwritten
 
 ### Requirement: Context gauge
 The apparatus view SHALL render a gauge showing the current context usage as a percentage of the model's context window.

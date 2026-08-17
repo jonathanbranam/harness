@@ -1,9 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import type { ApparatusEntry, ApparatusEntryKind, FoundationState, UsageState } from '../hooks/useIntrospectSocket'
+import type { ApparatusEntry, ApparatusEntryKind, UsageState } from '../hooks/useIntrospectSocket'
 
-/** Fixed waffle grid dimensions — tunable. Cells are laid out with CSS grid `1fr`
- * tracks (not fixed pixels), so the grid always exactly fills the pane's
- * available space with zero overflow, regardless of window size. */
+/** Fixed waffle grid dimensions — tunable. The grid is a square-aspect CSS
+ * grid (`COLS / ROWS`) that scales up to fill whichever of the pane's width
+ * or height is the binding constraint, then centers in the other axis — so
+ * cells stay square instead of stretching to fill a non-matching pane shape. */
 const COLS = 24
 const ROWS = 36
 const TOTAL_CELLS = COLS * ROWS
@@ -177,12 +178,10 @@ function CategorySwatch({ color }: { color: string }) {
 
 export function ApparatusView({
   entries,
-  foundation,
   foundationTokens,
   usage,
 }: {
   entries: ApparatusEntry[]
-  foundation: FoundationState
   foundationTokens: number
   usage: UsageState
 }) {
@@ -296,121 +295,117 @@ export function ApparatusView({
         </div>
       </div>
 
-      <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/60 flex-none">
-        <h3 className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Foundation (pinned)</h3>
-        <div className="text-[11px] text-gray-500 dark:text-gray-500 line-clamp-2 leading-snug">{foundation.systemPrompt || 'No system prompt loaded'}</div>
-        {foundation.skills.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {foundation.skills.map((skill) => (
-              <span key={skill.name} className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-300 text-[10px]">
-                {skill.name}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
       <div className="flex-1 min-h-0 p-3">
         <div
-          className="relative w-full h-full rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#0a0f1a] p-1.5"
-          style={{ minHeight: 0 }}
+          className="relative w-full h-full rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#0a0f1a] p-1.5 flex items-center justify-center"
+          style={{ minHeight: 0, containerType: 'size' }}
         >
-          {/* zone bands */}
           <div
-            className="absolute left-1.5 right-1.5 pointer-events-none"
-            style={{ top: 0, height: `${(smartRow / ROWS) * 100}%`, background: 'rgba(52, 211, 153, 0.06)' }}
-          />
-          <div
-            className="absolute left-1.5 right-1.5 pointer-events-none"
-            style={{ top: `${(smartRow / ROWS) * 100}%`, height: `${((dumbRow - smartRow) / ROWS) * 100}%`, background: 'rgba(251, 191, 36, 0.10)' }}
-          />
-          <div
-            className="absolute left-1.5 right-1.5 pointer-events-none"
-            style={{ top: `${(dumbRow / ROWS) * 100}%`, bottom: 0, background: 'rgba(248, 113, 113, 0.12)' }}
-          />
-          <div
-            className="absolute right-2 pointer-events-none text-[9px] uppercase tracking-wide text-gray-400 dark:text-gray-500 bg-white/60 dark:bg-black/40 px-1 rounded"
-            style={{ top: 2 }}
+            className="relative"
+            style={{
+              aspectRatio: `${COLS} / ${ROWS}`,
+              width: `min(100%, 100cqh * ${COLS / ROWS})`,
+              maxWidth: '100%',
+              maxHeight: '100%',
+            }}
           >
-            smart zone
-          </div>
-          <div
-            className="absolute right-2 pointer-events-none text-[9px] uppercase tracking-wide text-gray-400 dark:text-gray-500 bg-white/60 dark:bg-black/40 px-1 rounded"
-            style={{ top: `calc(${(smartRow / ROWS) * 100}% + 2px)` }}
-          >
-            dumb zone
-          </div>
-          <div
-            className="absolute right-2 pointer-events-none text-[9px] uppercase tracking-wide text-gray-400 dark:text-gray-500 bg-white/60 dark:bg-black/40 px-1 rounded"
-            style={{ top: `calc(${(dumbRow / ROWS) * 100}% + 2px)` }}
-          >
-            forced compaction
-          </div>
+            {/* zone bands */}
+            <div
+              className="absolute left-1.5 right-1.5 pointer-events-none"
+              style={{ top: 0, height: `${(smartRow / ROWS) * 100}%`, background: 'rgba(52, 211, 153, 0.06)' }}
+            />
+            <div
+              className="absolute left-1.5 right-1.5 pointer-events-none"
+              style={{ top: `${(smartRow / ROWS) * 100}%`, height: `${((dumbRow - smartRow) / ROWS) * 100}%`, background: 'rgba(251, 191, 36, 0.10)' }}
+            />
+            <div
+              className="absolute left-1.5 right-1.5 pointer-events-none"
+              style={{ top: `${(dumbRow / ROWS) * 100}%`, bottom: 0, background: 'rgba(248, 113, 113, 0.12)' }}
+            />
+            <div
+              className="absolute right-2 pointer-events-none text-[9px] uppercase tracking-wide text-gray-400 dark:text-gray-500 bg-white/60 dark:bg-black/40 px-1 rounded"
+              style={{ top: 2 }}
+            >
+              smart zone
+            </div>
+            <div
+              className="absolute right-2 pointer-events-none text-[9px] uppercase tracking-wide text-gray-400 dark:text-gray-500 bg-white/60 dark:bg-black/40 px-1 rounded"
+              style={{ top: `calc(${(smartRow / ROWS) * 100}% + 2px)` }}
+            >
+              dumb zone
+            </div>
+            <div
+              className="absolute right-2 pointer-events-none text-[9px] uppercase tracking-wide text-gray-400 dark:text-gray-500 bg-white/60 dark:bg-black/40 px-1 rounded"
+              style={{ top: `calc(${(dumbRow / ROWS) * 100}% + 2px)` }}
+            >
+              forced compaction
+            </div>
 
-          {/* cell grid */}
-          <div
-            className="relative w-full h-full"
-            style={{ display: 'grid', gridTemplateColumns: `repeat(${COLS}, 1fr)`, gridTemplateRows: `repeat(${ROWS}, 1fr)`, gap: '2px' }}
-          >
-            {Array.from({ length: TOTAL_CELLS }, (_, i) => {
-              const cell = i < cells.length ? cells[i] : undefined
-              const sectionIdx = cell ? cellSection[cell.index] : undefined
-              const section = sectionIdx != null ? sections[sectionIdx] : undefined
-              const color = cell?.dominant ? CATEGORY_META[cell.dominant].color : undefined
-              const isHovered = sectionIdx != null && hoverSection === sectionIdx
-              return (
-                <div
-                  key={i}
-                  className="rounded-sm"
-                  style={{
-                    background: color ?? 'rgba(120,120,120,0.08)',
-                    cursor: cell ? 'pointer' : 'default',
-                    boxShadow: [
-                      i === lastFilledIndex ? '0 0 0 2px #f3f4f6, 0 0 4px 1px rgba(255,255,255,0.5)' : '',
-                      isHovered ? 'inset 0 0 0 1px rgba(255,255,255,0.8)' : '',
-                    ]
-                      .filter(Boolean)
-                      .join(', '),
-                    filter: isHovered ? 'brightness(1.3)' : undefined,
-                  }}
-                  onMouseEnter={() => sectionIdx != null && setHoverSection(sectionIdx)}
-                  onMouseMove={(ev) => section && showSectionTooltip(ev, section)}
-                  onMouseLeave={() => {
-                    setHoverSection(null)
-                    setTooltip(null)
-                  }}
-                />
-              )
-            })}
-          </div>
-
-          {/* tool call marker overlay */}
-          <div className="absolute inset-1.5 pointer-events-none">
-            {Array.from(toolCellGroups.entries()).map(([cellIndex, list]) => {
-              const row = Math.floor(cellIndex / COLS)
-              const col = cellIndex % COLS
-              const status = worstToolStatus(list)
-              const size = Math.min(45 + (list.length - 1) * 12, 85)
-              return (
-                <div
-                  key={cellIndex}
-                  className="absolute flex items-center justify-center pointer-events-auto"
-                  style={{
-                    left: `${(col / COLS) * 100}%`,
-                    top: `${(row / ROWS) * 100}%`,
-                    width: `${(1 / COLS) * 100}%`,
-                    height: `${(1 / ROWS) * 100}%`,
-                  }}
-                  onMouseMove={(ev) => showToolTooltip(ev, list)}
-                  onMouseLeave={() => setTooltip(null)}
-                >
+            {/* cell grid */}
+            <div
+              className="relative w-full h-full"
+              style={{ display: 'grid', gridTemplateColumns: `repeat(${COLS}, 1fr)`, gridTemplateRows: `repeat(${ROWS}, 1fr)`, gap: '2px' }}
+            >
+              {Array.from({ length: TOTAL_CELLS }, (_, i) => {
+                const cell = i < cells.length ? cells[i] : undefined
+                const sectionIdx = cell ? cellSection[cell.index] : undefined
+                const section = sectionIdx != null ? sections[sectionIdx] : undefined
+                const color = cell?.dominant ? CATEGORY_META[cell.dominant].color : undefined
+                const isHovered = sectionIdx != null && hoverSection === sectionIdx
+                return (
                   <div
+                    key={i}
                     className="rounded-sm"
-                    style={{ width: `${size}%`, height: `${size}%`, background: TOOL_STATUS_COLOR[status], boxShadow: '0 0 0 1.5px #05070d' }}
+                    style={{
+                      background: color ?? 'rgba(120,120,120,0.08)',
+                      cursor: cell ? 'pointer' : 'default',
+                      boxShadow: [
+                        i === lastFilledIndex ? '0 0 0 2px #f3f4f6, 0 0 4px 1px rgba(255,255,255,0.5)' : '',
+                        isHovered ? 'inset 0 0 0 1px rgba(255,255,255,0.8)' : '',
+                      ]
+                        .filter(Boolean)
+                        .join(', '),
+                      filter: isHovered ? 'brightness(1.3)' : undefined,
+                    }}
+                    onMouseEnter={() => sectionIdx != null && setHoverSection(sectionIdx)}
+                    onMouseMove={(ev) => section && showSectionTooltip(ev, section)}
+                    onMouseLeave={() => {
+                      setHoverSection(null)
+                      setTooltip(null)
+                    }}
                   />
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
+
+            {/* tool call marker overlay */}
+            <div className="absolute inset-1.5 pointer-events-none">
+              {Array.from(toolCellGroups.entries()).map(([cellIndex, list]) => {
+                const row = Math.floor(cellIndex / COLS)
+                const col = cellIndex % COLS
+                const status = worstToolStatus(list)
+                const size = Math.min(45 + (list.length - 1) * 12, 85)
+                return (
+                  <div
+                    key={cellIndex}
+                    className="absolute flex items-center justify-center pointer-events-auto"
+                    style={{
+                      left: `${(col / COLS) * 100}%`,
+                      top: `${(row / ROWS) * 100}%`,
+                      width: `${(1 / COLS) * 100}%`,
+                      height: `${(1 / ROWS) * 100}%`,
+                    }}
+                    onMouseMove={(ev) => showToolTooltip(ev, list)}
+                    onMouseLeave={() => setTooltip(null)}
+                  >
+                    <div
+                      className="rounded-sm"
+                      style={{ width: `${size}%`, height: `${size}%`, background: TOOL_STATUS_COLOR[status], boxShadow: '0 0 0 1.5px #05070d' }}
+                    />
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -439,35 +434,6 @@ export function ApparatusView({
                 {toolCalls.length} calls{toolErrors ? ` (${toolErrors} error)` : ''}
               </span>
             </div>
-          </div>
-        </div>
-
-        <div className="border-t border-gray-200 dark:border-gray-800 pt-2 space-y-1">
-          {(['done', 'running', 'error'] as const).map((status) => (
-            <div key={status} className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-              <CategorySwatch color={TOOL_STATUS_COLOR[status]} />
-              <b className="text-gray-700 dark:text-gray-200 font-semibold">{status}</b>
-              <span>
-                {status === 'done' ? '— call completed successfully' : status === 'running' ? '— still in flight (live sessions only)' : '— the call failed'}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t border-gray-200 dark:border-gray-800 pt-2 space-y-1 text-[11.5px] text-gray-500 dark:text-gray-400">
-          <div className="flex justify-between">
-            <span>smart zone</span>
-            <b className="text-gray-700 dark:text-gray-200">0–{Math.round(CONTEXT_ZONES.smart * 100)}%</b>
-          </div>
-          <div className="flex justify-between">
-            <span>dumb zone</span>
-            <b className="text-gray-700 dark:text-gray-200">
-              {Math.round(CONTEXT_ZONES.smart * 100)}–{Math.round(CONTEXT_ZONES.dumb * 100)}%
-            </b>
-          </div>
-          <div className="flex justify-between">
-            <span>forced compaction</span>
-            <b className="text-gray-700 dark:text-gray-200">{Math.round(CONTEXT_ZONES.dumb * 100)}–100%</b>
           </div>
         </div>
       </div>
