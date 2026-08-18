@@ -21,7 +21,7 @@ const MIN_SIZE = '18%'
 
 export function DungeonPage() {
   const { logout } = useAuth()
-  const { connected, transcript, pendingApproval, boardState, sendPrompt, respondApproval } = useDungeonSocket()
+  const { connected, transcript, pendingApproval, boardState, canvasRef, sendPrompt, respondApproval } = useDungeonSocket()
   const { theme, toggleTheme } = useTheme()
   const { paneModes, panelRefs, minimizePane, maximizePane, restorePane, handleLayoutChanged } = usePaneManager(PANE_IDS, DEFAULT_SIZES)
 
@@ -76,7 +76,7 @@ export function DungeonPage() {
                   onRestore={() => restorePane(BOARD_PANE)}
                 />
                 <div className="flex-1 min-h-0">
-                  <BoardCanvas boardState={boardState} />
+                  <BoardCanvas ref={canvasRef} boardState={boardState} />
                 </div>
               </div>
             )}

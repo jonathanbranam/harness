@@ -1,6 +1,7 @@
+import { forwardRef } from 'react'
 import type { BoardObject, BoardState, Point } from '../hooks/useDungeonSocket'
 
-const CELL_SIZE = 40
+export const CELL_SIZE = 40
 
 function toPixel(point: Point): { x: number; y: number } {
   return { x: point.x * CELL_SIZE, y: point.y * CELL_SIZE }
@@ -85,8 +86,16 @@ interface BoardCanvasProps {
  * plus every drawn object (shape/line/overlay/label) rendered generically by
  * kind. Mirrors client-deck's DeckCanvas precedent of plain SVG/Canvas over
  * Phaser for a live-state view (see design.md/proposal.md).
+ *
+ * The forwarded ref lands on a fixed-pixel-size wrapper div around the svg
+ * (not the svg element itself, since captureNode's html-to-image capture
+ * expects an HTMLElement) — mirrors DeckCanvas's canvasRef, which similarly
+ * targets a div sized to the canvas's fixed logical dimensions rather than
+ * whatever's currently on screen. Unlike DeckCanvas, this wrapper carries no
+ * scale-to-fit transform (BoardCanvas is overflow-auto, not scaled), so
+ * useDungeonSocket's capture needs no style override to defeat one.
  */
-export function BoardCanvas({ boardState }: BoardCanvasProps) {
+export const BoardCanvas = forwardRef<HTMLDivElement, BoardCanvasProps>(function BoardCanvas({ boardState }, ref) {
   if (!boardState) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-gray-400 dark:text-gray-500">Waiting for board state…</div>
@@ -102,38 +111,40 @@ export function BoardCanvas({ boardState }: BoardCanvasProps) {
 
   return (
     <div className="flex items-center justify-center h-full overflow-auto p-4">
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="border border-gray-300 dark:border-gray-700">
-        {boardState.cells.map((row, r) =>
-          row.map((cell, c) => (
-            <rect
-              key={`${c},${r}`}
-              x={c * CELL_SIZE}
-              y={r * CELL_SIZE}
-              width={CELL_SIZE}
-              height={CELL_SIZE}
-              fill={cell.fillColor}
-              stroke="#9ca3af"
-              strokeWidth={0.5}
-            />
-          )),
-        )}
+      <div ref={ref} style={{ width, height }}>
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="border border-gray-300 dark:border-gray-700">
+          {boardState.cells.map((row, r) =>
+            row.map((cell, c) => (
+              <rect
+                key={`${c},${r}`}
+                x={c * CELL_SIZE}
+                y={r * CELL_SIZE}
+                width={CELL_SIZE}
+                height={CELL_SIZE}
+                fill={cell.fillColor}
+                stroke="#9ca3af"
+                strokeWidth={0.5}
+              />
+            )),
+          )}
 
-        {overlays.map((object) => (
-          <OverlayWash key={object.id} object={object} />
-        ))}
+          {overlays.map((object) => (
+            <OverlayWash key={object.id} object={object} />
+          ))}
 
-        {lines.map((object) => (
-          <LineShape key={object.id} object={object} />
-        ))}
+          {lines.map((object) => (
+            <LineShape key={object.id} object={object} />
+          ))}
 
-        {shapes.map((object) => (
-          <ShapeMarker key={object.id} object={object} />
-        ))}
+          {shapes.map((object) => (
+            <ShapeMarker key={object.id} object={object} />
+          ))}
 
-        {labels.map((object) => (
-          <LabelText key={object.id} object={object} />
-        ))}
-      </svg>
+          {labels.map((object) => (
+            <LabelText key={object.id} object={object} />
+          ))}
+        </svg>
+      </div>
     </div>
   )
-}
+})

@@ -1,5 +1,6 @@
+import { captureNode, type ChatMessageEntry, type ToolCallEntry as SharedToolCallEntry } from '@harness/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatMessageEntry, ToolCallEntry as SharedToolCallEntry } from '@harness/ui'
+import { CELL_SIZE } from '../components/BoardCanvas'
 import { genId } from '../id'
 
 export type { ChatMessageEntry }
@@ -103,19 +104,26 @@ function summarize(value: unknown): string {
 /**
  * Owns the single WebSocket connection to dungeon-harness-server: forwards
  * pi's AgentSessionEvent stream into a simplified chat transcript (text
- * streaming + tool call status), and surfaces pending permission-gate
- * approvals. See websocket.ts on the server for the message protocol this
- * speaks — trimmed from client-deck's useDeckSocket per design.md's decision
- * (no DeckState, no canvasRef/render-request handling, no shape/image/deck/
- * slide senders).
+ * streaming + tool call status), surfaces pending permission-gate approvals,
+ * and (per extract-shared-canvas-capture) answers board-render requests
+ * backing the dungeon_board_view pi tool via the shared captureNode utility.
+ * See websocket.ts on the server for the message protocol this speaks —
+ * trimmed from client-deck's useDeckSocket per design.md's decision (no
+ * DeckState, no shape/image/deck/slide senders).
  */
 export function useDungeonSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const streamingIdRef = useRef<string | null>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
   const [connected, setConnected] = useState(false)
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
   const [boardState, setBoardState] = useState<BoardState | null>(null)
+  // ws.onmessage's handleRenderRequest closes over the effect's first run
+  // (deps: []), so it can't read the `boardState` state variable directly —
+  // this ref is kept in sync with every board_state message instead, mirroring
+  // canvasRef's own ref-not-state pattern for the same reason.
+  const boardStateRef = useRef<BoardState | null>(null)
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -124,6 +132,27 @@ export function useDungeonSocket() {
 
     ws.onopen = () => setConnected(true)
     ws.onclose = () => setConnected(false)
+
+    // Renders the DOM node captured by canvasRef and returns the result to
+    // the server over this same connection — see websocket.ts's
+    // requestRender/pendingRenders, which backs the dungeon_board_view pi
+    // tool. Mirrors client-deck's useDeckSocket.ts handleRenderRequest, but
+    // BoardCanvas has no scale-to-fit transform to defeat, so no style
+    // override is needed.
+    async function handleRenderRequest(requestId: string) {
+      const node = canvasRef.current
+      const board = boardStateRef.current
+      if (!node || !board) {
+        ws.send(JSON.stringify({ type: 'render_response', requestId, error: 'Board not mounted' }))
+        return
+      }
+      try {
+        const image = await captureNode(node, { width: board.width * CELL_SIZE, height: board.height * CELL_SIZE })
+        ws.send(JSON.stringify({ type: 'render_response', requestId, image }))
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'render_response', requestId, error: err instanceof Error ? err.message : 'Render failed' }))
+      }
+    }
 
     ws.onmessage = (evt) => {
       let msg: { type: string; [key: string]: unknown }
@@ -139,7 +168,14 @@ export function useDungeonSocket() {
       }
 
       if (msg.type === 'board_state') {
+        boardStateRef.current = msg.state as BoardState
         setBoardState(msg.state as BoardState)
+        return
+      }
+
+      if (msg.type === 'render_request') {
+        const request = msg.request as { requestId: string }
+        void handleRenderRequest(request.requestId)
         return
       }
 
@@ -240,6 +276,7 @@ export function useDungeonSocket() {
     transcript,
     pendingApproval,
     boardState,
+    canvasRef,
     sendPrompt,
     respondApproval,
   }

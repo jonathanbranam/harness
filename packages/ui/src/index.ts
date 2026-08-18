@@ -1,3 +1,5 @@
+export { captureNode, type CaptureNodeOptions } from './canvas/captureNode'
+
 export { ChatInput } from './chat/ChatInput'
 export { ChatPanel } from './chat/ChatPanel'
 export { MarkdownMessage } from './chat/MarkdownMessage'
