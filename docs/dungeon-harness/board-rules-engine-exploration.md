@@ -1,5 +1,14 @@
 # Board rules engine: exploration notes
 
+> **Still worth reading — this is the post-mortem, not a plan.** The
+> diagnosis here (the agent free-hands rule reasoning and nothing catches
+> it; correctness and staleness are separate problems) is *why* the whole
+> dungeon-harness effort was stopped — see [`STATUS.md`](STATUS.md). The
+> open questions at the bottom are answered, at least provisionally, by the
+> [`turn-machines/`](turn-machines/README.md) candidate design
+> (`turn-machines/harness-integration.md` §7), which is **not yet
+> approved**. Nothing in this doc should be implemented as written.
+
 Captures an `/openspec-explore` session investigating why the dungeon-harness
 agent draws the board incorrectly and answers rules questions wrong — e.g.
 it drew a PC's movement options, then added enemies without re-evaluating

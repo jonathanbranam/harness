@@ -1,8 +1,31 @@
+> # ⛔ STOPPED — superseded work, do not implement
+>
+> **This plan is stopped and is being backed out** (2026-08-18). The
+> Gherkin-authoring dungeon-harness approach it belongs to put the LLM in
+> the referee's chair for game rules, and the harness was never usable as a
+> design tool. See [`../STATUS.md`](../STATUS.md) for why, what landed, and
+> what happens to each piece, and [`../backout-plan.md`](../backout-plan.md)
+> for the removal plan.
+>
+> Replacement direction — **still being evaluated, not approved**: a shared
+> rules engine with a declarative unit language
+> ([`../turn-machines/README.md`](../turn-machines/README.md)), plus a
+> ground-up harness rebuild around live multi-scenario simulation.
+>
+> Kept for historical context only. The **Status** line below records what
+> actually landed before the stop.
+
 # Phase 02 — track-web Gherkin test runner
 
 **Repo:** `track-web`
 **Depends on:** none (parallel with phase 01)
 **Blocks:** 04, 06, 07, 08
+
+**Status:** ✅ **Complete** — archived OpenSpec changes `2026-08-16-dungeon-tactics-gherkin-runner`,
+`2026-08-16-dungeon-tactics-separate-test-runner`, `2026-08-16-dungeon-tactics-gherkin-shared-steps`
+(migrated from `@amiceli/vitest-cucumber` to `quickpickle`; own `npm run test:dungeon-tactics`).
+**Disposition:** **KEEP for now, frozen.** Gherkin/cucumber is explicitly *not* being removed yet;
+it stays as regression coverage, no longer as a design surface.
 
 ## Goal
 

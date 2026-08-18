@@ -1,3 +1,11 @@
+> # ⛔ SUPERSEDED — slated for deletion
+>
+> The dungeon-harness work this change belongs to was **stopped on
+> 2026-08-18** and is being backed out. See
+> `docs/dungeon-harness/STATUS.md` for why, and
+> `docs/dungeon-harness/backout-plan.md` §2.6 — this change is proposal-only
+> with no implementation, and is slated for deletion. Do not resume it.
+
 ## Why
 
 The dungeon-harness agent can currently draw anything on the board, but has

@@ -1,3 +1,23 @@
+> # ⛔ STOPPED — this plan is being backed out
+>
+> **As of 2026-08-18 this entire phase plan is stopped.** It executed
+> [`../proposal.md`](../proposal.md)'s Gherkin-authoring approach, which put
+> the LLM in the referee's chair for game rules and never produced a harness
+> that was usable to design with. Phases 01–07 landed, 08a landed for two of
+> four units, 08b never started — and all of it beyond the scaffold is being
+> removed.
+>
+> - **Why, and what happens to each piece:** [`../STATUS.md`](../STATUS.md)
+> - **Concrete removal plan:** [`../backout-plan.md`](../backout-plan.md)
+> - **Replacement direction, still being evaluated and not approved:**
+>   [`../turn-machines/README.md`](../turn-machines/README.md) (shared rules
+>   engine + declarative unit language), plus a ground-up harness rebuild
+>   around live multi-scenario simulation (TBD, not yet designed).
+>
+> The phase docs below stay accurate as a record of *what was built*; each
+> carries its own **Status** and **Disposition**. Do not start new work from
+> this plan.
+
 # Dungeon-Harness Implementation Phases
 
 Execution breakdown of [`../proposal.md`](../proposal.md) into 9 phases,
@@ -18,19 +38,26 @@ repo it's scoped to, when work on it starts.
 
 ## Phases
 
-| # | Repo | Phase | Depends on |
-|---|---|---|---|
-| 01 | harness | [Harness scaffold](phase-01-harness-scaffold.md) | — |
-| 02 | track-web | [Gherkin test runner](phase-02-trackweb-gherkin-runner.md) | — |
-| 03 | harness | [Board & local rules interpreter](phase-03-harness-board-interpreter.md) | 01 |
-| 04 | track-web | [Step catalog generator](phase-04-trackweb-step-catalog.md) | 02 |
-| 05 | harness | [Gherkin authoring core](phase-05-harness-gherkin-authoring.md) | 01 |
-| 06 | harness | [Baseline, changeset & read-only track-web access](phase-06-harness-baseline-changeset.md) | 05; track-web 02, 04 |
-| 07 | track-web | [Engineer skill: scenario → OpenSpec change](phase-07-trackweb-engineer-skill.md) | 02; recommended after 06 |
-| 08a | track-web | [Existing-unit Gherkin extraction (agent-driven)](phase-08a-trackweb-existing-unit-extraction.md) | 02, 07 |
-| 08b | track-web | [Pipeline proof (real harness session)](phase-08b-trackweb-pipeline-proof.md) | all of 01–07, 08a |
+Every phase's current state and what happens to it. "Disposition" is
+summarized from [`../STATUS.md`](../STATUS.md).
 
-## Ordering
+| # | Repo | Phase | Status | Disposition |
+|---|---|---|---|---|
+| 01 | harness | [Harness scaffold](phase-01-harness-scaffold.md) | ✅ Complete | **Keep** — substrate-independent |
+| 02 | track-web | [Gherkin test runner](phase-02-trackweb-gherkin-runner.md) | ✅ Complete | **Keep, frozen** — Gherkin not removed yet |
+| 03 | harness | [Board & local rules interpreter](phase-03-harness-board-interpreter.md) | ✅ then ❌ already reverted | Gone — deleted by `dungeon-board-tool-enhancements` |
+| 04 | track-web | [Step catalog generator](phase-04-trackweb-step-catalog.md) | ✅ Complete | **Delete** |
+| 05 | harness | [Gherkin authoring core](phase-05-harness-gherkin-authoring.md) | ✅ Complete | **Delete** |
+| 06 | harness | [Baseline, changeset & read-only track-web access](phase-06-harness-baseline-changeset.md) | ✅ Complete | **Delete** |
+| 07 | track-web | [Engineer skill: scenario → OpenSpec change](phase-07-trackweb-engineer-skill.md) | ✅ Complete | **Delete** |
+| 08a | track-web | [Existing-unit Gherkin extraction (agent-driven)](phase-08a-trackweb-existing-unit-extraction.md) | ⚠️ Partial (melee, rogue only) | **Keep features**, unwind capability split |
+| 08b | track-web | [Pipeline proof (real harness session)](phase-08b-trackweb-pipeline-proof.md) | ❌ Never started | Moot |
+
+## Ordering (historical)
+
+The dependency graph as planned. Retained to explain how the built pieces
+relate; not a plan to follow.
+
 
 ```mermaid
 graph LR

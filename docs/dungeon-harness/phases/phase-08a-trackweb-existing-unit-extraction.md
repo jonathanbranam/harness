@@ -1,8 +1,34 @@
+> # ⛔ STOPPED — superseded work, do not implement
+>
+> **This plan is stopped and is being backed out** (2026-08-18). The
+> Gherkin-authoring dungeon-harness approach it belongs to put the LLM in
+> the referee's chair for game rules, and the harness was never usable as a
+> design tool. See [`../STATUS.md`](../STATUS.md) for why, what landed, and
+> what happens to each piece, and [`../backout-plan.md`](../backout-plan.md)
+> for the removal plan.
+>
+> Replacement direction — **still being evaluated, not approved**: a shared
+> rules engine with a declarative unit language
+> ([`../turn-machines/README.md`](../turn-machines/README.md)), plus a
+> ground-up harness rebuild around live multi-scenario simulation.
+>
+> Kept for historical context only. The **Status** line below records what
+> actually landed before the stop.
+
 # Phase 08a — track-web existing-unit Gherkin extraction (agent-driven, no design session)
 
 **Repo:** `track-web`
 **Depends on:** this repo's phase 02 (hard — need a runnable step-def target) and phase 07 (hard — this is exactly what consumes the bundle)
 **Blocks:** 08b
+
+**Status:** ⚠️ **Partial, halted.** `melee` and `rogue` landed (archived changes
+`2026-08-16-dungeon-tactics-melee-archetype`, `2026-08-17-dungeon-tactics-rogue-archetype`,
+`2026-08-17-melee-move-attack-scenarios`); **`ranger` and `magic-user` were never started** and now
+never will be under this plan.
+**Disposition:** **KEEP the `.feature` files** (real regression coverage of shipped behavior);
+**unwind the capability split** this phase introduced — `melee-archetype`/`rogue-archetype` were
+carved out of `pc-archetypes`, leaving archetype specs split across three capabilities for no
+reason that survives the stop. See [`../backout-plan.md`](../backout-plan.md).
 
 ## Goal
 

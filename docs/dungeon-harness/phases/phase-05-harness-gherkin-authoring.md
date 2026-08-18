@@ -1,9 +1,29 @@
+> # ⛔ STOPPED — superseded work, do not implement
+>
+> **This plan is stopped and is being backed out** (2026-08-18). The
+> Gherkin-authoring dungeon-harness approach it belongs to put the LLM in
+> the referee's chair for game rules, and the harness was never usable as a
+> design tool. See [`../STATUS.md`](../STATUS.md) for why, what landed, and
+> what happens to each piece, and [`../backout-plan.md`](../backout-plan.md)
+> for the removal plan.
+>
+> Replacement direction — **still being evaluated, not approved**: a shared
+> rules engine with a declarative unit language
+> ([`../turn-machines/README.md`](../turn-machines/README.md)), plus a
+> ground-up harness rebuild around live multi-scenario simulation.
+>
+> Kept for historical context only. The **Status** line below records what
+> actually landed before the stop.
+
 # Phase 05 — Harness Gherkin authoring core
 
 **Repo:** `harness`
 **Depends on:** 01
 **Parallel with:** 02, 03, 04
-**Status:** ✅ Implemented — `openspec/changes/harness-gherkin-authoring`
+
+**Status:** ✅ **Complete** — archived OpenSpec change `2026-08-16-harness-gherkin-authoring`.
+**Disposition:** **DELETE.** Gherkin parse/render/diff and the write-side scenario tools go with
+the authoring approach.
 
 ## Goal
 

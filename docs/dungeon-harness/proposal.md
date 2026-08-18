@@ -1,3 +1,19 @@
+> # ⛔ STOPPED — superseded work, do not implement
+>
+> **This work is stopped and is being backed out** (2026-08-18). The
+> Gherkin-authoring dungeon-harness approach documented here put the LLM in
+> the referee's chair for game rules, and the harness was never usable as a
+> design tool. See [`STATUS.md`](STATUS.md) for why, exactly what landed,
+> and what happens to each piece, and [`backout-plan.md`](backout-plan.md)
+> for the removal plan.
+>
+> Replacement direction — **still being evaluated, not approved**: a shared
+> rules engine with a declarative unit language
+> ([`turn-machines/README.md`](turn-machines/README.md)), plus a ground-up
+> harness rebuild around live multi-scenario simulation.
+>
+> Kept for historical context only.
+
 # Dungeon-Harness Proposal
 
 Design notes for a *third* harness in this repo: a chat-driven tool for a

@@ -1,9 +1,29 @@
+> # ⛔ STOPPED — superseded work, do not implement
+>
+> **This plan is stopped and is being backed out** (2026-08-18). The
+> Gherkin-authoring dungeon-harness approach it belongs to put the LLM in
+> the referee's chair for game rules, and the harness was never usable as a
+> design tool. See [`../STATUS.md`](../STATUS.md) for why, what landed, and
+> what happens to each piece, and [`../backout-plan.md`](../backout-plan.md)
+> for the removal plan.
+>
+> Replacement direction — **still being evaluated, not approved**: a shared
+> rules engine with a declarative unit language
+> ([`../turn-machines/README.md`](../turn-machines/README.md)), plus a
+> ground-up harness rebuild around live multi-scenario simulation.
+>
+> Kept for historical context only. The **Status** line below records what
+> actually landed before the stop.
+
 # Phase 08b — track-web pipeline proof (real harness session against a real baseline)
 
 **Repo:** `track-web` (+ harness, converging)
 **Depends on:** harness repo's phases 01–07; this repo's phases 02, 04, 07,
 **08a** (hard — needs the non-empty baseline/catalog 08a produces)
 **Blocks:** nothing — payoff phase
+
+**Status:** ❌ **Never started** — and now moot. This phase was the payoff for the whole plan (a real
+designer session flowing end-to-end through the pipeline); the pipeline is being dismantled instead.
 
 ## Goal
 

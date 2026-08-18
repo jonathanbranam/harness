@@ -10,11 +10,24 @@ live presentation-editing chat UI — see `docs/talks/deck-harness/planning.md`
 for its design. The second harness is `introspect-harness-server` +
 `client-introspect`, a browser chat that drives an in-process `AgentSession`
 and visualizes the agent's context window. A third harness,
-`dungeon-harness-server` + `client-dungeon`, is scaffolded (auth, one
-long-lived `AgentSession` per login, a jailed agent workspace, a bare chat
-UI) but has no dungeon-tactics-specific tools yet — board tools and Gherkin
-scenario authoring against a live game-board visualization land in later
-phases; see `docs/dungeon-harness/proposal.md`. See
+`dungeon-harness-server` + `client-dungeon`, has a scaffold (auth, one
+long-lived `AgentSession` per login, a jailed agent workspace, chat UI)
+plus freehand board-drawing tools and Gherkin scenario-authoring tools.
+
+> **⛔ The dungeon harness's current feature work is stopped and being
+> backed out** (2026-08-18). The Gherkin-authoring approach put the LLM in
+> the referee's chair for game rules and never produced a usable design
+> tool. **Read `docs/dungeon-harness/STATUS.md` before touching anything
+> under `dungeon-harness-server/src/gherkin/`, `pi-extensions/
+> {scenario,baseline}-bridge.ts`, or the board tools**; the removal plan is
+> `docs/dungeon-harness/backout-plan.md`. Only the phase-01 scaffold is
+> being kept. The harness is to be **rebuilt** around live multi-scenario
+> simulation driven by the real game engine (design TBD); the candidate
+> rules layer is `docs/dungeon-harness/turn-machines/` (**under evaluation,
+> not approved**). `docs/dungeon-harness/proposal.md` and `phases/` are
+> historical — do not implement from them.
+
+See
 `docs/arch/track-web-architecture.md` for the patterns this project
 deliberately reuses (monorepo shape, Hono, Vite/React/Tailwind,
 cookie-session auth, Caddy per-subdomain pattern, PM2).
