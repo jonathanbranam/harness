@@ -21,11 +21,14 @@ plus freehand board-drawing tools and Gherkin scenario-authoring tools.
 > under `dungeon-harness-server/src/gherkin/`, `pi-extensions/
 > {scenario,baseline}-bridge.ts`, or the board tools**; the removal plan is
 > `docs/dungeon-harness/backout-plan.md`. Only the phase-01 scaffold is
-> being kept. The harness is to be **rebuilt** around live multi-scenario
-> simulation driven by the real game engine (design TBD); the candidate
-> rules layer is `docs/dungeon-harness/turn-machines/` (**under evaluation,
-> not approved**). `docs/dungeon-harness/proposal.md` and `phases/` are
-> historical — do not implement from them.
+> being kept. The harness is being **rebuilt** around simulation driven by
+> the real game engine — design and build order in
+> `docs/dungeon-harness/harness-rebuild/` (`phase-plan.md` is the plan of
+> record: six shippable phases starting from a single hand-driven board).
+> The candidate rules layer is `docs/dungeon-harness/turn-machines/`
+> (**under evaluation, not approved**; only a scoped-down slice of it is
+> planned, in phase 6). `docs/dungeon-harness/proposal.md` and `phases/`
+> are historical — do not implement from them.
 
 See
 `docs/arch/track-web-architecture.md` for the patterns this project

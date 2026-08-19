@@ -74,8 +74,14 @@ principle: the designer changes a rule or a value and *immediately sees*
 the effect, with **multiple scenarios previewing and playing out
 simultaneously** beside the edit. The agent's role narrows to being the
 *interface* for expressing unit behavior (authoring the turn machine); the
-**real game engine** does all simulation. This is TBD and needs its own
-design pass; nothing about it is specified yet.
+**real game engine** does all simulation. That design pass is under way in
+[`harness-rebuild/`](harness-rebuild/README.md): the designer-facing UI is
+settled ([`designer-ui-session.md`](harness-rebuild/designer-ui-session.md)),
+and the build order is agreed
+([`phase-plan.md`](harness-rebuild/phase-plan.md), 2026-08-18) — six
+shippable phases starting from a single hand-driven board, with a
+scoped-down turn machine arriving in phase 6 rather than gating the work.
+Nothing is built yet.
 
 What survives from the old harness is the scaffold (phase 01) and the
 lesson: **the engine referees, never the agent.**
