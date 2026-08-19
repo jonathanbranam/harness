@@ -161,6 +161,23 @@ function fail(error: string): BenchResult {
   return { ok: false, error }
 }
 
+/**
+ * The next free id number for a set of units.
+ *
+ * Ids are handed out as `<type>-<n>`, and both scrubbing back and loading a
+ * bookmark install units this bench did not place. Counting them is not enough —
+ * ids need not be contiguous — so the next number comes from the highest one
+ * actually in use.
+ */
+function nextSeqFrom(units: Unit[]): number {
+  let highest = 0
+  for (const unit of units) {
+    const suffix = Number(unit.id.slice(unit.id.lastIndexOf('-') + 1))
+    if (Number.isFinite(suffix) && suffix > highest) highest = suffix
+  }
+  return highest
+}
+
 function kindOf(unitType: UnitType): 'pc' | 'npc' {
   return (PC_TYPES as string[]).includes(unitType) ? 'pc' : 'npc'
 }
@@ -250,6 +267,7 @@ export class BenchStore {
     this.state = frame.state
     this.map = frame.map
     this.defOverrides = { ...frame.defOverrides }
+    this.unitSeq = nextSeqFrom(frame.state.units)
     this.ensureActive()
     if (this.selectedId && !this.unit(this.selectedId)) this.selectedId = null
   }
@@ -381,6 +399,7 @@ export class BenchStore {
    * tile; `.` is none. Reading a shape is far easier than reading a coordinate map.
    */
   fieldRows(side: 'pc' | 'npc', layer: 'reach' | 'threat'): string[] {
+    this.ensureActive()
     const counts = this.computeFields()[layer][side]
     return this.state.cells.map((row, rowIndex) =>
       row.map((_cell, colIndex) => {
@@ -455,6 +474,7 @@ export class BenchStore {
     if (!unit) return fail(`No unit "${unitId}" on the board`)
     if (col < 0 || col >= gridCols() || row < 0 || row >= gridRows()) return fail(`(${col}, ${row}) is off the board`)
     if (this.state.units.some((u) => u.id !== unitId && u.col === col && u.row === row)) return fail(`(${col}, ${row}) is already occupied`)
+    if (this.state.cells[row][col].hasStructure) return fail(`(${col}, ${row}) holds a structure`)
 
     const units = this.state.units.map((u) => (u.id === unitId ? { ...u, col, row } : u))
     this.commit({ ...this.state, units }, `Moved ${unitId} to (${col}, ${row}) during setup.`)
@@ -683,7 +703,7 @@ export class BenchStore {
     this.selectedId = null
     this.ensureActive()
     // Unit ids came from the saved state; keep new placements from colliding.
-    this.unitSeq = bookmark.state.units.length
+    this.unitSeq = nextSeqFrom(bookmark.state.units)
     this.commit(bookmark.state, `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
     return ok(`Loaded "${bookmark.name}".`)
   }

@@ -117,6 +117,24 @@ describe('saving and reloading a position', () => {
     expect(store.getState().units).toHaveLength(2)
   })
 
+  it('gives a fresh id to a unit placed after loading a bookmark with gaps in its ids', () => {
+    // Ids are handed out as <type>-<n>, so a collision needs same-type units and
+    // a gap: melee-1 and melee-3 saved, then a new melee placed after loading.
+    // Counting the units rather than reading their ids hands out melee-3 again.
+    const store = bench()
+    store.placeUnit('melee', 0, 0)
+    store.placeUnit('melee', 1, 0)
+    store.placeUnit('melee', 2, 0)
+    store.removeUnit(store.getState().units[1].id)
+    store.saveBookmark('gappy')
+    store.clearUnits()
+    store.loadBookmark('gappy')
+
+    store.placeUnit('melee', 4, 0)
+    const ids = store.getState().units.map((u) => u.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
   it('survives a corrupt file in the directory', () => {
     const store = bench()
     store.placeUnit('melee', 1, 1)

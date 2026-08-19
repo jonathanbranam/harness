@@ -459,3 +459,42 @@ describe('the timeline', () => {
     expect(bench.getState().canRedo).toBe(false)
   })
 })
+
+describe('details that bite', () => {
+  it('keeps ids unique when placing after scrubbing back', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    bench.placeUnit('melee', 1, 0)
+    bench.undo()
+
+    bench.placeUnit('melee', 2, 0)
+    const ids = bench.getState().units.map((u) => u.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('will not park a unit on a structure during setup', () => {
+    const bench = new BenchStore()
+    bench.newBoard(boardFromRows(['.....', '..P..', '.....']))
+    bench.placeUnit('melee', 0, 0)
+    const id = bench.getState().units[0].id
+
+    expect(bench.relocateUnit(id, 2, 1)).toMatchObject({ ok: false })
+    expect(bench.placeUnit('rogue', 2, 1)).toMatchObject({ ok: false })
+  })
+
+  it('reads fields against its own board when another bench is live', () => {
+    // The engine's board store is a process global, so a second bench moves it.
+    // A *smaller* other board is what exposes it: reach is bounded by the
+    // engine's idea of the board, so without re-pointing it first, this bench's
+    // melee would appear unable to walk past column 2.
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0) // move 4 on an 8x5 board
+    expect(bench.fieldRows('pc', 'reach')[0]).toBe('.1111...')
+
+    const other = new BenchStore()
+    other.newBoard(generateBoard({ cols: 3, rows: 3, preset: 'open', powerCenters: 0 }))
+    other.getState()
+
+    expect(bench.fieldRows('pc', 'reach')[0]).toBe('.1111...')
+  })
+})
