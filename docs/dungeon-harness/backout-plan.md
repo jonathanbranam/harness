@@ -16,6 +16,30 @@ implementing anything from [`turn-machines/`](turn-machines/README.md)
 
 ---
 
+> ## ✅ Executed, 2026-08-18
+>
+> Both parts of this plan have been carried out.
+>
+> - **track-web** (Part 1, steps 1–2): step catalog and engineer skill
+>   deleted, archetype capability split unwound — commit "Remove track-web's
+>   dungeon-harness surface; refile PC archetypes", change
+>   `2026-08-18-dungeon-tactics-harness-backout`.
+> - **harness** (Part 2, steps 3–5): Gherkin authoring core,
+>   baseline/changeset, freehand board tools, board state, and `BoardCanvas`
+>   deleted; session/websocket/client rewired; workspace `AGENTS.md`
+>   rewritten; the two proposal-only changes closed. Change
+>   `dungeon-harness-backout`.
+>
+> Two deviations from the plan as written, both recorded in the changes:
+> retired capabilities are **deleted directly** rather than emptied by a
+> `REMOVED` delta (`openspec archive` rejects a spec left with zero
+> requirements), and the harness `.env`'s stale
+> `DUNGEON_TRACKWEB_FEATURES_DIR` line was left in place — it is user-owned
+> and now inert.
+>
+> This document is kept as the record of what was removed and why. What
+> replaces it: `harness-rebuild/phase-plan.md`.
+
 ## Part 1 — track-web (conservative)
 
 ### 1.1 Delete: step catalog (phase 04)

@@ -1,6 +1,5 @@
 import { captureNode, type ChatMessageEntry, type ToolCallEntry as SharedToolCallEntry } from '@harness/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CELL_SIZE } from '../components/BoardCanvas'
 import { genId } from '../id'
 
 export type { ChatMessageEntry }
@@ -9,79 +8,6 @@ export interface ApprovalRequest {
   toolCallId: string
   toolName: string
   input: unknown
-}
-
-// Duplicated from dungeon-harness-server/src/board-state.ts (no shared
-// `packages/` tier yet — see CLAUDE.md's "No packages/ tier yet"); keep this
-// shape in sync with the server's BoardState/BoardObject types by hand.
-
-export interface Cell {
-  col: number
-  row: number
-}
-
-export interface Point {
-  x: number
-  y: number
-}
-
-export interface BoardCell {
-  fillColor: string
-}
-
-export interface CircleShape {
-  id: string
-  kind: 'shape'
-  shapeType: 'circle'
-  position: Point
-  radius: number
-  color: string
-  label?: string
-}
-
-export interface RectangleShape {
-  id: string
-  kind: 'shape'
-  shapeType: 'rectangle'
-  position: Point
-  width: number
-  height: number
-  color: string
-  label?: string
-}
-
-export type ShapeObject = CircleShape | RectangleShape
-
-export interface LineObject {
-  id: string
-  kind: 'line'
-  points: Point[]
-  color: string
-  style: 'solid' | 'dashed'
-}
-
-export interface OverlayObject {
-  id: string
-  kind: 'overlay'
-  cells: Cell[]
-  color: string
-}
-
-export interface LabelObject {
-  id: string
-  kind: 'label'
-  position: Point
-  text: string
-  color: string
-}
-
-export type BoardObject = ShapeObject | LineObject | OverlayObject | LabelObject
-
-export interface BoardState {
-  width: number
-  height: number
-  cells: BoardCell[][]
-  objects: BoardObject[]
 }
 
 export interface ToolCallEntry extends SharedToolCallEntry {
@@ -105,11 +31,15 @@ function summarize(value: unknown): string {
  * Owns the single WebSocket connection to dungeon-harness-server: forwards
  * pi's AgentSessionEvent stream into a simplified chat transcript (text
  * streaming + tool call status), surfaces pending permission-gate approvals,
- * and (per extract-shared-canvas-capture) answers board-render requests
- * backing the dungeon_board_view pi tool via the shared captureNode utility.
- * See websocket.ts on the server for the message protocol this speaks —
- * trimmed from client-deck's useDeckSocket per design.md's decision (no
- * DeckState, no shape/image/deck/slide senders).
+ * and answers render requests backing the dungeon_board_view pi tool via the
+ * shared captureNode utility. See websocket.ts on the server for the message
+ * protocol this speaks.
+ *
+ * `canvasRef` currently has nothing to point at: the freehand board pane was
+ * removed with the rest of the stopped effort (see
+ * docs/dungeon-harness/backout-plan.md), and the rebuilt bench will mount its
+ * own board on this ref. Until it does, a render request answers "nothing to
+ * capture" rather than failing silently.
  */
 export function useDungeonSocket() {
   const wsRef = useRef<WebSocket | null>(null)
@@ -118,12 +48,6 @@ export function useDungeonSocket() {
   const [connected, setConnected] = useState(false)
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
-  const [boardState, setBoardState] = useState<BoardState | null>(null)
-  // ws.onmessage's handleRenderRequest closes over the effect's first run
-  // (deps: []), so it can't read the `boardState` state variable directly —
-  // this ref is kept in sync with every board_state message instead, mirroring
-  // canvasRef's own ref-not-state pattern for the same reason.
-  const boardStateRef = useRef<BoardState | null>(null)
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -136,18 +60,18 @@ export function useDungeonSocket() {
     // Renders the DOM node captured by canvasRef and returns the result to
     // the server over this same connection — see websocket.ts's
     // requestRender/pendingRenders, which backs the dungeon_board_view pi
-    // tool. Mirrors client-deck's useDeckSocket.ts handleRenderRequest, but
-    // BoardCanvas has no scale-to-fit transform to defeat, so no style
-    // override is needed.
+    // tool. The capture size comes from the node's own layout box, so
+    // whatever the bench mounts on this ref captures at its rendered size
+    // with no scale-to-fit transform to defeat.
     async function handleRenderRequest(requestId: string) {
       const node = canvasRef.current
-      const board = boardStateRef.current
-      if (!node || !board) {
-        ws.send(JSON.stringify({ type: 'render_response', requestId, error: 'Board not mounted' }))
+      if (!node) {
+        ws.send(JSON.stringify({ type: 'render_response', requestId, error: 'Nothing mounted to capture' }))
         return
       }
       try {
-        const image = await captureNode(node, { width: board.width * CELL_SIZE, height: board.height * CELL_SIZE })
+        const { width, height } = node.getBoundingClientRect()
+        const image = await captureNode(node, { width: Math.round(width), height: Math.round(height) })
         ws.send(JSON.stringify({ type: 'render_response', requestId, image }))
       } catch (err) {
         ws.send(JSON.stringify({ type: 'render_response', requestId, error: err instanceof Error ? err.message : 'Render failed' }))
@@ -164,12 +88,6 @@ export function useDungeonSocket() {
 
       if (msg.type === 'approval_required') {
         setPendingApproval(msg.request as ApprovalRequest)
-        return
-      }
-
-      if (msg.type === 'board_state') {
-        boardStateRef.current = msg.state as BoardState
-        setBoardState(msg.state as BoardState)
         return
       }
 
@@ -249,8 +167,8 @@ export function useDungeonSocket() {
         const isError = event.isError as boolean | undefined
         const resultSummary = summarize(event.result)
         // event.result is the tool's full AgentToolResult ({ content, details,
-        // ... }) — the JSON-serializable value board-bridge.ts's execute()
-        // functions return is its "details" field.
+        // ... }) — the JSON-serializable value a tool's execute() returns is
+        // its "details" field.
         const result = (event.result as { details?: unknown } | undefined)?.details
         setTranscript((t) =>
           t.map((e) => (e.kind === 'tool' && e.toolCallId === toolCallId ? { ...e, status: isError ? 'error' : 'done', resultSummary, result } : e)),
@@ -275,7 +193,6 @@ export function useDungeonSocket() {
     connected,
     transcript,
     pendingApproval,
-    boardState,
     canvasRef,
     sendPrompt,
     respondApproval,

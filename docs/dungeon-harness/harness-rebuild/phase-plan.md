@@ -42,7 +42,9 @@ setup-and-play interface itself.
 
 Tasks:
 
-1. **Extract `track-web/packages/dungeon-engine`.** Move the Phaser-free
+1. **Extract `track-web/packages/dungeon-engine`.** Specced as
+   `track-web:openspec/changes/dungeon-engine-package` (proposal, spec,
+   design, tasks written 2026-08-18; not implemented). Move the Phaser-free
    rules modules (`types`, `turn`, `pc`, `npc`, `pathfinding`,
    `attackFootprint`, `unitDefs`, plus the `defStore`/`contentStore`
    *state* and *getters*) into the package, next to the existing

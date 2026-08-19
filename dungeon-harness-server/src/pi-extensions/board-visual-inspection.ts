@@ -40,7 +40,7 @@ export function createBoardVisualInspectionExtension(opts: { requestRender: Requ
         'Render the current game board to an image and return it, so you can visually check for layout problems — overlapping objects, mispositioned drawings, wrong colors — that numeric board state alone might not reveal. Reflects the board as of the moment this is called.',
       promptSnippet: 'Render the current game board to an image and inspect it visually',
       promptGuidelines: [
-        'Call this after a drawing change you are unsure about, not on every edit — it round-trips to the browser and is slower than dungeon_get_board_state.',
+        'Call this when you need to see what the browser is actually showing, not on every step — it round-trips to the browser and back, so it is slower than reading state directly.',
       ],
       parameters: Type.Object({}),
       execute: async () => {
