@@ -1,5 +1,6 @@
 import { captureNode, type ChatMessageEntry, type ToolCallEntry as SharedToolCallEntry } from '@harness/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { BenchIntent, BenchState } from '../bench/types'
 import { genId } from '../id'
 
 export type { ChatMessageEntry }
@@ -35,11 +36,11 @@ function summarize(value: unknown): string {
  * shared captureNode utility. See websocket.ts on the server for the message
  * protocol this speaks.
  *
- * `canvasRef` currently has nothing to point at: the freehand board pane was
- * removed with the rest of the stopped effort (see
- * docs/dungeon-harness/backout-plan.md), and the rebuilt bench will mount its
- * own board on this ref. Until it does, a render request answers "nothing to
- * capture" rather than failing silently.
+ * Bench state arrives here whenever the server's `BenchStore` changes — from a
+ * designer's click or from an agent tool call, which are the same path — and
+ * intents go back the other way. The client never computes a rule; it renders
+ * what the engine produced. `canvasRef` points at the board, so
+ * `dungeon_board_view` captures exactly what the designer is looking at.
  */
 export function useDungeonSocket() {
   const wsRef = useRef<WebSocket | null>(null)
@@ -48,6 +49,8 @@ export function useDungeonSocket() {
   const [connected, setConnected] = useState(false)
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null)
+  const [benchState, setBenchState] = useState<BenchState | null>(null)
+  const [benchError, setBenchError] = useState<string | null>(null)
 
   useEffect(() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -88,6 +91,19 @@ export function useDungeonSocket() {
 
       if (msg.type === 'approval_required') {
         setPendingApproval(msg.request as ApprovalRequest)
+        return
+      }
+
+      if (msg.type === 'bench_state') {
+        setBenchState(msg.state as BenchState)
+        setBenchError(null)
+        return
+      }
+
+      if (msg.type === 'bench_error') {
+        // The engine refusing an action is information, not a fault: it means
+        // the move or attack genuinely isn't legal.
+        setBenchError(msg.message as string)
         return
       }
 
@@ -184,6 +200,11 @@ export function useDungeonSocket() {
     wsRef.current?.send(JSON.stringify({ type: 'prompt', text }))
   }, [])
 
+  const sendIntent = useCallback((intent: BenchIntent) => {
+    setBenchError(null)
+    wsRef.current?.send(JSON.stringify({ type: 'bench_intent', intent }))
+  }, [])
+
   const respondApproval = useCallback((toolCallId: string, approved: boolean) => {
     wsRef.current?.send(JSON.stringify({ type: 'approval_response', toolCallId, approved }))
     setPendingApproval(null)
@@ -193,8 +214,11 @@ export function useDungeonSocket() {
     connected,
     transcript,
     pendingApproval,
+    benchState,
+    benchError,
     canvasRef,
     sendPrompt,
+    sendIntent,
     respondApproval,
   }
 }

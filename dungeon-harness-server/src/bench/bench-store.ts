@@ -1,0 +1,481 @@
+// The design bench: one board, played by hand, refereed entirely by the real
+// game engine (`@repo/dungeon-engine`).
+//
+// Every rule question — where a unit may move, what an attack reaches, what
+// damage lands — is answered by calling the engine. Nothing here re-implements
+// or approximates a rule, and no caller (agent or browser) is given a way to
+// assert one. That is the constraint the previous harness violated; see
+// docs/dungeon-harness/STATUS.md.
+//
+// Two engine facts shape this file:
+//
+// 1. The engine's board and unit-definition stores are module-level singletons
+//    (one board, one def table per process). `ensureActive()` re-applies this
+//    bench's board and def overrides before every engine call, so a second
+//    session cannot leave the singleton pointing at someone else's board. It is
+//    cheap at bench board sizes; instance-scoping the engine is the real fix and
+//    is deferred until multiple boards must coexist.
+// 2. Damage is side-asymmetric by design: a PC attack damages NPCs and
+//    structures, an NPC attack damages PCs and structures. So a PC attack is
+//    resolved with `resolvePcAction` and an NPC attack with `resolveNpcAction`,
+//    even though both sides share the movement API.
+
+import {
+  applyLoaded,
+  applyMap,
+  attackFootprint,
+  boardCells,
+  clampDef,
+  computeMovePath,
+  computeNpcTurns,
+  endRound,
+  getAllDefs,
+  getDef,
+  gridCols,
+  gridRows,
+  hasAttacked,
+  remainingMove,
+  resolveNpcAction,
+  resolvePcAction,
+  applyMove,
+  validMoveDests,
+  type Cell,
+  type ContentMap,
+  type Direction,
+  type GameState,
+  type NpcType,
+  type PcType,
+  type Unit,
+  type UnitDef,
+} from '@repo/dungeon-engine'
+import { generateBoard, type GenerateBoardOptions } from './board-gen'
+
+export type UnitType = PcType | NpcType
+
+const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
+const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
+export const UNIT_TYPES: UnitType[] = [...PC_TYPES, ...NPC_TYPES]
+export const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
+
+/** Snapshots kept for step-back. Deep-ish: `GameState` is plain data and every
+ *  engine function returns a new one, so storing the value is enough. */
+const MAX_HISTORY = 200
+
+export interface Tile {
+  col: number
+  row: number
+}
+
+/** What the browser draws and the agent reads. Every derived field is computed
+ *  by the engine at read time, never stored — the failure mode that killed the
+ *  previous harness was a stored overlay that outlived the state it described. */
+export interface BenchState {
+  board: {
+    name: string
+    cols: number
+    rows: number
+    cells: Cell[][]
+  }
+  units: Unit[]
+  selection: SelectionView | null
+  /** NPC attack telegraphs from the last AI run, as the game would show them. */
+  telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
+  defs: Record<UnitType, UnitDef>
+  canUndo: boolean
+  /** Human-readable record of what has happened, newest last. */
+  log: string[]
+}
+
+export interface SelectionView {
+  unitId: string
+  unitType: UnitType
+  kind: 'pc' | 'npc'
+  col: number
+  row: number
+  hp: number
+  maxHp: number
+  remainingMove: number
+  hasAttacked: boolean
+  /** Engine-derived: every tile this unit can still reach this turn. */
+  moveDests: Tile[]
+  /** Engine-derived: the attack footprint in each direction from where it stands. */
+  attackByDir: Record<Direction, Tile[]>
+}
+
+export type BenchResult = { ok: true; message: string } | { ok: false; error: string }
+
+function ok(message: string): BenchResult {
+  return { ok: true, message }
+}
+
+function fail(error: string): BenchResult {
+  return { ok: false, error }
+}
+
+function kindOf(unitType: UnitType): 'pc' | 'npc' {
+  return (PC_TYPES as string[]).includes(unitType) ? 'pc' : 'npc'
+}
+
+function emptyState(cells: Cell[][]): GameState {
+  return {
+    cells,
+    units: [],
+    spawners: [],
+    phase: 'player',
+    planningPhase: 'none',
+    selectedUnitId: null,
+    plans: {},
+    planOrder: [],
+    npcPlans: [],
+    undoStack: [],
+    movedThisTurn: {},
+    attackedThisTurn: [],
+  }
+}
+
+export class BenchStore {
+  private map: ContentMap
+  private state: GameState
+  private history: GameState[] = []
+  private selectedId: string | null = null
+  private defOverrides: Partial<Record<UnitType, UnitDef>> = {}
+  private log: string[] = []
+  private unitSeq = 0
+  private listeners = new Set<(state: BenchState) => void>()
+
+  constructor(opts: GenerateBoardOptions = {}) {
+    this.map = generateBoard(opts)
+    applyMap(this.map)
+    this.state = emptyState(this.freshCells())
+    this.note(`Board "${this.map.name}" ready (${this.map.size.cols}×${this.map.size.rows}). No units placed.`)
+  }
+
+  // ─── Engine access ──────────────────────────────────────────────────────────
+
+  /** Point the engine's process-global stores at this bench before any call. */
+  private ensureActive(): void {
+    applyMap(this.map)
+    applyLoaded(this.defOverrides as Record<string, UnitDef>)
+  }
+
+  private freshCells(): Cell[][] {
+    // The engine's own deserialized grid (terrain plus any structures), copied,
+    // so the bench's board is byte-identical to what its queries will consult.
+    return boardCells()
+  }
+
+  private unit(id: string): Unit | undefined {
+    return this.state.units.find((u) => u.id === id)
+  }
+
+  private note(message: string): void {
+    this.log.push(message)
+    if (this.log.length > 100) this.log.shift()
+  }
+
+  /** Save the current state so `undo()` can come back to it, then commit `next`. */
+  private commit(next: GameState, message: string): void {
+    this.history.push(this.state)
+    if (this.history.length > MAX_HISTORY) this.history.shift()
+    this.state = next
+    this.note(message)
+    this.emit()
+  }
+
+  // ─── Reads ──────────────────────────────────────────────────────────────────
+
+  getState(): BenchState {
+    this.ensureActive()
+    return {
+      board: { name: this.map.name, cols: gridCols(), rows: gridRows(), cells: this.state.cells },
+      units: this.state.units,
+      selection: this.selectionView(),
+      telegraphs: this.state.npcPlans.map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
+      defs: getAllDefs() as Record<UnitType, UnitDef>,
+      canUndo: this.history.length > 0,
+      log: [...this.log],
+    }
+  }
+
+  private selectionView(): SelectionView | null {
+    if (!this.selectedId) return null
+    const unit = this.unit(this.selectedId)
+    if (!unit) return null
+
+    const def = getDef(unit.unitType)
+    const attackByDir = {} as Record<Direction, Tile[]>
+    for (const dir of DIRECTIONS) {
+      attackByDir[dir] = attackFootprint(def, { col: unit.col, row: unit.row }, dir)
+    }
+
+    return {
+      unitId: unit.id,
+      unitType: unit.unitType as UnitType,
+      kind: unit.kind,
+      col: unit.col,
+      row: unit.row,
+      hp: unit.hp,
+      maxHp: def.maxHp,
+      remainingMove: remainingMove(this.state, unit),
+      hasAttacked: hasAttacked(this.state, unit.id),
+      moveDests: validMoveDests(this.state, unit.id),
+      attackByDir,
+    }
+  }
+
+  /** The board as terrain rows — how the agent reads a board without a screenshot. */
+  boardRows(): string[] {
+    return this.state.cells.map((row) => row.map((c) => (c.hasStructure ? '#' : c.terrain[0])).join(''))
+  }
+
+  subscribe(listener: (state: BenchState) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  private emit(): void {
+    const snapshot = this.getState()
+    for (const listener of this.listeners) listener(snapshot)
+  }
+
+  // ─── Setup ──────────────────────────────────────────────────────────────────
+
+  newBoard(map: ContentMap): BenchResult {
+    this.map = map
+    applyMap(this.map)
+    this.state = emptyState(this.freshCells())
+    this.history = []
+    this.selectedId = null
+    this.unitSeq = 0
+    this.note(`New board "${map.name}" (${map.size.cols}×${map.size.rows}). All units cleared.`)
+    this.emit()
+    return ok(`Board is now "${map.name}", ${map.size.cols}×${map.size.rows}, empty.`)
+  }
+
+  placeUnit(unitType: UnitType, col: number, row: number, hp?: number): BenchResult {
+    this.ensureActive()
+    if (!UNIT_TYPES.includes(unitType)) return fail(`Unknown unit type "${unitType}". Known: ${UNIT_TYPES.join(', ')}`)
+    if (col < 0 || col >= gridCols() || row < 0 || row >= gridRows()) {
+      return fail(`(${col}, ${row}) is off the ${gridCols()}×${gridRows()} board`)
+    }
+    if (this.state.units.some((u) => u.col === col && u.row === row)) return fail(`(${col}, ${row}) is already occupied`)
+    if (this.state.cells[row][col].hasStructure) return fail(`(${col}, ${row}) holds a structure`)
+
+    const def = getDef(unitType)
+    const unit: Unit = {
+      id: `${unitType}-${++this.unitSeq}`,
+      kind: kindOf(unitType),
+      col,
+      row,
+      unitType,
+      hp: hp ?? def.maxHp,
+    }
+    this.commit({ ...this.state, units: [...this.state.units, unit] }, `Placed ${unit.id} at (${col}, ${row}) with ${unit.hp} HP.`)
+    return ok(`Placed ${unit.id} at (${col}, ${row}).`)
+  }
+
+  removeUnit(unitId: string): BenchResult {
+    if (!this.unit(unitId)) return fail(`No unit "${unitId}" on the board`)
+    if (this.selectedId === unitId) this.selectedId = null
+    this.commit({ ...this.state, units: this.state.units.filter((u) => u.id !== unitId) }, `Removed ${unitId}.`)
+    return ok(`Removed ${unitId}.`)
+  }
+
+  /** Setup-time relocation: ignores movement budget and legality, because this is
+   *  placing a piece, not taking a turn. Use `moveSelectedTo` to take a turn. */
+  relocateUnit(unitId: string, col: number, row: number): BenchResult {
+    this.ensureActive()
+    const unit = this.unit(unitId)
+    if (!unit) return fail(`No unit "${unitId}" on the board`)
+    if (col < 0 || col >= gridCols() || row < 0 || row >= gridRows()) return fail(`(${col}, ${row}) is off the board`)
+    if (this.state.units.some((u) => u.id !== unitId && u.col === col && u.row === row)) return fail(`(${col}, ${row}) is already occupied`)
+
+    const units = this.state.units.map((u) => (u.id === unitId ? { ...u, col, row } : u))
+    this.commit({ ...this.state, units }, `Moved ${unitId} to (${col}, ${row}) during setup.`)
+    return ok(`${unitId} is now at (${col}, ${row}).`)
+  }
+
+  setUnitHp(unitId: string, hp: number): BenchResult {
+    const unit = this.unit(unitId)
+    if (!unit) return fail(`No unit "${unitId}" on the board`)
+    if (hp <= 0) return fail('HP must be at least 1 — remove the unit instead')
+    const units = this.state.units.map((u) => (u.id === unitId ? { ...u, hp } : u))
+    this.commit({ ...this.state, units }, `Set ${unitId} to ${hp} HP.`)
+    return ok(`${unitId} now has ${hp} HP.`)
+  }
+
+  clearUnits(): BenchResult {
+    this.selectedId = null
+    this.commit({ ...this.state, units: [] }, 'Cleared all units.')
+    return ok('Board cleared of units.')
+  }
+
+  // ─── Play ───────────────────────────────────────────────────────────────────
+
+  select(unitId: string | null): BenchResult {
+    if (unitId && !this.unit(unitId)) return fail(`No unit "${unitId}" on the board`)
+    this.selectedId = unitId
+    this.emit()
+    return ok(unitId ? `Selected ${unitId}.` : 'Selection cleared.')
+  }
+
+  /** Take a movement step with the selected unit. Legality and cost come from the
+   *  engine: `validMoveDests` decides where it may go, `computeMovePath` finds the
+   *  route, `applyMove` charges the budget. */
+  moveSelectedTo(col: number, row: number): BenchResult {
+    this.ensureActive()
+    if (!this.selectedId) return fail('No unit selected')
+    const unit = this.unit(this.selectedId)
+    if (!unit) return fail('Selected unit is no longer on the board')
+
+    const legal = validMoveDests(this.state, unit.id)
+    if (!legal.some((t) => t.col === col && t.row === row)) {
+      const left = remainingMove(this.state, unit)
+      return fail(
+        left <= 0
+          ? `${unit.id} has no movement left this turn${hasAttacked(this.state, unit.id) ? ' (it has attacked)' : ''}`
+          : `(${col}, ${row}) is not reachable — ${unit.id} has ${left} movement left`,
+      )
+    }
+
+    const path = computeMovePath(this.state, unit.id, unit.col, unit.row, col, row)
+    if (path.length === 0) return fail(`No path from (${unit.col}, ${unit.row}) to (${col}, ${row})`)
+
+    this.commit(applyMove(this.state, unit.id, col, row, path), `${unit.id} moved to (${col}, ${row}), ${path.length} tile(s).`)
+    return ok(`${unit.id} moved to (${col}, ${row}).`)
+  }
+
+  /**
+   * Attack with the selected unit in `dir`. The footprint comes from the engine.
+   * A PC attack is resolved by `resolvePcAction` (it damages NPCs/structures); an
+   * NPC attack is resolved by `resolveNpcAction` against one tile of the
+   * footprint (it damages PCs/structures), which is why NPCs take a target.
+   */
+  attackSelected(dir: Direction, target?: Tile): BenchResult {
+    this.ensureActive()
+    if (!this.selectedId) return fail('No unit selected')
+    const unit = this.unit(this.selectedId)
+    if (!unit) return fail('Selected unit is no longer on the board')
+    if (hasAttacked(this.state, unit.id)) return fail(`${unit.id} has already attacked this turn`)
+
+    const footprint = attackFootprint(getDef(unit.unitType), { col: unit.col, row: unit.row }, dir)
+    if (footprint.length === 0) return fail(`${unit.id} has nothing in reach ${dir}`)
+
+    if (unit.kind === 'pc') {
+      const before = this.state.units
+      const next = resolvePcAction(this.state, { kind: 'attack', unitId: unit.id, col: unit.col, row: unit.row, attackDir: dir })
+      this.commit(next, `${unit.id} attacked ${dir}. ${describeCasualties(before, next.units)}`)
+      return ok(`${unit.id} attacked ${dir}.`)
+    }
+
+    const tile = target ?? footprint[0]
+    if (!footprint.some((t) => t.col === tile.col && t.row === tile.row)) {
+      return fail(`(${tile.col}, ${tile.row}) is not in ${unit.id}'s ${dir} footprint`)
+    }
+    const before = this.state.units
+    const next = resolveNpcAction(this.state, { kind: 'attack', unitId: unit.id, targetCol: tile.col, targetRow: tile.row })
+    // resolveNpcAction doesn't mark the attacker as spent (the game resolves NPC
+    // telegraphs at end of round, not as a turn action), so the bench marks it —
+    // otherwise a hand-driven NPC could attack repeatedly in one turn.
+    const attackedThisTurn = next.attackedThisTurn.includes(unit.id) ? next.attackedThisTurn : [...next.attackedThisTurn, unit.id]
+    this.commit({ ...next, attackedThisTurn }, `${unit.id} attacked (${tile.col}, ${tile.row}). ${describeCasualties(before, next.units)}`)
+    return ok(`${unit.id} attacked (${tile.col}, ${tile.row}).`)
+  }
+
+  /** Hand the enemy side to the game's own AI for one round, for comparison with
+   *  driving it by hand. Moves resolve first, then the attack telegraphs. */
+  runEnemyAi(): BenchResult {
+    this.ensureActive()
+    if (!this.state.units.some((u) => u.kind === 'npc')) return fail('No NPCs on the board')
+
+    const { moves, attackPlans } = computeNpcTurns(this.state)
+    const before = this.state.units
+    let next = this.state
+    for (const move of moves) next = resolveNpcAction(next, move)
+    for (const plan of attackPlans) next = resolveNpcAction(next, plan)
+
+    this.commit(
+      { ...next, npcPlans: attackPlans },
+      `Enemy AI ran: ${moves.length} move(s), ${attackPlans.length} attack(s). ${describeCasualties(before, next.units)}`,
+    )
+    return ok(`Enemy AI ran ${moves.length} move(s) and ${attackPlans.length} attack(s).`)
+  }
+
+  endRound(): BenchResult {
+    this.ensureActive()
+    this.commit(endRound(this.state), 'Round ended — movement and attacks are available again.')
+    return ok('Round ended.')
+  }
+
+  /** Step back one action. Full-state snapshots, so this reverses attacks and
+   *  placements too, not just moves (the engine's own undo covers moves only). */
+  undo(): BenchResult {
+    const previous = this.history.pop()
+    if (!previous) return fail('Nothing to step back to')
+    this.state = previous
+    if (this.selectedId && !this.unit(this.selectedId)) this.selectedId = null
+    this.note('Stepped back one action.')
+    this.emit()
+    return ok('Stepped back one action.')
+  }
+
+  // ─── Unit definitions (session-scoped, never persisted) ──────────────────────
+
+  /**
+   * Change a unit type's numbers for this session only. Nothing is written to
+   * disk: this is the edit→see loop for a POC, not an editor. The engine clamps
+   * the values, and every overlay re-derives on the next read.
+   */
+  tweakDef(unitType: UnitType, patch: Partial<{ maxHp: number; moveRange: number; damage: number; minRange: number; maxRange: number }>): BenchResult {
+    this.ensureActive()
+    if (!UNIT_TYPES.includes(unitType)) return fail(`Unknown unit type "${unitType}". Known: ${UNIT_TYPES.join(', ')}`)
+
+    const current = getDef(unitType)
+    const next = clampDef({
+      ...current,
+      maxHp: patch.maxHp ?? current.maxHp,
+      movement: { range: patch.moveRange ?? current.movement.range },
+      attack: {
+        ...current.attack,
+        damage: patch.damage ?? current.attack.damage,
+        targeting: {
+          ...current.attack.targeting,
+          minRange: patch.minRange ?? current.attack.targeting.minRange,
+          maxRange: patch.maxRange ?? current.attack.targeting.maxRange,
+        },
+      },
+    })
+
+    this.defOverrides[unitType] = next
+    this.ensureActive()
+    const summary = `${unitType}: ${next.maxHp} HP, move ${next.movement.range}, damage ${next.attack.damage}, range ${next.attack.targeting.minRange}–${next.attack.targeting.maxRange}`
+    this.note(`Definition changed — ${summary}`)
+    this.emit()
+    return ok(summary)
+  }
+
+  /** Drop every session tweak and go back to the game's shipped numbers. */
+  resetDefs(): BenchResult {
+    this.defOverrides = {}
+    this.ensureActive()
+    this.note('Unit definitions reset to the shipped values.')
+    this.emit()
+    return ok('Unit definitions reset to the shipped values.')
+  }
+}
+
+/** Which units died between two unit lists, phrased for the log. */
+function describeCasualties(before: Unit[], after: Unit[]): string {
+  const survivors = new Set(after.map((u) => u.id))
+  const dead = before.filter((u) => !survivors.has(u.id)).map((u) => u.id)
+  const damaged = after
+    .map((u) => {
+      const was = before.find((b) => b.id === u.id)
+      return was && was.hp !== u.hp ? `${u.id} ${was.hp}→${u.hp} HP` : null
+    })
+    .filter((s): s is string => s !== null)
+
+  const parts = [...damaged]
+  if (dead.length > 0) parts.push(`${dead.join(', ')} destroyed`)
+  return parts.length > 0 ? parts.join('; ') + '.' : 'Nothing was hit.'
+}

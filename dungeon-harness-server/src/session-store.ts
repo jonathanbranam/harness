@@ -9,6 +9,8 @@ import { join } from 'node:path'
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, type AgentSession } from '@earendil-works/pi-coding-agent'
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
+import { BenchStore } from './bench/bench-store'
+import { BENCH_TOOL_NAMES, createBenchBridgeExtension } from './pi-extensions/bench-bridge'
 import { createBoardVisualInspectionExtension, type RequestRender } from './pi-extensions/board-visual-inspection'
 import { createPermissionGateExtension, type RequestApproval } from './pi-extensions/permission-gate'
 
@@ -20,13 +22,14 @@ const modelRuntimePromise = ModelRuntime.create()
 
 interface SessionRecord {
   session: AgentSession
+  bench: BenchStore
   callbacks: SessionCallbacks
 }
 
 const sessions = new Map<string, SessionRecord>()
 
 const BUILTIN_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'] as const
-const CUSTOM_TOOL_NAMES = ['dungeon_board_view'] as const
+const CUSTOM_TOOL_NAMES = [...BENCH_TOOL_NAMES, 'dungeon_board_view'] as const
 
 export interface SessionCallbacks {
   requestApproval: RequestApproval
@@ -50,6 +53,13 @@ export async function getOrCreateSession(sessionId: string, callbacks: SessionCa
   return record.session
 }
 
+/** The session's bench — one board per login, shared by the agent's tools and the
+ *  browser, so a click and a chat instruction act on the same authoritative state. */
+export async function getOrCreateBench(sessionId: string, callbacks: SessionCallbacks, opts: { rebind?: boolean } = {}): Promise<BenchStore> {
+  const record = await getOrCreateSessionRecord(sessionId, callbacks, opts)
+  return record.bench
+}
+
 async function getOrCreateSessionRecord(sessionId: string, callbacks: SessionCallbacks, opts: { rebind?: boolean } = {}): Promise<SessionRecord> {
   const existing = sessions.get(sessionId)
   if (existing) {
@@ -59,11 +69,12 @@ async function getOrCreateSessionRecord(sessionId: string, callbacks: SessionCal
 
   const cwd = ensureAgentWorkspace(env.DUNGEON_WORKSPACE_DIR, TEMPLATES_DIR)
   const modelRuntime = await modelRuntimePromise
+  const bench = new BenchStore()
 
   // record.callbacks can be mutated by a later rebind (see above), so route
   // through it indirectly instead of closing over this call's callbacks by
   // value.
-  const record: SessionRecord = { session: undefined as unknown as AgentSession, callbacks }
+  const record: SessionRecord = { session: undefined as unknown as AgentSession, bench, callbacks }
   const requestApproval: RequestApproval = (request) => record.callbacks.requestApproval(request)
   const requestRender: RequestRender = (request) => record.callbacks.requestRender(request)
 
@@ -72,6 +83,7 @@ async function getOrCreateSessionRecord(sessionId: string, callbacks: SessionCal
     agentDir: getAgentDir(),
     extensionFactories: [
       createPermissionGateExtension({ cwd, requestApproval }),
+      createBenchBridgeExtension({ bench }),
       createBoardVisualInspectionExtension({ requestRender }),
     ],
   })
