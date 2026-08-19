@@ -498,3 +498,58 @@ describe('details that bite', () => {
     expect(bench.fieldRows('pc', 'reach')[0]).toBe('.1111...')
   })
 })
+
+describe('the action log', () => {
+  it('reports a structure taking a hit, not "nothing was hit"', () => {
+    const bench = new BenchStore()
+    bench.newBoard(boardFromRows(['.....', '..P..', '.....']))
+    bench.placeUnit('melee', 1, 1)
+    bench.select(bench.getState().units[0].id)
+    bench.attackSelected('right')
+
+    // Structures take one point per hit whatever the attacker's damage.
+    expect(bench.getState().log.at(-1)).toMatch(/power-center at \(2, 1\) 3→2 HP/)
+  })
+
+  it('reports a structure being levelled', () => {
+    const bench = new BenchStore()
+    bench.newBoard(boardFromRows(['.....', '..P..', '.....']))
+    bench.placeUnit('melee', 1, 1)
+    const id = bench.getState().units[0].id
+    for (let i = 0; i < 3; i++) {
+      bench.select(id)
+      bench.attackSelected('right')
+      bench.endRound()
+    }
+    expect(bench.getState().log.some((line) => /levelled/.test(line))).toBe(true)
+  })
+
+  it('still reports unit damage and deaths', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.placeUnit('short-range', 3, 2, 1)
+    bench.select(bench.getState().units[0].id)
+    bench.attackSelected('right')
+    expect(bench.getState().log.at(-1)).toMatch(/destroyed/)
+  })
+})
+
+describe('the board the agent reads', () => {
+  it('uses the same alphabet the tools document and boardFromRows accepts', () => {
+    const rows = ['..f..', 'w.P.s', '..T..']
+    const bench = new BenchStore()
+    bench.newBoard(boardFromRows(rows))
+
+    expect(bench.boardRows()).toEqual(rows)
+  })
+
+  it('round-trips: a board it reads is a board it could hand back', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 9, rows: 6, preset: 'scattered', seed: 7 }))
+    const asText = bench.boardRows()
+
+    const echoed = new BenchStore()
+    echoed.newBoard(boardFromRows(asText))
+    expect(echoed.boardRows()).toEqual(asText)
+  })
+})

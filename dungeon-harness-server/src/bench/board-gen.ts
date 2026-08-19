@@ -44,7 +44,7 @@ export const TERRAIN_CHARS: Record<string, TerrainType> = {
   s: 'stone',
 }
 
-const CHAR_BY_TERRAIN: Record<TerrainType, string> = {
+export const CHAR_BY_TERRAIN: Record<TerrainType, string> = {
   plains: '.',
   forest: 'f',
   water: 'w',
@@ -184,6 +184,27 @@ export function boardFromRows(rows: string[], name = 'custom'): ContentMap {
     playerSpawnZone: Array.from({ length: cols }, (_, col) => `${col},${rows.length - 1}`),
     enemySpawnZone: Array.from({ length: cols }, (_, col) => `${col},0`),
   }
+}
+
+/**
+ * A live board grid as text, using the same alphabet as `boardFromRows`.
+ *
+ * This is what the agent reads, so it has to match the alphabet the tool
+ * descriptions teach — `.` for plains, `P` for a power center. An earlier version
+ * of the bench rendered terrain by its first letter (`p` for plains) and any
+ * structure as `#`, which handed the agent a board written in an alphabet nobody
+ * had told it about.
+ */
+export function cellsToRows(cells: { terrain: TerrainType; hasStructure: boolean; structureKind?: 'power-center' | 'tower' }[][]): string[] {
+  return cells.map((row) =>
+    row
+      .map((cell) => {
+        if (!cell.hasStructure) return CHAR_BY_TERRAIN[cell.terrain]
+        const char = Object.entries(STRUCTURE_CHARS).find(([, s]) => s.kind === cell.structureKind)?.[0]
+        return char ?? 'P'
+      })
+      .join(''),
+  )
 }
 
 /** The inverse of `boardFromRows`, so a board can be shown to the agent (or a

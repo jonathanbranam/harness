@@ -21,14 +21,23 @@ interface BoardViewProps {
   onUnitClick: (unit: Unit) => void
 }
 
-/** Field paint: player side cool, enemy side warm; threat reads stronger than
- *  reach, since "what can touch this tile" is the sharper question. Opacity
- *  steps with the count, so a tile two units cover looks different from one. */
+/**
+ * Field paint: player side cool, enemy side warm.
+ *
+ * **Reach is a flat wash; threat is hatched**, and the two sides' hatches lean
+ * opposite ways. Flat tints alone did not survive contact — with more than one
+ * field on, the board turned into a muddy wash you could not read a side out of,
+ * and the tint was easy to mistake for terrain. Texture separates the layers even
+ * where they overlap, which is exactly where the interesting tiles are.
+ *
+ * Opacity still steps with the count, so a tile two units cover reads stronger
+ * than one covered by a single unit.
+ */
 const FIELD_STYLE = {
-  pcReach: { color: '#0ea5e9', base: 0.1, step: 0.06 },
-  pcThreat: { color: '#2563eb', base: 0.16, step: 0.1 },
-  npcReach: { color: '#f59e0b', base: 0.1, step: 0.06 },
-  npcThreat: { color: '#dc2626', base: 0.16, step: 0.1 },
+  pcReach: { color: '#0284c7', base: 0.14, step: 0.07, pattern: null },
+  pcThreat: { color: '#1d4ed8', base: 0.5, step: 0.15, pattern: 'hatch-pc' },
+  npcReach: { color: '#d97706', base: 0.14, step: 0.07, pattern: null },
+  npcThreat: { color: '#b91c1c', base: 0.5, step: 0.15, pattern: 'hatch-npc' },
 } as const
 
 function key(tile: { col: number; row: number }): string {
@@ -78,6 +87,17 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
     <div className="h-full overflow-auto grid place-items-center p-4">
       <div ref={ref} className="inline-block bg-white dark:bg-gray-950">
         <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Board ${board.name}`}>
+          <defs>
+            {/* Opposed diagonals: player threat leans one way, enemy threat the
+                other, so a tile both sides threaten reads as a cross-hatch
+                rather than as a third colour. */}
+            <pattern id="hatch-pc" width={8} height={8} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <line x1={0} y1={0} x2={0} y2={8} stroke={FIELD_STYLE.pcThreat.color} strokeWidth={3} />
+            </pattern>
+            <pattern id="hatch-npc" width={8} height={8} patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+              <line x1={0} y1={0} x2={0} y2={8} stroke={FIELD_STYLE.npcThreat.color} strokeWidth={3} />
+            </pattern>
+          </defs>
           {board.cells.map((row, rowIndex) =>
             row.map((cell, colIndex) => {
               const x = colIndex * CELL_SIZE
@@ -116,8 +136,8 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
                         y={y}
                         width={CELL_SIZE}
                         height={CELL_SIZE}
-                        fill={style.color}
-                        opacity={Math.min(0.55, style.base + (count - 1) * style.step)}
+                        fill={style.pattern ? `url(#${style.pattern})` : style.color}
+                        opacity={Math.min(0.8, style.base + (count - 1) * style.step)}
                       />
                     )
                   })}

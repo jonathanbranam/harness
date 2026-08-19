@@ -48,7 +48,7 @@ import {
   type Unit,
   type UnitDef,
 } from '@repo/dungeon-engine'
-import { generateBoard, type GenerateBoardOptions } from './board-gen'
+import { cellsToRows, generateBoard, type GenerateBoardOptions } from './board-gen'
 import type { BookmarkStore, BookmarkSummary } from './bookmark-store'
 
 export type UnitType = PcType | NpcType
@@ -409,9 +409,11 @@ export class BenchStore {
     )
   }
 
-  /** The board as terrain rows — how the agent reads a board without a screenshot. */
+  /** The board as terrain rows — how the agent reads a board without a screenshot.
+   *  Same alphabet the tools document and `boardFromRows` accepts, so a board the
+   *  agent reads is a board it could hand straight back. */
   boardRows(): string[] {
-    return this.state.cells.map((row) => row.map((c) => (c.hasStructure ? '#' : c.terrain[0])).join(''))
+    return cellsToRows(this.state.cells)
   }
 
   subscribe(listener: (state: BenchState) => void): () => void {
@@ -548,9 +550,9 @@ export class BenchStore {
     if (footprint.length === 0) return fail(`${unit.id} has nothing in reach ${dir}`)
 
     if (unit.kind === 'pc') {
-      const before = this.state.units
+      const before = this.state
       const next = resolvePcAction(this.state, { kind: 'attack', unitId: unit.id, col: unit.col, row: unit.row, attackDir: dir })
-      this.commit(next, `${unit.id} attacked ${dir}. ${describeCasualties(before, next.units)}`)
+      this.commit(next, `${unit.id} attacked ${dir}. ${describeChanges(before, next)}`)
       return ok(`${unit.id} attacked ${dir}.`)
     }
 
@@ -558,13 +560,13 @@ export class BenchStore {
     if (!footprint.some((t) => t.col === tile.col && t.row === tile.row)) {
       return fail(`(${tile.col}, ${tile.row}) is not in ${unit.id}'s ${dir} footprint`)
     }
-    const before = this.state.units
+    const before = this.state
     const next = resolveNpcAction(this.state, { kind: 'attack', unitId: unit.id, targetCol: tile.col, targetRow: tile.row })
     // resolveNpcAction doesn't mark the attacker as spent (the game resolves NPC
     // telegraphs at end of round, not as a turn action), so the bench marks it —
     // otherwise a hand-driven NPC could attack repeatedly in one turn.
     const attackedThisTurn = next.attackedThisTurn.includes(unit.id) ? next.attackedThisTurn : [...next.attackedThisTurn, unit.id]
-    this.commit({ ...next, attackedThisTurn }, `${unit.id} attacked (${tile.col}, ${tile.row}). ${describeCasualties(before, next.units)}`)
+    this.commit({ ...next, attackedThisTurn }, `${unit.id} attacked (${tile.col}, ${tile.row}). ${describeChanges(before, next)}`)
     return ok(`${unit.id} attacked (${tile.col}, ${tile.row}).`)
   }
 
@@ -575,14 +577,14 @@ export class BenchStore {
     if (!this.state.units.some((u) => u.kind === 'npc')) return fail('No NPCs on the board')
 
     const { moves, attackPlans } = computeNpcTurns(this.state)
-    const before = this.state.units
+    const before = this.state
     let next = this.state
     for (const move of moves) next = resolveNpcAction(next, move)
     for (const plan of attackPlans) next = resolveNpcAction(next, plan)
 
     this.commit(
       { ...next, npcPlans: attackPlans },
-      `Enemy AI ran: ${moves.length} move(s), ${attackPlans.length} attack(s). ${describeCasualties(before, next.units)}`,
+      `Enemy AI ran: ${moves.length} move(s), ${attackPlans.length} attack(s). ${describeChanges(before, next)}`,
     )
     return ok(`Enemy AI ran ${moves.length} move(s) and ${attackPlans.length} attack(s).`)
   }
@@ -725,18 +727,37 @@ export class BenchStore {
   }
 }
 
-/** Which units died between two unit lists, phrased for the log. */
-function describeCasualties(before: Unit[], after: Unit[]): string {
-  const survivors = new Set(after.map((u) => u.id))
-  const dead = before.filter((u) => !survivors.has(u.id)).map((u) => u.id)
-  const damaged = after
-    .map((u) => {
-      const was = before.find((b) => b.id === u.id)
-      return was && was.hp !== u.hp ? `${u.id} ${was.hp}→${u.hp} HP` : null
-    })
-    .filter((s): s is string => s !== null)
+/**
+ * What an action changed, phrased for the log: units damaged or destroyed, and
+ * structures damaged or levelled.
+ *
+ * Structures matter here as much as units. A PC swinging at a power center takes
+ * it from 3 to 2 — the engine deals structures one point per hit regardless of
+ * the attacker's damage — and a log that reported "nothing was hit" for that was
+ * simply wrong, which is worse than terse.
+ */
+function describeChanges(before: GameState, after: GameState): string {
+  const parts: string[] = []
 
-  const parts = [...damaged]
+  const survivors = new Set(after.units.map((u) => u.id))
+  for (const unit of after.units) {
+    const was = before.units.find((b) => b.id === unit.id)
+    if (was && was.hp !== unit.hp) parts.push(`${unit.id} ${was.hp}→${unit.hp} HP`)
+  }
+  const dead = before.units.filter((u) => !survivors.has(u.id)).map((u) => u.id)
   if (dead.length > 0) parts.push(`${dead.join(', ')} destroyed`)
+
+  for (let row = 0; row < before.cells.length; row++) {
+    for (let col = 0; col < before.cells[row].length; col++) {
+      const was = before.cells[row][col]
+      const now = after.cells[row]?.[col]
+      if (!now || !was.hasStructure) continue
+      if (!now.hasStructure) parts.push(`the ${was.structureKind ?? 'structure'} at (${col}, ${row}) was levelled`)
+      else if (was.structureHp !== now.structureHp) {
+        parts.push(`the ${was.structureKind ?? 'structure'} at (${col}, ${row}) ${was.structureHp}→${now.structureHp} HP`)
+      }
+    }
+  }
+
   return parts.length > 0 ? parts.join('; ') + '.' : 'Nothing was hit.'
 }
