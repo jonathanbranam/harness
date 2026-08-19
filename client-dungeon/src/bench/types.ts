@@ -60,6 +60,13 @@ export interface SelectionView {
   attackByDir: Record<Direction, Tile[]>
 }
 
+export interface BookmarkSummary {
+  name: string
+  savedAt: string
+  board: string
+  units: number
+}
+
 export interface BenchState {
   board: { name: string; cols: number; rows: number; cells: Cell[][] }
   units: Unit[]
@@ -67,6 +74,7 @@ export interface BenchState {
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
+  bookmarks: BookmarkSummary[]
   log: string[]
 }
 
@@ -85,6 +93,9 @@ export type BenchIntent =
   | { kind: 'undo' }
   | { kind: 'tweakDef'; unitType: UnitType; maxHp?: number; moveRange?: number; damage?: number; minRange?: number; maxRange?: number }
   | { kind: 'resetDefs' }
+  | { kind: 'saveBookmark'; name: string }
+  | { kind: 'loadBookmark'; name: string }
+  | { kind: 'deleteBookmark'; name: string }
 
 /** Archetype colors, matching the game's own rendering (see pc-archetypes spec). */
 export const UNIT_COLORS: Record<UnitType, string> = {

@@ -25,6 +25,9 @@ export type BenchIntent =
   | { kind: 'undo' }
   | { kind: 'tweakDef'; unitType: UnitType; maxHp?: number; moveRange?: number; damage?: number; minRange?: number; maxRange?: number }
   | { kind: 'resetDefs' }
+  | { kind: 'saveBookmark'; name: string }
+  | { kind: 'loadBookmark'; name: string }
+  | { kind: 'deleteBookmark'; name: string }
 
 export function applyIntent(bench: BenchStore, intent: BenchIntent): BenchResult {
   switch (intent.kind) {
@@ -69,5 +72,11 @@ export function applyIntent(bench: BenchStore, intent: BenchIntent): BenchResult
       })
     case 'resetDefs':
       return bench.resetDefs()
+    case 'saveBookmark':
+      return bench.saveBookmark(intent.name)
+    case 'loadBookmark':
+      return bench.loadBookmark(intent.name)
+    case 'deleteBookmark':
+      return bench.deleteBookmark(intent.name)
   }
 }

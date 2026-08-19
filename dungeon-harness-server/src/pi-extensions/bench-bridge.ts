@@ -35,6 +35,9 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_undo',
   'dungeon_tweak_unit_def',
   'dungeon_reset_unit_defs',
+  'dungeon_save_bookmark',
+  'dungeon_load_bookmark',
+  'dungeon_delete_bookmark',
 ] as const
 
 const text = (value: unknown) => [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }]
@@ -80,7 +83,7 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_board_state',
       label: 'Read Bench',
       description:
-        'Read the whole bench: the board as terrain rows (. plains, f forest, w water, s stone, P power center, T tower), every unit with position and HP, the current selection with its engine-derived move and attack options, enemy attack telegraphs, the unit definitions in force, and the recent action log. Everything derived here is computed by the game engine at read time, so it is never stale.',
+        'Read the whole bench: saved bookmarks, the board as terrain rows (. plains, f forest, w water, s stone, P power center, T tower), every unit with position and HP, the current selection with its engine-derived move and attack options, enemy attack telegraphs, the unit definitions in force, and the recent action log. Everything derived here is computed by the game engine at read time, so it is never stale.',
       promptSnippet: 'Read the live bench: board, units, selection, options, definitions',
       parameters: Type.Object({}),
       execute: async () => {
@@ -308,6 +311,37 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       promptSnippet: 'Reset unit definitions to the shipped values',
       parameters: Type.Object({}),
       execute: async () => outcome(bench, bench.resetDefs()),
+    })
+
+    // ─── Bookmarks ────────────────────────────────────────────────────────────
+
+    pi.registerTool({
+      name: 'dungeon_save_bookmark',
+      label: 'Save Bookmark',
+      description:
+        'Save the board exactly as it stands — mid-turn is fine — under a name, so the designer can come back to it later. Bookmarks are interesting positions to poke at, not approved tests: making one is cheap and throwing one away is cheap. Saving under an existing name replaces it. Read the current list from dungeon_board_state.',
+      promptSnippet: 'Save the current board under a name',
+      parameters: Type.Object({ name: Type.String() }),
+      execute: async (_id, params) => outcome(bench, bench.saveBookmark(params.name)),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_load_bookmark',
+      label: 'Load Bookmark',
+      description:
+        'Jump to a saved board, replacing whatever is on the bench now — including the board, every unit, and any session tweaks that were in force when it was saved. The jump can be stepped back like any other action.',
+      promptSnippet: 'Jump to a saved board',
+      parameters: Type.Object({ name: Type.String() }),
+      execute: async (_id, params) => outcome(bench, bench.loadBookmark(params.name)),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_delete_bookmark',
+      label: 'Delete Bookmark',
+      description: 'Delete a saved board permanently.',
+      promptSnippet: 'Delete a saved board',
+      parameters: Type.Object({ name: Type.String() }),
+      execute: async (_id, params) => outcome(bench, bench.deleteBookmark(params.name)),
     })
   }
 }

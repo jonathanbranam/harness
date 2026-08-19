@@ -10,6 +10,7 @@ import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, S
 import { env } from './env'
 import { ensureAgentWorkspace } from './agent-workspace'
 import { BenchStore } from './bench/bench-store'
+import { BookmarkStore } from './bench/bookmark-store'
 import { BENCH_TOOL_NAMES, createBenchBridgeExtension } from './pi-extensions/bench-bridge'
 import { createBoardVisualInspectionExtension, type RequestRender } from './pi-extensions/board-visual-inspection'
 import { createPermissionGateExtension, type RequestApproval } from './pi-extensions/permission-gate'
@@ -69,7 +70,9 @@ async function getOrCreateSessionRecord(sessionId: string, callbacks: SessionCal
 
   const cwd = ensureAgentWorkspace(env.DUNGEON_WORKSPACE_DIR, TEMPLATES_DIR)
   const modelRuntime = await modelRuntimePromise
-  const bench = new BenchStore()
+  // Bookmarks live beside the workspace, not inside it: a saved board must not be
+  // rewritable by the agent's `write`/`edit` tools, only through the bench.
+  const bench = new BenchStore({ bookmarks: new BookmarkStore(join(env.DUNGEON_WORKSPACE_DIR, '..', 'bookmarks')) })
 
   // record.callbacks can be mutated by a later rebind (see above), so route
   // through it indirectly instead of closing over this call's callbacks by

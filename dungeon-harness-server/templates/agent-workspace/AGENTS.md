@@ -65,6 +65,16 @@ Playing — both sides, by hand:
 - `dungeon_end_round` refills movement and clears attacks.
 - `dungeon_undo` steps back one action.
 
+Saving positions:
+
+- `dungeon_save_bookmark` stores the board exactly as it stands, mid-turn
+  included, under a name; `dungeon_load_bookmark` jumps back to it;
+  `dungeon_delete_bookmark` removes one. The saved list comes back in
+  `dungeon_board_state`.
+- Bookmarks are **interesting positions to poke at**, not approved tests.
+  Making one is cheap and throwing one away is cheap — offer to save before
+  something irreversible, and don't treat a saved board as precious.
+
 Trying numbers:
 
 - `dungeon_tweak_unit_def` changes a unit type's HP, movement, damage, or

@@ -107,7 +107,7 @@ become the only good way to set up a board. Direct manipulation has to stay
 first-class in this phase — if placing three brutes is easier by typing than
 by clicking, the UI is not done.
 
-## Phase 2 — Bookmarks (next)
+## Phase 2 — Bookmarks ✅ built 2026-08-18
 
 **At the end you can:** name and save the board you are looking at, and pull
 it back up later from a rail.
@@ -116,6 +116,12 @@ Small, because the state is already a serializable blob and mid-play states
 save for free. This is the session doc's central reframing made concrete:
 the library holds **interesting starting positions**, cheap to make and
 cheap to throw away — not test cases.
+
+> Built as part of `openspec/changes/dungeon-bench`. A bookmark stores the
+> board, every unit where it stands, and the session's definition tweaks, in
+> a file beside the workspace rather than inside it — so a saved position
+> cannot be rewritten by the agent's `write`/`edit` tools, only through the
+> bench. Loading one is itself a step-back point.
 
 ## Phase 3 — Threat and reach overlays
 

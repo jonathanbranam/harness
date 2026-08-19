@@ -49,6 +49,7 @@ import {
   type UnitDef,
 } from '@repo/dungeon-engine'
 import { generateBoard, type GenerateBoardOptions } from './board-gen'
+import type { BookmarkStore, BookmarkSummary } from './bookmark-store'
 
 export type UnitType = PcType | NpcType
 
@@ -82,6 +83,8 @@ export interface BenchState {
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
+  /** Saved board states, newest first. Empty when no bookmark store is configured. */
+  bookmarks: BookmarkSummary[]
   /** Human-readable record of what has happened, newest last. */
   log: string[]
 }
@@ -141,9 +144,11 @@ export class BenchStore {
   private defOverrides: Partial<Record<UnitType, UnitDef>> = {}
   private log: string[] = []
   private unitSeq = 0
+  private bookmarks: BookmarkStore | undefined
   private listeners = new Set<(state: BenchState) => void>()
 
-  constructor(opts: GenerateBoardOptions = {}) {
+  constructor(opts: GenerateBoardOptions & { bookmarks?: BookmarkStore } = {}) {
+    this.bookmarks = opts.bookmarks
     this.map = generateBoard(opts)
     applyMap(this.map)
     this.state = emptyState(this.freshCells())
@@ -193,6 +198,7 @@ export class BenchStore {
       telegraphs: this.state.npcPlans.map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
       defs: getAllDefs() as Record<UnitType, UnitDef>,
       canUndo: this.history.length > 0,
+      bookmarks: this.bookmarks?.list() ?? [],
       log: [...this.log],
     }
   }
@@ -452,6 +458,59 @@ export class BenchStore {
     this.note(`Definition changed — ${summary}`)
     this.emit()
     return ok(summary)
+  }
+
+  // ─── Bookmarks ──────────────────────────────────────────────────────────────
+
+  /**
+   * Save the board exactly as it stands — mid-turn, mid-fight, whatever it is —
+   * under a name. Cheap to make and cheap to throw away is the point: the
+   * library holds interesting positions, not approved test cases.
+   */
+  saveBookmark(name: string): BenchResult {
+    if (!this.bookmarks) return fail('Bookmarks are not configured for this bench')
+    try {
+      const saved = this.bookmarks.write({
+        name: name.trim(),
+        savedAt: new Date().toISOString(),
+        map: this.map,
+        state: this.state,
+        defOverrides: this.defOverrides,
+      })
+      this.note(`Saved bookmark "${saved}".`)
+      this.emit()
+      return ok(`Saved "${saved}".`)
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : 'Could not save that bookmark')
+    }
+  }
+
+  /** Jump to a saved position. The current board is replaced, not merged, and the
+   *  jump itself is a step-back point like any other action. */
+  loadBookmark(name: string): BenchResult {
+    if (!this.bookmarks) return fail('Bookmarks are not configured for this bench')
+    const bookmark = this.bookmarks.read(name)
+    if (!bookmark) return fail(`No bookmark named "${name}"`)
+
+    this.history.push(this.state)
+    this.map = bookmark.map
+    this.defOverrides = bookmark.defOverrides ?? {}
+    this.state = bookmark.state
+    this.selectedId = null
+    this.ensureActive()
+    // Unit ids came from the saved state; keep new placements from colliding.
+    this.unitSeq = this.state.units.length
+    this.note(`Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
+    this.emit()
+    return ok(`Loaded "${bookmark.name}".`)
+  }
+
+  deleteBookmark(name: string): BenchResult {
+    if (!this.bookmarks) return fail('Bookmarks are not configured for this bench')
+    if (!this.bookmarks.delete(name)) return fail(`No bookmark named "${name}"`)
+    this.note(`Deleted bookmark "${name}".`)
+    this.emit()
+    return ok(`Deleted "${name}".`)
   }
 
   /** Drop every session tweak and go back to the game's shipped numbers. */

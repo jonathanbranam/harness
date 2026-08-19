@@ -6,6 +6,7 @@ import { useDungeonSocket } from '../hooks/useDungeonSocket'
 import { useTheme } from '../hooks/useTheme'
 import { BoardView } from '../components/BoardView'
 import { BenchControls } from '../components/BenchControls'
+import { BookmarkRail } from '../components/BookmarkRail'
 import { ApprovalDialog } from '../components/ApprovalDialog'
 import type { Direction, Tile, Unit, UnitType } from '../bench/types'
 
@@ -135,8 +136,11 @@ export function DungeonPage() {
                   onIntent={sendIntent}
                   lastError={benchError}
                 />
-                <div className="flex-1 min-h-0">
-                  <BoardView ref={canvasRef} state={benchState} armedDirection={armedDirection} onTileClick={handleTileClick} onUnitClick={handleUnitClick} />
+                <div className="flex-1 min-h-0 flex">
+                  <BookmarkRail bookmarks={benchState?.bookmarks ?? []} onIntent={sendIntent} />
+                  <div className="flex-1 min-h-0">
+                    <BoardView ref={canvasRef} state={benchState} armedDirection={armedDirection} onTileClick={handleTileClick} onUnitClick={handleUnitClick} />
+                  </div>
                 </div>
               </div>
             )}
