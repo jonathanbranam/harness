@@ -17,6 +17,15 @@
 > Three defects surfaced that way and are fixed: a log that reported structural
 > damage as a miss, a board alphabet the agent was never taught, and threat
 > fields that turned into a muddy wash with more than one layer on.
+>
+> **The action surface landed on 2026-08-19** — see
+> [`action-surface-plan.md`](action-surface-plan.md) for the audit and the plan.
+> The engine now owns what a unit may do, what the player may pick, and whether
+> the pick is legal; the game and the bench both aim by tile, and the bench's
+> four direction buttons are gone. Three changes: `dungeon-engine-action-surface`
+> and `dungeon-game-action-adoption` in track-web,
+> `dungeon-bench-action-adoption` here, all archived. The turn sequencer and its
+> telegraph window remain deliberately deferred.
 
 ## What this is
 
