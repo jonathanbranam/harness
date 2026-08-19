@@ -9,12 +9,14 @@
 >
 > **Built (2026-08-18/19, branch `dungeon-harness-rebuild`):** the hand-driven
 > bench, bookmarks, reach and threat fields, and the transport strip — phases
-> 1 through 4 of [`phase-plan.md`](phase-plan.md), recorded as
-> `openspec/changes/dungeon-bench`. **Not built:** phase 5's scoped turn
-> machine, and everything deferred past it.
+> 1 through 4 of [`phase-plan.md`](phase-plan.md), archived as
+> `openspec/changes/archive/2026-08-19-dungeon-bench`. **Not built:** phase 5's
+> scoped turn machine, and everything deferred past it.
 >
-> **Not yet verified in a browser** — the automated gates pass (typecheck,
-> tests, client build, server boot) but nobody has driven the bench by hand.
+> **Verified in a browser**, end to end, including driving the bench from chat.
+> Three defects surfaced that way and are fixed: a log that reported structural
+> damage as a miss, a board alphabet the agent was never taught, and threat
+> fields that turned into a muddy wash with more than one layer on.
 
 ## What this is
 

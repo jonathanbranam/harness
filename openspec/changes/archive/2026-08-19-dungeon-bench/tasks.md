@@ -65,8 +65,11 @@
 - [x] 7.4 `npm test` passes
 - [x] 7.5 `npm run build:client-dungeon` passes
 - [x] 7.6 The server boots with the engine dependency
-- [ ] 7.7 Drive the bench in a browser — needs the dev servers running and the
-      login password; not done in this session
+- [x] 7.7 Drive the bench in a browser: log in, generate a board, place units,
+      select and see engine-derived reach, move and spend the budget, have an
+      illegal move refused with the engine's reason shown, arm a direction and
+      attack, toggle the fields, save and load a bookmark across a server
+      restart, step back and scrub, and drive it all from chat
 
 ## 8. Bookmarks (phase 2)
 
