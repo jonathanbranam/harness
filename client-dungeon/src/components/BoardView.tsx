@@ -3,8 +3,8 @@ import {
   TERRAIN_COLORS,
   UNIT_COLORS,
   UNIT_INITIALS,
+  type ActionId,
   type BenchState,
-  type Direction,
   type FieldToggles,
   type Tile,
   type Unit,
@@ -14,8 +14,9 @@ export const CELL_SIZE = 48
 
 interface BoardViewProps {
   state: BenchState | null
-  /** The direction currently armed for attack, if any — its footprint is highlighted. */
-  armedDirection: Direction | null
+  /** Which action is armed. Its engine-offered target tiles are highlighted, and
+   *  clicking one commits it. */
+  armedAction: ActionId
   fields: FieldToggles
   onTileClick: (tile: Tile) => void
   onUnitClick: (unit: Unit) => void
@@ -53,7 +54,7 @@ function key(tile: { col: number; row: number }): string {
  * no rule of its own — it decides colors, not legality.
  */
 export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function BoardView(
-  { state, armedDirection, fields, onTileClick, onUnitClick },
+  { state, armedAction, fields, onTileClick, onUnitClick },
   ref,
 ) {
   if (!state) {
@@ -68,10 +69,12 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
   const width = board.cols * CELL_SIZE
   const height = board.rows * CELL_SIZE
 
-  const reachable = new Set((selection?.moveDests ?? []).map(key))
-  const footprint = new Set(
-    armedDirection && selection ? selection.attackByDir[armedDirection].map(key) : [],
-  )
+  // The armed action's targets, straight from the engine. The board paints what
+  // it is told is legal; it does not work out reach or range for itself.
+  const armed = selection?.actions.find((a) => a.id === armedAction)
+  const offered = armed?.available ? armed.targets : []
+  const reachable = new Set(armedAction === 'move' ? offered.map(key) : (selection?.moveDests ?? []).map(key))
+  const footprint = new Set(armedAction === 'attack' ? offered.map(key) : [])
   const telegraphed = new Set(telegraphs.map((t) => `${t.targetCol},${t.targetRow}`))
 
   // Painted bottom to top so threat sits over reach and the enemy over the player

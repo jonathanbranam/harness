@@ -6,14 +6,13 @@
 // there is no path by which the browser can change board state except through a
 // method the engine backs.
 
-import type { Direction } from '@repo/dungeon-engine'
+import type { ActionId } from '@repo/dungeon-engine'
 import type { BenchResult, BenchStore, UnitType } from './bench-store'
 import { boardFromRows, generateBoard, type BoardPreset } from './board-gen'
 
 export type BenchIntent =
   | { kind: 'select'; unitId: string | null }
-  | { kind: 'move'; col: number; row: number }
-  | { kind: 'attack'; direction: Direction; target?: { col: number; row: number } }
+  | { kind: 'commit'; action: ActionId; col: number; row: number }
   | { kind: 'place'; unitType: UnitType; col: number; row: number; hp?: number }
   | { kind: 'remove'; unitId: string }
   | { kind: 'relocate'; unitId: string; col: number; row: number }
@@ -35,10 +34,8 @@ export function applyIntent(bench: BenchStore, intent: BenchIntent): BenchResult
   switch (intent.kind) {
     case 'select':
       return bench.select(intent.unitId)
-    case 'move':
-      return bench.moveSelectedTo(intent.col, intent.row)
-    case 'attack':
-      return bench.attackSelected(intent.direction, intent.target)
+    case 'commit':
+      return bench.commitSelected(intent.action, { col: intent.col, row: intent.row })
     case 'place':
       return bench.placeUnit(intent.unitType, intent.col, intent.row, intent.hp)
     case 'remove':

@@ -18,12 +18,12 @@ describe('bench intents', () => {
     applyIntent(store, { kind: 'select', unitId })
     expect(store.getState().selection?.unitId).toBe(unitId)
 
-    expect(applyIntent(store, { kind: 'move', col: 3, row: 1 })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'commit', action: 'move', col: 3, row: 1 })).toMatchObject({ ok: true })
     expect(store.getState().units[0]).toMatchObject({ col: 3, row: 1 })
 
     // Out of reach: the engine refuses, and the refusal is reported rather than
     // silently ignored, because "not legal" is an answer the designer wants.
-    expect(applyIntent(store, { kind: 'move', col: 7, row: 4 })).toMatchObject({ ok: false })
+    expect(applyIntent(store, { kind: 'commit', action: 'move', col: 7, row: 4 })).toMatchObject({ ok: false })
   })
 
   it('builds a board from explicit rows and reports a malformed one', () => {
@@ -42,7 +42,7 @@ describe('bench intents', () => {
     expect(applyIntent(store, { kind: 'setHp', unitId: pc.id, hp: 2 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 2, row: 3 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'select', unitId: npc.id })).toMatchObject({ ok: true })
-    expect(applyIntent(store, { kind: 'attack', direction: 'down', target: { col: 3, row: 3 } })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'commit', action: 'attack', col: 3, row: 3 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'endRound' })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'runEnemyAi' })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'tweakDef', unitType: 'melee', moveRange: 6 })).toMatchObject({ ok: true })

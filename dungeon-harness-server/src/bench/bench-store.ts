@@ -23,25 +23,29 @@
 import {
   applyLoaded,
   applyMap,
-  attackFootprint,
+  availableActions,
   boardCells,
   clampDef,
-  computeMovePath,
+  commitAction,
   computeNpcTurns,
   endRound,
   getAllDefs,
   getDef,
+  getMaxHp,
   gridCols,
   gridRows,
   hasAttacked,
+  preview,
+  reconcileHp,
   remainingMove,
   resolveNpcAction,
-  resolvePcAction,
-  applyMove,
+  threatTiles,
   validMoveDests,
+  type ActionId,
+  type ActionOption,
+  type ActionPreview,
   type Cell,
   type ContentMap,
-  type Direction,
   type GameState,
   type NpcType,
   type PcType,
@@ -56,7 +60,6 @@ export type UnitType = PcType | NpcType
 const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
 const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
 export const UNIT_TYPES: UnitType[] = [...PC_TYPES, ...NPC_TYPES]
-export const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
 
 /** How many frames the timeline keeps. `GameState` is plain data and every engine
  *  function returns a new one, so a frame is a value, not a diff to replay. */
@@ -145,10 +148,19 @@ export interface SelectionView {
   maxHp: number
   remainingMove: number
   hasAttacked: boolean
-  /** Engine-derived: every tile this unit can still reach this turn. */
+  /** Engine-derived: every tile this unit can still reach this turn. Kept
+   *  alongside `actions` because the board paints reach even when no action is
+   *  armed. */
   moveDests: Tile[]
-  /** Engine-derived: the attack footprint in each direction from where it stands. */
-  attackByDir: Record<Direction, Tile[]>
+  /**
+   * Engine-derived: what this unit may do, in the engine's own words.
+   *
+   * Unavailable actions are present, carrying the reason, so the client renders
+   * a disabled control that explains itself rather than deciding for itself when
+   * an action is possible. Aiming is by tile — no direction appears here, which
+   * is what stops a control from being built that the game does not have.
+   */
+  actions: ActionOption[]
 }
 
 export type BenchResult = { ok: true; message: string } | { ok: false; error: string }
@@ -297,10 +309,6 @@ export class BenchStore {
     if (!unit) return null
 
     const def = getDef(unit.unitType)
-    const attackByDir = {} as Record<Direction, Tile[]>
-    for (const dir of DIRECTIONS) {
-      attackByDir[dir] = attackFootprint(def, { col: unit.col, row: unit.row }, dir)
-    }
 
     return {
       unitId: unit.id,
@@ -313,7 +321,7 @@ export class BenchStore {
       remainingMove: remainingMove(this.state, unit),
       hasAttacked: hasAttacked(this.state, unit.id),
       moveDests: validMoveDests(this.state, unit.id),
-      attackByDir,
+      actions: availableActions(this.state, unit.id),
     }
   }
 
@@ -327,42 +335,27 @@ export class BenchStore {
    * engine reports for it.
    */
   /**
-   * Every tile a unit's attack could land on from `origin`, in any direction.
+   * Every tile a unit's attack could land on if it stood at `origin`.
    *
-   * For most shapes this is exactly the engine's own footprint. **One documented
-   * approximation:** a `single`-shape attack resolves on the tile at *min* range,
-   * but a unit whose targeting band is wider than that can select a target
-   * anywhere in the band — the NPC scanners in the engine walk `minRange` to
-   * `maxRange` along each cardinal. A short-range enemy therefore shoots two
-   * tiles, and a long-range enemy shoots across the board, even though each
-   * resolves on one tile. Using the footprint alone would tell the designer the
-   * enemy is far less dangerous than it is.
+   * This asks the engine, from a state with the unit moved there — it does not
+   * reconstruct reach from definition fields. The version this replaces did, and
+   * documented itself as an upper bound that ignored blocking, because the
+   * engine's targeting walk was private at the time. It no longer is, so the
+   * local copy is gone rather than corrected: a second implementation of a rule
+   * is how the two drift apart.
    *
-   * So for `single` shapes the band is used. It ignores blocking — the scanners
-   * stop at the first unit or structure — which makes this an **upper bound**:
-   * every tile shown is one the unit could hit with a clear line, and none is
-   * missing. That is the right direction to err for a "what can touch me" view.
-   * The scanners themselves are internal to the engine, so this is derived from
-   * the same definition fields they read rather than by re-implementing them.
+   * The practical difference is that a tile behind a blocker is no longer shown
+   * as threatened.
    */
-  private threatTilesFrom(def: UnitDef, origin: Tile): Tile[] {
-    const { minRange, maxRange } = def.attack.targeting
-    if (def.attack.propagation.shape !== 'single' || maxRange <= minRange) {
-      return DIRECTIONS.flatMap((dir) => attackFootprint(def, origin, dir))
+  private threatFrom(unit: Unit, origin: Tile): Tile[] {
+    if (origin.col === unit.col && origin.row === unit.row) {
+      return threatTiles(this.state, unit.id)
     }
-
-    // The targeting band along each cardinal, board-clipped the way the engine
-    // clips its own footprints.
-    const banded: Tile[] = []
-    for (const [dc, dr] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
-      for (let d = minRange; d <= maxRange; d++) {
-        const col = origin.col + dc * d
-        const row = origin.row + dr * d
-        if (col < 0 || row < 0 || col >= gridCols() || row >= gridRows()) break
-        banded.push({ col, row })
-      }
+    const moved: GameState = {
+      ...this.state,
+      units: this.state.units.map((u) => (u.id === unit.id ? { ...u, col: origin.col, row: origin.row } : u)),
     }
-    return banded
+    return threatTiles(moved, unit.id)
   }
 
   private computeFields(): BoardFields {
@@ -370,7 +363,6 @@ export class BenchStore {
 
     for (const unit of this.state.units) {
       const side = unit.kind
-      const def = getDef(unit.unitType)
       const dests = validMoveDests(this.state, unit.id)
 
       for (const tile of dests) {
@@ -383,7 +375,7 @@ export class BenchStore {
       // Attack origins: where it stands, plus everywhere it could move to first.
       const threatened = new Set<string>()
       for (const origin of [{ col: unit.col, row: unit.row }, ...dests]) {
-        for (const tile of this.threatTilesFrom(def, origin)) threatened.add(`${tile.col},${tile.row}`)
+        for (const tile of this.threatFrom(unit, origin)) threatened.add(`${tile.col},${tile.row}`)
       }
       for (const key of threatened) {
         fields.threat[side][key] = (fields.threat[side][key] ?? 0) + 1
@@ -469,7 +461,7 @@ export class BenchStore {
   }
 
   /** Setup-time relocation: ignores movement budget and legality, because this is
-   *  placing a piece, not taking a turn. Use `moveSelectedTo` to take a turn. */
+   *  placing a piece, not taking a turn. Use `commitSelected` to take a turn. */
   relocateUnit(unitId: string, col: number, row: number): BenchResult {
     this.ensureActive()
     const unit = this.unit(unitId)
@@ -507,67 +499,51 @@ export class BenchStore {
     return ok(unitId ? `Selected ${unitId}.` : 'Selection cleared.')
   }
 
-  /** Take a movement step with the selected unit. Legality and cost come from the
-   *  engine: `validMoveDests` decides where it may go, `computeMovePath` finds the
-   *  route, `applyMove` charges the budget. */
-  moveSelectedTo(col: number, row: number): BenchResult {
+  /**
+   * Commit an action for the selected unit against a target tile.
+   *
+   * The engine decides everything: which actions exist, which tiles each may be
+   * aimed at, and whether this particular tile is one of them. The bench neither
+   * checks nor pre-filters — it forwards the engine's refusal, so the designer
+   * and the agent hear the same sentence.
+   *
+   * Aiming is by **tile**. The version this replaces took a direction, which is
+   * not how the game aims: a cross-shaped attack covers tiles either side of its
+   * centre, and no direction names them.
+   */
+  commitSelected(action: ActionId, tile: Tile): BenchResult {
     this.ensureActive()
     if (!this.selectedId) return fail('No unit selected')
     const unit = this.unit(this.selectedId)
     if (!unit) return fail('Selected unit is no longer on the board')
 
-    const legal = validMoveDests(this.state, unit.id)
-    if (!legal.some((t) => t.col === col && t.row === row)) {
-      const left = remainingMove(this.state, unit)
-      return fail(
-        left <= 0
-          ? `${unit.id} has no movement left this turn${hasAttacked(this.state, unit.id) ? ' (it has attacked)' : ''}`
-          : `(${col}, ${row}) is not reachable — ${unit.id} has ${left} movement left`,
-      )
+    const before = this.state
+    const result = commitAction(this.state, unit.id, action, tile)
+    if (!result.ok) return fail(result.reason)
+
+    if (action === 'move') {
+      const spent = remainingMove(before, unit) - remainingMove(result.state, result.state.units.find((u) => u.id === unit.id)!)
+      this.commit(result.state, `${unit.id} moved to (${tile.col}, ${tile.row}), ${spent} tile(s).`)
+      return ok(`${unit.id} moved to (${tile.col}, ${tile.row}).`)
     }
 
-    const path = computeMovePath(this.state, unit.id, unit.col, unit.row, col, row)
-    if (path.length === 0) return fail(`No path from (${unit.col}, ${unit.row}) to (${col}, ${row})`)
-
-    this.commit(applyMove(this.state, unit.id, col, row, path), `${unit.id} moved to (${col}, ${row}), ${path.length} tile(s).`)
-    return ok(`${unit.id} moved to (${col}, ${row}).`)
+    this.commit(
+      result.state,
+      `${unit.id} attacked (${tile.col}, ${tile.row}). ${describeChanges(before, result.state)}`,
+    )
+    return ok(`${unit.id} attacked (${tile.col}, ${tile.row}).`)
   }
 
   /**
-   * Attack with the selected unit in `dir`. The footprint comes from the engine.
-   * A PC attack is resolved by `resolvePcAction` (it damages NPCs/structures); an
-   * NPC attack is resolved by `resolveNpcAction` against one tile of the
-   * footprint (it damages PCs/structures), which is why NPCs take a target.
+   * What an action would do against a tile, without doing it. Used for hover
+   * feedback in the browser and for an agent that wants to check before
+   * committing. Comes from the engine, which reads the effects by resolving and
+   * diffing, so a preview cannot disagree with the commit that follows.
    */
-  attackSelected(dir: Direction, target?: Tile): BenchResult {
+  previewSelected(action: ActionId, tile: Tile): ActionPreview | null {
     this.ensureActive()
-    if (!this.selectedId) return fail('No unit selected')
-    const unit = this.unit(this.selectedId)
-    if (!unit) return fail('Selected unit is no longer on the board')
-    if (hasAttacked(this.state, unit.id)) return fail(`${unit.id} has already attacked this turn`)
-
-    const footprint = attackFootprint(getDef(unit.unitType), { col: unit.col, row: unit.row }, dir)
-    if (footprint.length === 0) return fail(`${unit.id} has nothing in reach ${dir}`)
-
-    if (unit.kind === 'pc') {
-      const before = this.state
-      const next = resolvePcAction(this.state, { kind: 'attack', unitId: unit.id, col: unit.col, row: unit.row, attackDir: dir })
-      this.commit(next, `${unit.id} attacked ${dir}. ${describeChanges(before, next)}`)
-      return ok(`${unit.id} attacked ${dir}.`)
-    }
-
-    const tile = target ?? footprint[0]
-    if (!footprint.some((t) => t.col === tile.col && t.row === tile.row)) {
-      return fail(`(${tile.col}, ${tile.row}) is not in ${unit.id}'s ${dir} footprint`)
-    }
-    const before = this.state
-    const next = resolveNpcAction(this.state, { kind: 'attack', unitId: unit.id, targetCol: tile.col, targetRow: tile.row })
-    // resolveNpcAction doesn't mark the attacker as spent (the game resolves NPC
-    // telegraphs at end of round, not as a turn action), so the bench marks it —
-    // otherwise a hand-driven NPC could attack repeatedly in one turn.
-    const attackedThisTurn = next.attackedThisTurn.includes(unit.id) ? next.attackedThisTurn : [...next.attackedThisTurn, unit.id]
-    this.commit({ ...next, attackedThisTurn }, `${unit.id} attacked (${tile.col}, ${tile.row}). ${describeChanges(before, next)}`)
-    return ok(`${unit.id} attacked (${tile.col}, ${tile.row}).`)
+    if (!this.selectedId) return null
+    return preview(this.state, this.selectedId, action, tile)
   }
 
   /** Hand the enemy side to the game's own AI for one round, for comparison with
@@ -659,12 +635,18 @@ export class BenchStore {
       },
     })
 
+    const prevMax = { [unitType]: getMaxHp(unitType) } as Partial<Record<UnitType, number>>
     this.defOverrides[unitType] = next
     this.ensureActive()
+    // Units already on the board move with the change, through the engine's own
+    // rule — raising a maximum heals them, lowering it wounds them but never
+    // kills. Doing this here rather than locally is what keeps the bench and the
+    // game agreeing about what a balance edit does mid-match.
+    const reconciled = reconcileHp(this.state, prevMax)
     const summary = `${unitType}: ${next.maxHp} HP, move ${next.movement.range}, damage ${next.attack.damage}, range ${next.attack.targeting.minRange}–${next.attack.targeting.maxRange}`
     // A frame, so stepping back past a number change puts the number back — the
     // designer can walk a trajectory that includes their own edits.
-    this.commit(this.state, `Definition changed — ${summary}`)
+    this.commit(reconciled, `Definition changed — ${summary}`)
     return ok(summary)
   }
 

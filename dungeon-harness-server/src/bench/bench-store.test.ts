@@ -74,7 +74,7 @@ describe('playing by hand', () => {
     expect(before.remainingMove).toBe(4)
     expect(before.moveDests).toContainEqual({ col: 2, row: 0 })
 
-    expect(bench.moveSelectedTo(2, 0).ok).toBe(true)
+    expect(bench.commitSelected('move', { col: 2, row: 0 }).ok).toBe(true)
     const after = bench.getState().selection!
     expect([after.col, after.row]).toEqual([2, 0])
     expect(after.remainingMove).toBe(2)
@@ -85,7 +85,7 @@ describe('playing by hand', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
-    expect(bench.moveSelectedTo(7, 4)).toMatchObject({ ok: false })
+    expect(bench.commitSelected('move', { col: 7, row: 4 })).toMatchObject({ ok: false })
   })
 
   it('resolves a PC attack against an adjacent NPC for the def damage', () => {
@@ -95,8 +95,10 @@ describe('playing by hand', () => {
     const [pc, npc] = bench.getState().units
     bench.select(pc.id)
 
-    expect(bench.getState().selection!.attackByDir.right).toContainEqual({ col: 3, row: 2 })
-    expect(bench.attackSelected('right').ok).toBe(true)
+    const attack = bench.getState().selection!.actions.find((a) => a.id === 'attack')!
+    expect(attack.available).toBe(true)
+    expect(attack.targets).toContainEqual({ col: 3, row: 2 })
+    expect(bench.commitSelected('attack', { col: 3, row: 2 }).ok).toBe(true)
 
     const hit = bench.getState().units.find((u) => u.id === npc.id)!
     expect(hit.hp).toBe(1) // 3 HP - 2 melee damage
@@ -107,13 +109,19 @@ describe('playing by hand', () => {
     bench.placeUnit('melee', 2, 2)
     bench.placeUnit('short-range', 3, 2)
     bench.select(bench.getState().units[0].id)
-    bench.attackSelected('right')
+    bench.commitSelected('attack', { col: 3, row: 2 })
 
     const selection = bench.getState().selection!
     expect(selection.hasAttacked).toBe(true)
     expect(selection.remainingMove).toBe(0)
-    expect(bench.moveSelectedTo(2, 3)).toMatchObject({ ok: false })
-    expect(bench.attackSelected('right')).toMatchObject({ ok: false })
+    expect(bench.commitSelected('move', { col: 2, row: 3 })).toMatchObject({ ok: false })
+    expect(bench.commitSelected('attack', { col: 3, row: 2 })).toMatchObject({ ok: false })
+    // Both actions come back unavailable with the engine's own reason, so the
+    // client renders a disabled control that explains itself.
+    for (const action of selection.actions) {
+      expect(action.available).toBe(false)
+      expect(action.reason).toMatch(/already attacked/)
+    }
   })
 
   it('drives an NPC attack by hand against a PC', () => {
@@ -123,7 +131,7 @@ describe('playing by hand', () => {
     const [pc, npc] = bench.getState().units
     bench.select(npc.id)
 
-    expect(bench.attackSelected('left', { col: 2, row: 2 }).ok).toBe(true)
+    expect(bench.commitSelected('attack', { col: 2, row: 2 }).ok).toBe(true)
     expect(bench.getState().units.find((u) => u.id === pc.id)!.hp).toBe(2) // 3 - 1
   })
 
@@ -132,7 +140,7 @@ describe('playing by hand', () => {
     bench.placeUnit('melee', 6, 4)
     bench.placeUnit('short-range', 0, 0)
     bench.select(bench.getState().units[1].id)
-    expect(bench.attackSelected('right', { col: 6, row: 4 })).toMatchObject({ ok: false })
+    expect(bench.commitSelected('attack', { col: 6, row: 4 })).toMatchObject({ ok: false })
   })
 
   it('runs the game AI for the enemy side on request', () => {
@@ -175,7 +183,7 @@ describe('playing by hand', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
-    bench.moveSelectedTo(3, 0)
+    bench.commitSelected('move', { col: 3, row: 0 })
     expect(bench.getState().selection!.remainingMove).toBe(1)
     bench.endRound()
     expect(bench.getState().selection!.remainingMove).toBe(4)
@@ -187,7 +195,7 @@ describe('stepping back', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
-    bench.moveSelectedTo(2, 0)
+    bench.commitSelected('move', { col: 2, row: 0 })
     bench.undo()
     const selection = bench.getState().selection!
     expect([selection.col, selection.row]).toEqual([0, 0])
@@ -200,7 +208,7 @@ describe('stepping back', () => {
     bench.placeUnit('short-range', 3, 2)
     const npcId = bench.getState().units[1].id
     bench.select(bench.getState().units[0].id)
-    bench.attackSelected('right')
+    bench.commitSelected('attack', { col: 3, row: 2 })
     expect(bench.getState().units.find((u) => u.id === npcId)!.hp).toBe(1)
 
     bench.undo()
@@ -232,7 +240,7 @@ describe('session-scoped definition tweaks', () => {
     bench.placeUnit('short-range', 3, 2, 9)
     bench.tweakDef('melee', { damage: 5 })
     bench.select(bench.getState().units[0].id)
-    bench.attackSelected('right')
+    bench.commitSelected('attack', { col: 3, row: 2 })
     expect(bench.getState().units[1].hp).toBe(4)
   })
 
@@ -303,7 +311,7 @@ describe('reach and threat', () => {
     bench.placeUnit('melee', 2, 2)
     bench.placeUnit('short-range', 3, 2)
     bench.select(bench.getState().units[0].id)
-    bench.attackSelected('right')
+    bench.commitSelected('attack', { col: 3, row: 2 })
 
     const { reach, threat } = bench.getState().fields
     expect(Object.keys(reach.pc)).toHaveLength(0)
@@ -383,7 +391,7 @@ describe('the timeline', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
-    bench.moveSelectedTo(2, 0)
+    bench.commitSelected('move', { col: 2, row: 0 })
 
     const { timeline } = bench.getState()
     expect(timeline.cursor).toBe(timeline.labels.length - 1)
@@ -395,7 +403,7 @@ describe('the timeline', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
-    bench.moveSelectedTo(2, 0)
+    bench.commitSelected('move', { col: 2, row: 0 })
 
     expect(bench.undo().ok).toBe(true)
     expect(bench.getState().units[0]).toMatchObject({ col: 0, row: 0 })
@@ -411,7 +419,7 @@ describe('the timeline', () => {
     bench.placeUnit('melee', 0, 0)
     bench.placeUnit('short-range', 5, 0)
     bench.select(bench.getState().units[0].id)
-    bench.moveSelectedTo(3, 0)
+    bench.commitSelected('move', { col: 3, row: 0 })
 
     // Frames: 0 the bench's first board, 1 this board, 2 melee placed, 3 the
     // enemy placed, 4 the move. Selecting is not an action and makes no frame.
@@ -428,10 +436,10 @@ describe('the timeline', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
-    bench.moveSelectedTo(2, 0)
+    bench.commitSelected('move', { col: 2, row: 0 })
     bench.undo()
 
-    bench.moveSelectedTo(0, 2) // a different line
+    bench.commitSelected('move', { col: 0, row: 2 }) // a different line
     expect(bench.getState().canRedo).toBe(false)
     expect(bench.getState().units[0]).toMatchObject({ col: 0, row: 2 })
   })
@@ -505,7 +513,7 @@ describe('the action log', () => {
     bench.newBoard(boardFromRows(['.....', '..P..', '.....']))
     bench.placeUnit('melee', 1, 1)
     bench.select(bench.getState().units[0].id)
-    bench.attackSelected('right')
+    bench.commitSelected('attack', { col: 2, row: 1 })
 
     // Structures take one point per hit whatever the attacker's damage.
     expect(bench.getState().log.at(-1)).toMatch(/power-center at \(2, 1\) 3→2 HP/)
@@ -518,7 +526,7 @@ describe('the action log', () => {
     const id = bench.getState().units[0].id
     for (let i = 0; i < 3; i++) {
       bench.select(id)
-      bench.attackSelected('right')
+      bench.commitSelected('attack', { col: 2, row: 1 })
       bench.endRound()
     }
     expect(bench.getState().log.some((line) => /levelled/.test(line))).toBe(true)
@@ -529,7 +537,7 @@ describe('the action log', () => {
     bench.placeUnit('melee', 2, 2)
     bench.placeUnit('short-range', 3, 2, 1)
     bench.select(bench.getState().units[0].id)
-    bench.attackSelected('right')
+    bench.commitSelected('attack', { col: 3, row: 2 })
     expect(bench.getState().log.at(-1)).toMatch(/destroyed/)
   })
 })
@@ -551,5 +559,152 @@ describe('the board the agent reads', () => {
     const echoed = new BenchStore()
     echoed.newBoard(boardFromRows(asText))
     expect(echoed.boardRows()).toEqual(asText)
+  })
+})
+
+describe('the engine decides what a unit may do', () => {
+  const sel = (bench: BenchStore) => bench.getState().selection!
+  const action = (bench: BenchStore, id: 'move' | 'attack') =>
+    sel(bench).actions.find((a) => a.id === id)!
+
+  it('offers both actions to a unit that has not acted', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.select(bench.getState().units[0].id)
+
+    expect(action(bench, 'move').available).toBe(true)
+    expect(action(bench, 'attack').available).toBe(true)
+    expect(action(bench, 'move').targets.length).toBeGreaterThan(0)
+  })
+
+  it('keeps the attack when movement runs out, and says why the move is gone', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    const id = bench.getState().units[0].id
+    bench.select(id)
+    // Melee moves 4; spend it all in one step across the open board.
+    expect(bench.commitSelected('move', { col: 6, row: 2 }).ok).toBe(true)
+
+    expect(sel(bench).remainingMove).toBe(0)
+    expect(action(bench, 'move').available).toBe(false)
+    expect(action(bench, 'move').reason).toMatch(/no movement left/)
+    expect(action(bench, 'attack').available).toBe(true)
+  })
+})
+
+describe('aiming is by tile, never by direction', () => {
+  it('offers an area attack its off-axis tiles and resolves the cross containing one', () => {
+    const bench = openBench()
+    bench.placeUnit('magic-user', 2, 2)
+    // The up-cross from (2,2) centres on (2,0) and covers (1,0) and (3,0).
+    bench.placeUnit('short-range', 1, 0)
+    bench.placeUnit('short-range', 2, 0)
+    const [, offAxis, centre] = bench.getState().units
+    bench.select(bench.getState().units[0].id)
+
+    const targets = bench.getState().selection!.actions.find((a) => a.id === 'attack')!.targets
+    expect(targets).toContainEqual({ col: 1, row: 0 })
+
+    // Aiming at the off-axis arm resolves the whole cross — the centre is hit too,
+    // which is the case a direction-only control could never express.
+    expect(bench.commitSelected('attack', { col: 1, row: 0 }).ok).toBe(true)
+    const after = bench.getState().units
+    expect(after.find((u) => u.id === offAxis.id)!.hp).toBe(2)
+    expect(after.find((u) => u.id === centre.id)!.hp).toBe(2)
+  })
+
+  it('refuses an aligned tile beyond reach and damages nothing', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.placeUnit('short-range', 2, 1)
+    const npc = bench.getState().units[1]
+    bench.select(bench.getState().units[0].id)
+
+    // Straight up but three tiles away: the melee reaches one. The derivation
+    // this replaces would have struck the adjacent enemy instead.
+    expect(bench.commitSelected('attack', { col: 2, row: 4 })).toMatchObject({ ok: false })
+    expect(bench.getState().units.find((u) => u.id === npc.id)!.hp).toBe(3)
+  })
+
+  it('will not let a hand-driven enemy attack twice in a round', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.placeUnit('short-range', 3, 2)
+    bench.select(bench.getState().units[1].id)
+
+    expect(bench.commitSelected('attack', { col: 2, row: 2 }).ok).toBe(true)
+    expect(bench.commitSelected('attack', { col: 2, row: 2 })).toMatchObject({ ok: false })
+  })
+})
+
+describe('previewing an action', () => {
+  it('reports the damage without dealing it', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.placeUnit('short-range', 3, 2)
+    bench.select(bench.getState().units[0].id)
+
+    const preview = bench.previewSelected('attack', { col: 3, row: 2 })!
+    expect(preview.hitsNothing).toBe(false)
+    expect(preview.effects[0]).toMatchObject({ kind: 'damage', amount: 2 })
+    // The board is untouched — a preview is a question, not an action.
+    expect(bench.getState().units[1].hp).toBe(3)
+  })
+
+  it('says plainly when an attack would accomplish nothing', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.select(bench.getState().units[0].id)
+
+    const preview = bench.previewSelected('attack', { col: 3, row: 2 })!
+    expect(preview.hitsNothing).toBe(true)
+    // Still legal: an attack may be aimed for reasons other than damage.
+    expect(bench.commitSelected('attack', { col: 3, row: 2 }).ok).toBe(true)
+  })
+})
+
+describe('what a unit can hit accounts for blocking', () => {
+  // The approximation this replaces ignored blocking and said so, because the
+  // engine's targeting walk was private. It no longer is.
+  it('stops the offered targets at the first blocker', () => {
+    const bench = openBench()
+    // long-range scans from range 2 to the board edge; the melee stands in the way.
+    bench.placeUnit('long-range', 0, 2)
+    bench.placeUnit('melee', 2, 2)
+    bench.select(bench.getState().units[0].id)
+
+    const targets = bench.getState().selection!.actions.find((a) => a.id === 'attack')!.targets
+    expect(targets).toContainEqual({ col: 2, row: 2 }) // the blocker itself
+    expect(targets).not.toContainEqual({ col: 3, row: 2 }) // nothing behind it
+    expect(targets).not.toContainEqual({ col: 4, row: 2 })
+  })
+
+  // Worth stating, because it looks like a bug until you see why: the threat
+  // field unions every tile a unit could attack *after moving*, so a mobile unit
+  // still threatens past a blocker it can simply walk around. Blocking narrows
+  // what it can hit from one spot, not what it threatens over a whole turn.
+  it('still threatens past a blocker a mobile unit could walk around', () => {
+    const bench = openBench()
+    bench.placeUnit('long-range', 0, 2)
+    bench.placeUnit('melee', 2, 2)
+
+    expect(bench.fieldRows('npc', 'threat')[2][4]).not.toBe('.')
+  })
+})
+
+describe('changing a maximum moves units already on the board', () => {
+  it('heals them when the maximum rises', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2, 2)
+    bench.tweakDef('melee', { maxHp: 5 })
+    expect(bench.getState().units[0].hp).toBe(4)
+  })
+
+  it('wounds but never removes them when it falls', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2, 1)
+    bench.tweakDef('melee', { maxHp: 1 })
+    expect(bench.getState().units).toHaveLength(1)
+    expect(bench.getState().units[0].hp).toBe(1)
   })
 })

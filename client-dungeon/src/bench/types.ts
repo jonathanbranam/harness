@@ -6,14 +6,12 @@
 // are kept in sync by hand. Only what the UI actually reads is duplicated.
 
 export type TerrainType = 'plains' | 'forest' | 'water' | 'stone'
-export type Direction = 'up' | 'down' | 'left' | 'right'
 export type PcType = 'melee' | 'ranger' | 'magic-user' | 'rogue'
 export type NpcType = 'short-range' | 'long-range'
 export type UnitType = PcType | NpcType
 
 export const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
 export const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
-export const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
 
 export interface Tile {
   col: number
@@ -73,7 +71,36 @@ export interface SelectionView {
   remainingMove: number
   hasAttacked: boolean
   moveDests: Tile[]
-  attackByDir: Record<Direction, Tile[]>
+  /** What the engine says this unit may do. Unavailable actions are present,
+   *  carrying the reason, so the control row can disable and explain rather than
+   *  the client deciding for itself. */
+  actions: ActionOption[]
+}
+
+/** An action as the engine reports it. Aiming is by tile: no direction appears
+ *  here, which is what keeps a direction picker from being built for an attack
+ *  the game aims by tile. */
+export interface ActionOption {
+  id: ActionId
+  label: string
+  available: boolean
+  reason?: string
+  selection: 'tile'
+  targets: Tile[]
+  overlay: 'reachable' | 'targetable'
+}
+
+export type ActionId = 'move' | 'attack'
+
+export type ActionEffect =
+  | { kind: 'damage'; tile: Tile; target: string; amount: number; lethal: boolean }
+  | { kind: 'damage-structure'; tile: Tile; amount: number; destroys: boolean }
+
+export interface ActionPreview {
+  affected: Tile[]
+  cost: number
+  effects: ActionEffect[]
+  hitsNothing: boolean
 }
 
 export interface BookmarkSummary {
@@ -99,8 +126,7 @@ export interface BenchState {
 
 export type BenchIntent =
   | { kind: 'select'; unitId: string | null }
-  | { kind: 'move'; col: number; row: number }
-  | { kind: 'attack'; direction: Direction; target?: Tile }
+  | { kind: 'commit'; action: ActionId; col: number; row: number }
   | { kind: 'place'; unitType: UnitType; col: number; row: number; hp?: number }
   | { kind: 'remove'; unitId: string }
   | { kind: 'relocate'; unitId: string; col: number; row: number }

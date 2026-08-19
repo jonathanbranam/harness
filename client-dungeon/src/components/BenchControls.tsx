@@ -1,4 +1,4 @@
-import { DIRECTIONS, NPC_TYPES, PC_TYPES, type BenchIntent, type BenchState, type Direction, type FieldToggles, type UnitType } from '../bench/types'
+import { NPC_TYPES, PC_TYPES, type ActionId, type BenchIntent, type BenchState, type FieldToggles, type UnitType } from '../bench/types'
 
 interface BenchControlsProps {
   state: BenchState | null
@@ -6,8 +6,8 @@ interface BenchControlsProps {
   onModeChange: (mode: 'setup' | 'play') => void
   palette: UnitType | null
   onPaletteChange: (unitType: UnitType | null) => void
-  armedDirection: Direction | null
-  onArmDirection: (direction: Direction | null) => void
+  armedAction: ActionId
+  onArmAction: (action: ActionId) => void
   onIntent: (intent: BenchIntent) => void
   fields: FieldToggles
   onFieldsChange: (fields: FieldToggles) => void
@@ -39,8 +39,8 @@ export function BenchControls({
   onModeChange,
   palette,
   onPaletteChange,
-  armedDirection,
-  onArmDirection,
+  armedAction,
+  onArmAction,
   onIntent,
   fields,
   onFieldsChange,
@@ -133,23 +133,25 @@ export function BenchControls({
                 <strong>{selection.unitId}</strong> · {selection.hp}/{selection.maxHp} HP · {selection.remainingMove} move left
                 {selection.hasAttacked ? ' · attacked' : ''}
               </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">Attack:</span>
-              {DIRECTIONS.map((direction) => (
+              {/* The engine's own list. An unavailable action stays on screen,
+                  disabled and carrying its reason — the tiles quietly failing to
+                  appear is not an answer to "why can't I move?". */}
+              {selection.actions.map((action) => (
                 <button
-                  key={direction}
+                  key={action.id}
                   type="button"
-                  className={armedDirection === direction ? ACTIVE : BUTTON}
-                  disabled={selection.hasAttacked || selection.attackByDir[direction].length === 0}
-                  onClick={() => onArmDirection(armedDirection === direction ? null : direction)}
+                  className={armedAction === action.id && action.available ? ACTIVE : BUTTON}
+                  disabled={!action.available}
+                  title={action.reason}
+                  onClick={() => onArmAction(action.id)}
                 >
-                  {direction}
+                  {action.label}
                 </button>
               ))}
-              {armedDirection && (
-                <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {selection.kind === 'npc' ? 'click a highlighted tile to attack it' : 'click any highlighted tile to attack'}
-                </span>
-              )}
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {selection.actions.find((a) => a.id === armedAction)?.reason
+                  ?? (armedAction === 'attack' ? 'click a highlighted tile to attack it' : 'click a highlighted tile to move there')}
+              </span>
             </>
           ) : (
             <span className="text-xs text-gray-500 dark:text-gray-400">Click a unit to select it. Its reachable tiles light up; click one to move.</span>

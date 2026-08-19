@@ -42,9 +42,10 @@ Reading:
 
 - `dungeon_board_state` — the whole bench: board rows, units, current
   selection with its options, telegraphs, unit definitions, recent log.
-- `dungeon_unit_options` — what one unit can do *right now*: reachable
-  tiles, attack footprint per direction, movement left, whether it has
-  attacked.
+- `dungeon_unit_options` — what one unit can do *right now*: its actions
+  (move, attack), whether each is available and why not when it isn't, the
+  exact tiles each may be aimed at, movement left, and whether it has
+  attacked. Call this before answering any question about reach or range.
 - `dungeon_fields` — reach and threat across the whole board, as rows of
   digits (how many units of that side cover each tile). Threat counts a move
   first: a unit that could step two tiles and then swing threatens where it
@@ -67,6 +68,18 @@ Playing — both sides, by hand:
 - `dungeon_select_unit`, then `dungeon_move_unit` and `dungeon_attack`.
   Selection is shared with the browser: what you select is what the designer
   sees highlighted.
+- **Aim at a tile, never a direction.** `dungeon_attack` takes `col`/`row`,
+  and the tile must be one `dungeon_unit_options` offered — anything else is
+  refused. This matters most for the magic-user, whose attack is a cross
+  centred two tiles out: the tiles either side of that centre are legal
+  targets, and no direction names them. Note the tile you aim at is not
+  necessarily the centre of the blast — aiming at an arm resolves the cross
+  that contains it. `dungeon_preview_action` tells you exactly which tiles a
+  given aim would cover, so use it rather than reasoning about the shape.
+- `dungeon_preview_action` — what an action *would* do, without doing it:
+  the tiles it covers, what it would damage, whether anything would die, and
+  whether it would hit nothing at all. An attack that hits nothing is still
+  legal, so "it accomplishes nothing" is a real answer worth giving.
 - `dungeon_run_enemy_ai` hands the enemy turn to the game's own AI instead.
 - `dungeon_end_round` refills movement and clears attacks.
 - `dungeon_undo` steps back one action and `dungeon_redo` steps forward

@@ -13,9 +13,9 @@
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import type { BenchStore, SelectionView, UnitType } from '../bench/bench-store'
-import { DIRECTIONS, UNIT_TYPES } from '../bench/bench-store'
+import { UNIT_TYPES } from '../bench/bench-store'
 import { boardFromRows, boardToRows, generateBoard } from '../bench/board-gen'
-import type { Direction, Unit } from '@repo/dungeon-engine'
+import type { ActionId, ActionPreview, Unit } from '@repo/dungeon-engine'
 
 /** Tool names registered here, for session-store.ts's allowlist. */
 export const BENCH_TOOL_NAMES = [
@@ -31,6 +31,7 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_fields',
   'dungeon_move_unit',
   'dungeon_attack',
+  'dungeon_preview_action',
   'dungeon_run_enemy_ai',
   'dungeon_end_round',
   'dungeon_undo',
@@ -54,6 +55,7 @@ interface BenchToolDetails {
   board?: string[]
   units?: Unit[]
   selection?: SelectionView | null
+  preview?: ActionPreview
 }
 
 interface BenchToolResult {
@@ -74,10 +76,8 @@ function outcome(bench: BenchStore, result: { ok: true; message: string } | { ok
 export function createBenchBridgeExtension(opts: { bench: BenchStore }): ExtensionFactory {
   const { bench } = opts
   const unitTypeParam = Type.String({ description: `One of: ${UNIT_TYPES.join(', ')}` })
-  const directionParam = Type.String({ description: `One of: ${DIRECTIONS.join(', ')}` })
 
   const asUnitType = (value: string): UnitType | undefined => (UNIT_TYPES as string[]).includes(value) ? (value as UnitType) : undefined
-  const asDirection = (value: string): Direction | undefined => (DIRECTIONS as string[]).includes(value) ? (value as Direction) : undefined
 
   return function benchBridge(pi: ExtensionAPI) {
     // ─── Reading ──────────────────────────────────────────────────────────────
@@ -100,8 +100,8 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_unit_options',
       label: 'Unit Options',
       description:
-        'Ask the engine what a unit can do right now: every tile it can still reach this turn, its attack footprint in each of the four directions, movement remaining, and whether it has already attacked. This is the tool to call before answering any question about reach, range, or what is targetable — never answer those from memory.',
-      promptSnippet: "Ask the engine for a unit's legal moves and attack footprints",
+        'Ask the engine what a unit can do right now: its available actions (move, attack), whether each is available and the reason when it is not, the exact tiles each action may be aimed at, movement remaining, and whether it has already attacked. This is the tool to call before answering any question about reach, range, or what is targetable — never answer those from memory. Attacks are aimed at a tile, never a direction.',
+      promptSnippet: "Ask the engine what a unit may do and where it may aim",
       parameters: Type.Object({ unit_id: Type.String() }),
       execute: async (_id, params): Promise<BenchToolResult> => {
         // Reads through the selection so the answer is exactly what the designer
@@ -245,27 +245,41 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
         'Move the selected unit to a tile as a turn action. The engine decides whether the tile is reachable, finds the path, and charges the movement budget — a tile it rejects is a tile the unit genuinely cannot reach. Works for both sides: driving the enemy by hand is the point of this bench.',
       promptSnippet: 'Move the selected unit as a turn action',
       parameters: Type.Object({ col: Type.Number(), row: Type.Number() }),
-      execute: async (_id, params) => outcome(bench, bench.moveSelectedTo(params.col, params.row)),
+      execute: async (_id, params) => outcome(bench, bench.commitSelected('move', { col: params.col, row: params.row })),
     })
 
     pi.registerTool({
       name: 'dungeon_attack',
       label: 'Attack',
       description:
-        'Attack with the selected unit in a direction. The footprint comes from the engine. A PC attack damages NPCs and structures across its whole footprint; an NPC attack damages one tile, so pass target_col/target_row (defaults to the nearest tile in the footprint). Attacking is committal: the unit cannot move or attack again until the round ends.',
-      promptSnippet: 'Attack with the selected unit in a direction',
+        "Attack with the selected unit, aimed at a target tile. Call dungeon_unit_options first and pick one of the attack action's target tiles — a tile the engine does not offer is refused. Aim by tile, never by direction: an area attack covers tiles either side of its centre, and no direction names those. A PC attack damages every NPC and structure the attack covers; an NPC attack damages the one tile. Attacking is committal: the unit cannot move or attack again until the round ends.",
+      promptSnippet: 'Attack with the selected unit, aimed at a tile',
+      parameters: Type.Object({ col: Type.Number(), row: Type.Number() }),
+      execute: async (_id, params) => outcome(bench, bench.commitSelected('attack', { col: params.col, row: params.row })),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_preview_action',
+      label: 'Preview Action',
+      description:
+        'Ask the engine what an action would do against a tile without doing it: the tiles it would cover, the movement it would spend, what it would damage and whether anything would die, and whether it would hit nothing at all. Use it to answer "what if" without changing the board — an attack that hits nothing is still legal, so the answer may well be that it accomplishes nothing.',
+      promptSnippet: 'Preview what an action would do, without doing it',
       parameters: Type.Object({
-        direction: directionParam,
-        target_col: Type.Optional(Type.Number()),
-        target_row: Type.Optional(Type.Number()),
+        action: Type.String({ description: 'move | attack' }),
+        col: Type.Number(),
+        row: Type.Number(),
       }),
-      execute: async (_id, params) => {
-        const dir = asDirection(params.direction)
-        if (!dir) return { content: text(`Unknown direction "${params.direction}"`), details: { ok: false }, isError: true }
-        const target = params.target_col !== undefined && params.target_row !== undefined
-          ? { col: params.target_col, row: params.target_row }
-          : undefined
-        return outcome(bench, bench.attackSelected(dir, target))
+      execute: async (_id, params): Promise<BenchToolResult> => {
+        if (params.action !== 'move' && params.action !== 'attack') {
+          const error = `Unknown action "${params.action}" — expected move or attack`
+          return { content: text(error), details: { ok: false, error }, isError: true }
+        }
+        const result = bench.previewSelected(params.action as ActionId, { col: params.col, row: params.row })
+        if (!result) {
+          const error = `${params.action} cannot be aimed at (${params.col}, ${params.row}) by the selected unit`
+          return { content: text(error), details: { ok: false, error }, isError: true }
+        }
+        return { content: text(result), details: { ok: true, preview: result } }
       },
     })
 

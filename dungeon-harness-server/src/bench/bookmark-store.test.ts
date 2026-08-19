@@ -57,7 +57,7 @@ describe('saving and reloading a position', () => {
     const store = bench()
     store.placeUnit('melee', 0, 0)
     store.select(store.getState().units[0].id)
-    store.moveSelectedTo(3, 0)
+    store.commitSelected('move', { col: 3, row: 0 })
     store.saveBookmark('Half moved')
 
     // Round end refreshes the budget; the bookmark should still hold the spent one.

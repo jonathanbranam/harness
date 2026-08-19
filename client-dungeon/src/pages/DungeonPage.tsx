@@ -9,7 +9,7 @@ import { BenchControls } from '../components/BenchControls'
 import { BookmarkRail } from '../components/BookmarkRail'
 import { TransportStrip } from '../components/TransportStrip'
 import { ApprovalDialog } from '../components/ApprovalDialog'
-import { NO_FIELDS, type Direction, type FieldToggles, type Tile, type Unit, type UnitType } from '../bench/types'
+import { NO_FIELDS, type ActionId, type FieldToggles, type Tile, type Unit, type UnitType } from '../bench/types'
 
 const BOARD_PANE = 'board'
 const CHAT_PANE = 'chat'
@@ -32,7 +32,9 @@ export function DungeonPage() {
 
   const [mode, setMode] = useState<'setup' | 'play'>('setup')
   const [palette, setPalette] = useState<UnitType | null>(null)
-  const [armedDirection, setArmedDirection] = useState<Direction | null>(null)
+  // Which action the designer has armed. Selecting a unit arms Move, so the
+  // board lights its reach by default — the same place the game starts.
+  const [armedAction, setArmedAction] = useState<ActionId>('move')
   const [fields, setFields] = useState<FieldToggles>(NO_FIELDS)
 
   const selection = benchState?.selection ?? null
@@ -42,10 +44,25 @@ export function DungeonPage() {
   // PCs from NPCs.
   const handleUnitClick = useCallback(
     (unit: Unit) => {
-      setArmedDirection(null)
+      // Aiming takes precedence over selecting, as it does in the game: with an
+      // action armed, a click on a unit standing on one of its target tiles is a
+      // click on that tile. Without this, the enemy you were aiming at simply
+      // becomes the selected unit and the attack never happens.
+      const armed = selection?.actions.find((a) => a.id === armedAction)
+      if (
+        mode === 'play' &&
+        armedAction === 'attack' &&
+        armed?.available &&
+        armed.targets.some((t) => t.col === unit.col && t.row === unit.row)
+      ) {
+        sendIntent({ kind: 'commit', action: 'attack', col: unit.col, row: unit.row })
+        setArmedAction('move')
+        return
+      }
+      setArmedAction('move')
       sendIntent({ kind: 'select', unitId: unit.id })
     },
-    [sendIntent],
+    [armedAction, mode, selection, sendIntent],
   )
 
   const handleTileClick = useCallback(
@@ -61,20 +78,21 @@ export function DungeonPage() {
 
       if (!selection) return
 
-      // An armed direction turns the footprint into the click target — the tile
-      // matters for NPCs, which damage a single tile, and is harmless for PCs.
-      if (armedDirection) {
-        const inFootprint = selection.attackByDir[armedDirection].some((t) => t.col === tile.col && t.row === tile.row)
-        if (inFootprint) {
-          sendIntent({ kind: 'attack', direction: armedDirection, target: tile })
-          setArmedDirection(null)
-          return
-        }
+      // Aim by tile, exactly as the game does. The engine decides which tiles an
+      // action may be aimed at; a click anywhere else disarms rather than acting,
+      // so a stray click can never resolve an attack somewhere the designer did
+      // not point at.
+      const action = selection.actions.find((a) => a.id === armedAction)
+      if (!action?.available) return
+      if (!action.targets.some((t) => t.col === tile.col && t.row === tile.row)) {
+        setArmedAction('move')
+        return
       }
 
-      sendIntent({ kind: 'move', col: tile.col, row: tile.row })
+      sendIntent({ kind: 'commit', action: armedAction, col: tile.col, row: tile.row })
+      if (armedAction === 'attack') setArmedAction('move')
     },
-    [armedDirection, mode, palette, selection, sendIntent],
+    [armedAction, mode, palette, selection, sendIntent],
   )
 
   return (
@@ -134,8 +152,8 @@ export function DungeonPage() {
                   onModeChange={setMode}
                   palette={palette}
                   onPaletteChange={setPalette}
-                  armedDirection={armedDirection}
-                  onArmDirection={setArmedDirection}
+                  armedAction={armedAction}
+                  onArmAction={setArmedAction}
                   onIntent={sendIntent}
                   fields={fields}
                   onFieldsChange={setFields}
@@ -147,7 +165,7 @@ export function DungeonPage() {
                     <BoardView
                       ref={canvasRef}
                       state={benchState}
-                      armedDirection={armedDirection}
+                      armedAction={armedAction}
                       fields={fields}
                       onTileClick={handleTileClick}
                       onUnitClick={handleUnitClick}
