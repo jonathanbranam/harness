@@ -58,9 +58,23 @@ const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
 export const UNIT_TYPES: UnitType[] = [...PC_TYPES, ...NPC_TYPES]
 export const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
 
-/** Snapshots kept for step-back. Deep-ish: `GameState` is plain data and every
- *  engine function returns a new one, so storing the value is enough. */
-const MAX_HISTORY = 200
+/** How many frames the timeline keeps. `GameState` is plain data and every engine
+ *  function returns a new one, so a frame is a value, not a diff to replay. */
+const MAX_FRAMES = 200
+
+/**
+ * One point on the timeline: everything needed to put the bench back exactly as
+ * it was. The board and the session's definition tweaks travel with the state
+ * because loading a bookmark or changing a number are themselves steps — scrubbing
+ * past one has to undo it too.
+ */
+interface Frame {
+  state: GameState
+  map: ContentMap
+  defOverrides: Partial<Record<UnitType, UnitDef>>
+  /** What produced this frame, for the scrub bar's tooltip. */
+  label: string
+}
 
 export interface Tile {
   col: number
@@ -70,6 +84,14 @@ export interface Tile {
 /** What the browser draws and the agent reads. Every derived field is computed
  *  by the engine at read time, never stored — the failure mode that killed the
  *  previous harness was a stored overlay that outlived the state it described. */
+/** The transport strip's view of the timeline. */
+export interface TimelineView {
+  /** Index of the frame currently shown. */
+  cursor: number
+  /** Every frame's label, oldest first — `labels[cursor]` is what produced now. */
+  labels: string[]
+}
+
 export interface BenchState {
   board: {
     name: string
@@ -85,6 +107,8 @@ export interface BenchState {
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
+  canRedo: boolean
+  timeline: TimelineView
   /** Saved board states, newest first. Empty when no bookmark store is configured. */
   bookmarks: BookmarkSummary[]
   /** Human-readable record of what has happened, newest last. */
@@ -161,7 +185,8 @@ function emptyState(cells: Cell[][]): GameState {
 export class BenchStore {
   private map: ContentMap
   private state: GameState
-  private history: GameState[] = []
+  private frames: Frame[] = []
+  private cursor = 0
   private selectedId: string | null = null
   private defOverrides: Partial<Record<UnitType, UnitDef>> = {}
   private log: string[] = []
@@ -174,6 +199,7 @@ export class BenchStore {
     this.map = generateBoard(opts)
     applyMap(this.map)
     this.state = emptyState(this.freshCells())
+    this.frames = [{ state: this.state, map: this.map, defOverrides: {}, label: `Board "${this.map.name}"` }]
     this.note(`Board "${this.map.name}" ready (${this.map.size.cols}×${this.map.size.rows}). No units placed.`)
   }
 
@@ -200,13 +226,32 @@ export class BenchStore {
     if (this.log.length > 100) this.log.shift()
   }
 
-  /** Save the current state so `undo()` can come back to it, then commit `next`. */
+  /**
+   * Commit `next` as a new frame at the end of the timeline.
+   *
+   * Acting after stepping back discards the frames ahead, the way an editor's
+   * undo history does: the designer went back to try a different line, and the
+   * line they abandoned is not something they can step forward into any more.
+   */
   private commit(next: GameState, message: string): void {
-    this.history.push(this.state)
-    if (this.history.length > MAX_HISTORY) this.history.shift()
+    this.frames = this.frames.slice(0, this.cursor + 1)
+    this.frames.push({ state: next, map: this.map, defOverrides: { ...this.defOverrides }, label: message })
+    if (this.frames.length > MAX_FRAMES) this.frames.shift()
+    this.cursor = this.frames.length - 1
     this.state = next
     this.note(message)
     this.emit()
+  }
+
+  /** Put the bench back to the frame at `index` — board, units, and definitions. */
+  private restore(index: number): void {
+    const frame = this.frames[index]
+    this.cursor = index
+    this.state = frame.state
+    this.map = frame.map
+    this.defOverrides = { ...frame.defOverrides }
+    this.ensureActive()
+    if (this.selectedId && !this.unit(this.selectedId)) this.selectedId = null
   }
 
   // ─── Reads ──────────────────────────────────────────────────────────────────
@@ -220,7 +265,9 @@ export class BenchStore {
       fields: this.computeFields(),
       telegraphs: this.state.npcPlans.map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
       defs: getAllDefs() as Record<UnitType, UnitDef>,
-      canUndo: this.history.length > 0,
+      canUndo: this.cursor > 0,
+      canRedo: this.cursor < this.frames.length - 1,
+      timeline: { cursor: this.cursor, labels: this.frames.map((f) => f.label) },
       bookmarks: this.bookmarks?.list() ?? [],
       log: [...this.log],
     }
@@ -363,12 +410,11 @@ export class BenchStore {
   newBoard(map: ContentMap): BenchResult {
     this.map = map
     applyMap(this.map)
-    this.state = emptyState(this.freshCells())
-    this.history = []
     this.selectedId = null
     this.unitSeq = 0
-    this.note(`New board "${map.name}" (${map.size.cols}×${map.size.rows}). All units cleared.`)
-    this.emit()
+    // A frame like any other, so the designer can step back to the board they
+    // were working on if they swapped it out by mistake.
+    this.commit(emptyState(this.freshCells()), `New board "${map.name}" (${map.size.cols}×${map.size.rows}). All units cleared.`)
     return ok(`Board is now "${map.name}", ${map.size.cols}×${map.size.rows}, empty.`)
   }
 
@@ -527,16 +573,41 @@ export class BenchStore {
     return ok('Round ended.')
   }
 
-  /** Step back one action. Full-state snapshots, so this reverses attacks and
-   *  placements too, not just moves (the engine's own undo covers moves only). */
+  // ─── The timeline ───────────────────────────────────────────────────────────
+  //
+  // Every action is a frame, so the whole session is a trajectory the designer
+  // can walk rather than a one-way animation. Full-state frames mean this
+  // reverses attacks, placements, board changes, and definition tweaks — not just
+  // moves, which is all the engine's own undo covers.
+
+  /** Step back one action. */
   undo(): BenchResult {
-    const previous = this.history.pop()
-    if (!previous) return fail('Nothing to step back to')
-    this.state = previous
-    if (this.selectedId && !this.unit(this.selectedId)) this.selectedId = null
+    if (this.cursor === 0) return fail('Nothing to step back to')
+    this.restore(this.cursor - 1)
     this.note('Stepped back one action.')
     this.emit()
     return ok('Stepped back one action.')
+  }
+
+  /** Step forward again, if the designer has stepped back and not acted since. */
+  redo(): BenchResult {
+    if (this.cursor >= this.frames.length - 1) return fail('Nothing to step forward to')
+    this.restore(this.cursor + 1)
+    this.note('Stepped forward one action.')
+    this.emit()
+    return ok('Stepped forward one action.')
+  }
+
+  /** Jump anywhere on the timeline — what the scrub bar drives. */
+  stepTo(index: number): BenchResult {
+    if (!Number.isInteger(index) || index < 0 || index >= this.frames.length) {
+      return fail(`No frame ${index} — the timeline runs 0 to ${this.frames.length - 1}`)
+    }
+    if (index === this.cursor) return ok('Already there.')
+    this.restore(index)
+    this.note(`Scrubbed to "${this.frames[index].label}".`)
+    this.emit()
+    return ok(`At "${this.frames[index].label}".`)
   }
 
   // ─── Unit definitions (session-scoped, never persisted) ──────────────────────
@@ -569,8 +640,9 @@ export class BenchStore {
     this.defOverrides[unitType] = next
     this.ensureActive()
     const summary = `${unitType}: ${next.maxHp} HP, move ${next.movement.range}, damage ${next.attack.damage}, range ${next.attack.targeting.minRange}–${next.attack.targeting.maxRange}`
-    this.note(`Definition changed — ${summary}`)
-    this.emit()
+    // A frame, so stepping back past a number change puts the number back — the
+    // designer can walk a trajectory that includes their own edits.
+    this.commit(this.state, `Definition changed — ${summary}`)
     return ok(summary)
   }
 
@@ -600,22 +672,19 @@ export class BenchStore {
   }
 
   /** Jump to a saved position. The current board is replaced, not merged, and the
-   *  jump itself is a step-back point like any other action. */
+   *  jump is a frame on the timeline like any other action. */
   loadBookmark(name: string): BenchResult {
     if (!this.bookmarks) return fail('Bookmarks are not configured for this bench')
     const bookmark = this.bookmarks.read(name)
     if (!bookmark) return fail(`No bookmark named "${name}"`)
 
-    this.history.push(this.state)
     this.map = bookmark.map
     this.defOverrides = bookmark.defOverrides ?? {}
-    this.state = bookmark.state
     this.selectedId = null
     this.ensureActive()
     // Unit ids came from the saved state; keep new placements from colliding.
-    this.unitSeq = this.state.units.length
-    this.note(`Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
-    this.emit()
+    this.unitSeq = bookmark.state.units.length
+    this.commit(bookmark.state, `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
     return ok(`Loaded "${bookmark.name}".`)
   }
 
@@ -631,8 +700,7 @@ export class BenchStore {
   resetDefs(): BenchResult {
     this.defOverrides = {}
     this.ensureActive()
-    this.note('Unit definitions reset to the shipped values.')
-    this.emit()
+    this.commit(this.state, 'Unit definitions reset to the shipped values.')
     return ok('Unit definitions reset to the shipped values.')
   }
 }

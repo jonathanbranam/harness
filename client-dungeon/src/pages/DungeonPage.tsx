@@ -7,6 +7,7 @@ import { useTheme } from '../hooks/useTheme'
 import { BoardView } from '../components/BoardView'
 import { BenchControls } from '../components/BenchControls'
 import { BookmarkRail } from '../components/BookmarkRail'
+import { TransportStrip } from '../components/TransportStrip'
 import { ApprovalDialog } from '../components/ApprovalDialog'
 import { NO_FIELDS, type Direction, type FieldToggles, type Tile, type Unit, type UnitType } from '../bench/types'
 
@@ -126,6 +127,7 @@ export function DungeonPage() {
                   onMaximize={() => maximizePane(BOARD_PANE)}
                   onRestore={() => restorePane(BOARD_PANE)}
                 />
+                <TransportStrip state={benchState} onIntent={sendIntent} />
                 <BenchControls
                   state={benchState}
                   mode={mode}

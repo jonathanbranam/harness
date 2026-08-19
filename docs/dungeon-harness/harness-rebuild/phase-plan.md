@@ -151,13 +151,19 @@ cheaply on purpose so it can be discarded if the answer is no.
 > from an engine call, and it is derived from the same definition fields the
 > scanners read.
 
-## Phase 4 — Transport strip
+## Phase 4 — Transport strip ✅ built 2026-08-19
 
 **At the end you can:** step forward and back through a played sequence and
 scrub across it.
 
 Promotes phase 1's snapshot stack into a timeline, turning a session from a
 one-way animation into an inspectable trajectory.
+
+> Built as part of `openspec/changes/dungeon-bench`. Each frame carries the
+> board and the session's definition tweaks alongside the game state, so
+> scrubbing past a board swap or a number change undoes that too — the
+> designer walks a trajectory that includes their own edits. Acting after a
+> step back discards the frames ahead, the way an editor's undo history does.
 
 ## Phase 5 — Scoped turn machine v1
 

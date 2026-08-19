@@ -80,9 +80,6 @@ export function BenchControls({
         <button type="button" className={BUTTON} onClick={() => onIntent({ kind: 'endRound' })}>
           End round
         </button>
-        <button type="button" className={BUTTON} disabled={!state?.canUndo} onClick={() => onIntent({ kind: 'undo' })}>
-          Step back
-        </button>
       </div>
 
       {/* Reach and threat are the quantities this game makes continuously

@@ -69,7 +69,11 @@ Playing — both sides, by hand:
   sees highlighted.
 - `dungeon_run_enemy_ai` hands the enemy turn to the game's own AI instead.
 - `dungeon_end_round` refills movement and clears attacks.
-- `dungeon_undo` steps back one action.
+- `dungeon_undo` steps back one action and `dungeon_redo` steps forward
+  again; `dungeon_step_to` jumps to any frame in the session by index.
+  `dungeon_board_state` lists every frame with the action that produced it.
+  When something interesting happened three moves ago, take the designer
+  back to it rather than describing it.
 
 Saving positions:
 

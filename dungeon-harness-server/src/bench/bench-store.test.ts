@@ -377,3 +377,85 @@ describe('threat for single-tile attackers', () => {
     expect(rows[2]).toBe('111.111')
   })
 })
+
+describe('the timeline', () => {
+  it('records every action as a frame, labelled with what produced it', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    bench.select(bench.getState().units[0].id)
+    bench.moveSelectedTo(2, 0)
+
+    const { timeline } = bench.getState()
+    expect(timeline.cursor).toBe(timeline.labels.length - 1)
+    expect(timeline.labels[0]).toMatch(/^Board /)
+    expect(timeline.labels.at(-1)).toMatch(/moved to \(2, 0\)/)
+  })
+
+  it('steps back and forward again', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    bench.select(bench.getState().units[0].id)
+    bench.moveSelectedTo(2, 0)
+
+    expect(bench.undo().ok).toBe(true)
+    expect(bench.getState().units[0]).toMatchObject({ col: 0, row: 0 })
+    expect(bench.getState().canRedo).toBe(true)
+
+    expect(bench.redo().ok).toBe(true)
+    expect(bench.getState().units[0]).toMatchObject({ col: 2, row: 0 })
+    expect(bench.getState().canRedo).toBe(false)
+  })
+
+  it('scrubs to any point in the session', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    bench.placeUnit('short-range', 5, 0)
+    bench.select(bench.getState().units[0].id)
+    bench.moveSelectedTo(3, 0)
+
+    // Frames: 0 the bench's first board, 1 this board, 2 melee placed, 3 the
+    // enemy placed, 4 the move. Selecting is not an action and makes no frame.
+    expect(bench.stepTo(2).ok).toBe(true)
+    expect(bench.getState().units).toHaveLength(1)
+
+    expect(bench.stepTo(1).ok).toBe(true)
+    expect(bench.getState().units).toHaveLength(0)
+
+    expect(bench.stepTo(99)).toMatchObject({ ok: false })
+  })
+
+  it('discards the abandoned line when the designer acts after stepping back', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    bench.select(bench.getState().units[0].id)
+    bench.moveSelectedTo(2, 0)
+    bench.undo()
+
+    bench.moveSelectedTo(0, 2) // a different line
+    expect(bench.getState().canRedo).toBe(false)
+    expect(bench.getState().units[0]).toMatchObject({ col: 0, row: 2 })
+  })
+
+  it('takes the board and the definitions back with it', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 1, 1)
+    bench.tweakDef('melee', { moveRange: 9 })
+    bench.newBoard(generateBoard({ cols: 5, rows: 5, preset: 'open', powerCenters: 0 }))
+
+    expect(bench.getState().board.cols).toBe(5)
+    bench.undo() // back before the new board
+    expect(bench.getState().board.cols).toBe(8)
+    expect(bench.getState().defs.melee.movement.range).toBe(9)
+
+    bench.undo() // back before the definition change
+    expect(bench.getState().defs.melee.movement.range).toBe(4)
+  })
+
+  it('reports the ends of the timeline rather than running off them', () => {
+    const bench = new BenchStore()
+    expect(bench.undo()).toMatchObject({ ok: false })
+    expect(bench.redo()).toMatchObject({ ok: false })
+    expect(bench.getState().canUndo).toBe(false)
+    expect(bench.getState().canRedo).toBe(false)
+  })
+})

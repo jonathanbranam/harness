@@ -91,6 +91,8 @@ export interface BenchState {
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
+  canRedo: boolean
+  timeline: { cursor: number; labels: string[] }
   bookmarks: BookmarkSummary[]
   log: string[]
 }
@@ -108,6 +110,8 @@ export type BenchIntent =
   | { kind: 'runEnemyAi' }
   | { kind: 'endRound' }
   | { kind: 'undo' }
+  | { kind: 'redo' }
+  | { kind: 'stepTo'; index: number }
   | { kind: 'tweakDef'; unitType: UnitType; maxHp?: number; moveRange?: number; damage?: number; minRange?: number; maxRange?: number }
   | { kind: 'resetDefs' }
   | { kind: 'saveBookmark'; name: string }

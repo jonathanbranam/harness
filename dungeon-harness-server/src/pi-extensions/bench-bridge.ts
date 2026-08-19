@@ -34,6 +34,8 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_run_enemy_ai',
   'dungeon_end_round',
   'dungeon_undo',
+  'dungeon_redo',
+  'dungeon_step_to',
   'dungeon_tweak_unit_def',
   'dungeon_reset_unit_defs',
   'dungeon_save_bookmark',
@@ -289,10 +291,29 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
     pi.registerTool({
       name: 'dungeon_undo',
       label: 'Step Back',
-      description: 'Step back one action — moves, attacks, placements, definition changes, all of it.',
+      description: 'Step back one action — moves, attacks, placements, board changes, definition changes, all of it.',
       promptSnippet: 'Step back one action on the bench',
       parameters: Type.Object({}),
       execute: async () => outcome(bench, bench.undo()),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_redo',
+      label: 'Step Forward',
+      description: 'Step forward again after stepping back. Acting after a step back discards the frames ahead, so this only works while nothing new has been done.',
+      promptSnippet: 'Step forward one action on the bench',
+      parameters: Type.Object({}),
+      execute: async () => outcome(bench, bench.redo()),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_step_to',
+      label: 'Scrub To',
+      description:
+        'Jump to any point in this session by frame index — 0 is where the bench started, and dungeon_board_state lists every frame with the action that produced it. Use it to take the designer back to the moment something interesting happened rather than describing it.',
+      promptSnippet: 'Jump to a point earlier in the session',
+      parameters: Type.Object({ index: Type.Number() }),
+      execute: async (_id, params) => outcome(bench, bench.stepTo(params.index)),
     })
 
     // ─── Unit definitions ─────────────────────────────────────────────────────
