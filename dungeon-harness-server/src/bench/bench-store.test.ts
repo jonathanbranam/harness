@@ -265,3 +265,115 @@ describe('board isolation', () => {
     expect(small.getState().board.cols).toBe(6)
   })
 })
+
+describe('reach and threat', () => {
+  it('reports where each side can move', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0) // move 4
+    bench.placeUnit('short-range', 7, 4) // move 3
+
+    const { reach } = bench.getState().fields
+    expect(reach.pc['2,0']).toBe(1)
+    expect(reach.npc['2,0']).toBeUndefined()
+    expect(reach.npc['5,4']).toBe(1)
+  })
+
+  it('threatens tiles a unit could reach and then attack', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0) // move 4, attack range 1
+
+    const { threat } = bench.getState().fields
+    // Standing still it can hit (1,0); after moving four tiles it can hit (5,0).
+    expect(threat.pc['1,0']).toBe(1)
+    expect(threat.pc['5,0']).toBe(1)
+    expect(threat.pc['7,4']).toBeUndefined()
+  })
+
+  it('counts overlapping threat, so a doubly-covered tile reads differently', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    bench.placeUnit('short-range', 2, 0)
+
+    const { threat } = bench.getState().fields
+    expect(threat.npc['1,0']).toBe(2)
+  })
+
+  it('drops a unit out of both fields once it has attacked', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 2, 2)
+    bench.placeUnit('short-range', 3, 2)
+    bench.select(bench.getState().units[0].id)
+    bench.attackSelected('right')
+
+    const { reach, threat } = bench.getState().fields
+    expect(Object.keys(reach.pc)).toHaveLength(0)
+    expect(Object.keys(threat.pc)).toHaveLength(0)
+  })
+
+  it('grows the moment a definition changes', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    const before = Object.keys(bench.getState().fields.threat.pc).length
+
+    bench.tweakDef('melee', { moveRange: 6 })
+    expect(Object.keys(bench.getState().fields.threat.pc).length).toBeGreaterThan(before)
+  })
+
+  it('contracts when attack range is cut, without the unit moving', () => {
+    // The ranger's shipped line attack reaches the board edge, so its threat
+    // already covers everything an 8x5 board has; nerfing the range is what makes
+    // the field visibly move.
+    const bench = openBench()
+    bench.placeUnit('ranger', 0, 2)
+    const before = Object.keys(bench.getState().fields.threat.pc).length
+
+    bench.tweakDef('ranger', { minRange: 1, maxRange: 2 })
+    expect(Object.keys(bench.getState().fields.threat.pc).length).toBeLessThan(before)
+  })
+})
+
+describe('fields as rows', () => {
+  it('draws a threat layer the way the agent reads it', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 5, rows: 3, preset: 'open', powerCenters: 0 }))
+    bench.placeUnit('short-range', 0, 0)
+    bench.tweakDef('short-range', { moveRange: 0 })
+
+    // Move 0, targeting band 1-2 along the cardinals. Its attack *resolves* on a
+    // single tile at range 1, but its AI scans to range 2 and will shoot a PC
+    // standing there — so threat covers the band, not just the footprint.
+    expect(bench.fieldRows('npc', 'threat')).toEqual([
+      '.11..',
+      '1....',
+      '1....',
+    ])
+    expect(bench.fieldRows('pc', 'threat')).toEqual(['.....', '.....', '.....'])
+  })
+})
+
+describe('threat for single-tile attackers', () => {
+  it('covers what a long-range enemy can actually shoot, not just where its shot lands', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 7, rows: 3, preset: 'open', powerCenters: 0 }))
+    bench.placeUnit('long-range', 0, 1)
+    bench.tweakDef('long-range', { moveRange: 0 })
+
+    // Its attack resolves on one tile, but its AI scans from range 2 outward, so
+    // standing anywhere along the row from two tiles away is unsafe.
+    const rows = bench.fieldRows('npc', 'threat')
+    expect(rows[1]).toBe('..11111')
+  })
+
+  it('still uses the exact footprint for a shape that covers several tiles', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 7, rows: 5, preset: 'open', powerCenters: 0 }))
+    bench.placeUnit('magic-user', 3, 2) // plus-shaped AoE centred at range 2
+    bench.tweakDef('magic-user', { moveRange: 0 })
+
+    const rows = bench.fieldRows('pc', 'threat')
+    // Aiming left centres the cross on (1,2), so its arms cover (0,2) and (2,2)
+    // — the tile it "shoots over" is still caught by the blast. Only the tile it
+    // stands on is untouched.
+    expect(rows[2]).toBe('111.111')
+  })
+})

@@ -45,6 +45,12 @@ Reading:
 - `dungeon_unit_options` — what one unit can do *right now*: reachable
   tiles, attack footprint per direction, movement left, whether it has
   attacked.
+- `dungeon_fields` — reach and threat across the whole board, as rows of
+  digits (how many units of that side cover each tile). Threat counts a move
+  first: a unit that could step two tiles and then swing threatens where it
+  would land. This is the tool for "what can touch her?", "where is it safe
+  to stand?", and for showing what a number change did to the shape of the
+  board.
 - `dungeon_board_view` — a screenshot of what the designer is looking at.
   Use it to check layout, not to work out rules.
 

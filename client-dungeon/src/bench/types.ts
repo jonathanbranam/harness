@@ -46,6 +46,22 @@ export interface UnitDef {
   }
 }
 
+export interface BoardFields {
+  reach: { pc: Record<string, number>; npc: Record<string, number> }
+  threat: { pc: Record<string, number>; npc: Record<string, number> }
+}
+
+/** Which field layers are painted. Reach is where a side can go; threat is what
+ *  it can hit, counting moves it could make first. */
+export interface FieldToggles {
+  pcReach: boolean
+  pcThreat: boolean
+  npcReach: boolean
+  npcThreat: boolean
+}
+
+export const NO_FIELDS: FieldToggles = { pcReach: false, pcThreat: false, npcReach: false, npcThreat: false }
+
 export interface SelectionView {
   unitId: string
   unitType: UnitType
@@ -71,6 +87,7 @@ export interface BenchState {
   board: { name: string; cols: number; rows: number; cells: Cell[][] }
   units: Unit[]
   selection: SelectionView | null
+  fields: BoardFields
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean

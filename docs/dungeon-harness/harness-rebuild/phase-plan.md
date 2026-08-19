@@ -123,7 +123,7 @@ cheap to throw away — not test cases.
 > cannot be rewritten by the agent's `write`/`edit` tools, only through the
 > bench. Loading one is itself a step-back point.
 
-## Phase 3 — Threat and reach overlays
+## Phase 3 — Threat and reach overlays ✅ built 2026-08-19
 
 **At the end you can:** tint the board by who can reach or touch each
 square, toggle it per side, and watch the option space in a paused state.
@@ -132,6 +132,24 @@ This is the *Inventing on Principle* payload, and the phase where we find
 out whether **reach and threat** really is the quantity worth making
 continuously visible (`designer-ui-session.md`, "Key Reframing"). Built
 cheaply on purpose so it can be discarded if the answer is no.
+
+> Built as part of `openspec/changes/dungeon-bench`. Four toggles (reach and
+> threat, per side), painted as tile tints whose opacity steps with how many
+> units cover the tile, plus a `dungeon_fields` tool that hands the agent the
+> same field as rows of digits. Threat counts a move first, since a unit may
+> move and then attack.
+>
+> **One documented approximation lives here.** An NPC attack *resolves* on a
+> single tile at min range, but the engine's internal scanners select a target
+> anywhere in the targeting band — a long-range enemy shoots across the board
+> even though its shot lands on one tile. Using the engine's footprint alone
+> would have shown the enemy as far less dangerous than it is, so for
+> single-tile attacks the threat field covers the whole band. It ignores
+> blocking, which the scanners respect, making it an upper bound: nothing
+> threatening is missing, and some shown tiles need a clear line. This is the
+> only place the harness derives anything rules-shaped that it did not get
+> from an engine call, and it is derived from the same definition fields the
+> scanners read.
 
 ## Phase 4 — Transport strip
 

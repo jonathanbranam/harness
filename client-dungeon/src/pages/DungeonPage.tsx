@@ -8,7 +8,7 @@ import { BoardView } from '../components/BoardView'
 import { BenchControls } from '../components/BenchControls'
 import { BookmarkRail } from '../components/BookmarkRail'
 import { ApprovalDialog } from '../components/ApprovalDialog'
-import type { Direction, Tile, Unit, UnitType } from '../bench/types'
+import { NO_FIELDS, type Direction, type FieldToggles, type Tile, type Unit, type UnitType } from '../bench/types'
 
 const BOARD_PANE = 'board'
 const CHAT_PANE = 'chat'
@@ -32,6 +32,7 @@ export function DungeonPage() {
   const [mode, setMode] = useState<'setup' | 'play'>('setup')
   const [palette, setPalette] = useState<UnitType | null>(null)
   const [armedDirection, setArmedDirection] = useState<Direction | null>(null)
+  const [fields, setFields] = useState<FieldToggles>(NO_FIELDS)
 
   const selection = benchState?.selection ?? null
 
@@ -134,12 +135,21 @@ export function DungeonPage() {
                   armedDirection={armedDirection}
                   onArmDirection={setArmedDirection}
                   onIntent={sendIntent}
+                  fields={fields}
+                  onFieldsChange={setFields}
                   lastError={benchError}
                 />
                 <div className="flex-1 min-h-0 flex">
                   <BookmarkRail bookmarks={benchState?.bookmarks ?? []} onIntent={sendIntent} />
                   <div className="flex-1 min-h-0">
-                    <BoardView ref={canvasRef} state={benchState} armedDirection={armedDirection} onTileClick={handleTileClick} onUnitClick={handleUnitClick} />
+                    <BoardView
+                      ref={canvasRef}
+                      state={benchState}
+                      armedDirection={armedDirection}
+                      fields={fields}
+                      onTileClick={handleTileClick}
+                      onUnitClick={handleUnitClick}
+                    />
                   </div>
                 </div>
               </div>

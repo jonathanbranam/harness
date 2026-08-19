@@ -5,6 +5,7 @@ import {
   UNIT_INITIALS,
   type BenchState,
   type Direction,
+  type FieldToggles,
   type Tile,
   type Unit,
 } from '../bench/types'
@@ -15,9 +16,20 @@ interface BoardViewProps {
   state: BenchState | null
   /** The direction currently armed for attack, if any — its footprint is highlighted. */
   armedDirection: Direction | null
+  fields: FieldToggles
   onTileClick: (tile: Tile) => void
   onUnitClick: (unit: Unit) => void
 }
+
+/** Field paint: player side cool, enemy side warm; threat reads stronger than
+ *  reach, since "what can touch this tile" is the sharper question. Opacity
+ *  steps with the count, so a tile two units cover looks different from one. */
+const FIELD_STYLE = {
+  pcReach: { color: '#0ea5e9', base: 0.1, step: 0.06 },
+  pcThreat: { color: '#2563eb', base: 0.16, step: 0.1 },
+  npcReach: { color: '#f59e0b', base: 0.1, step: 0.06 },
+  npcThreat: { color: '#dc2626', base: 0.16, step: 0.1 },
+} as const
 
 function key(tile: { col: number; row: number }): string {
   return `${tile.col},${tile.row}`
@@ -32,7 +44,7 @@ function key(tile: { col: number; row: number }): string {
  * no rule of its own — it decides colors, not legality.
  */
 export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function BoardView(
-  { state, armedDirection, onTileClick, onUnitClick },
+  { state, armedDirection, fields, onTileClick, onUnitClick },
   ref,
 ) {
   if (!state) {
@@ -52,6 +64,15 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
     armedDirection && selection ? selection.attackByDir[armedDirection].map(key) : [],
   )
   const telegraphed = new Set(telegraphs.map((t) => `${t.targetCol},${t.targetRow}`))
+
+  // Painted bottom to top so threat sits over reach and the enemy over the player
+  // — the layer a designer is usually asking about ends up on top.
+  const activeLayers = ([
+    ['pcReach', state.fields.reach.pc],
+    ['npcReach', state.fields.reach.npc],
+    ['pcThreat', state.fields.threat.pc],
+    ['npcThreat', state.fields.threat.npc],
+  ] as const).filter(([id]) => fields[id])
 
   return (
     <div className="h-full overflow-auto grid place-items-center p-4">
@@ -83,6 +104,23 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
                       </text>
                     </>
                   )}
+
+                  {activeLayers.map(([id, counts]) => {
+                    const count = counts[tileKey]
+                    if (!count) return null
+                    const style = FIELD_STYLE[id]
+                    return (
+                      <rect
+                        key={id}
+                        x={x}
+                        y={y}
+                        width={CELL_SIZE}
+                        height={CELL_SIZE}
+                        fill={style.color}
+                        opacity={Math.min(0.55, style.base + (count - 1) * style.step)}
+                      />
+                    )
+                  })}
 
                   {reachable.has(tileKey) && (
                     <rect x={x + 2} y={y + 2} width={CELL_SIZE - 4} height={CELL_SIZE - 4} fill="#22d3ee55" stroke="#0891b2" strokeWidth={2} />

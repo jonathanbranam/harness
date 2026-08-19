@@ -28,6 +28,7 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_clear_units',
   'dungeon_select_unit',
   'dungeon_unit_options',
+  'dungeon_fields',
   'dungeon_move_unit',
   'dungeon_attack',
   'dungeon_run_enemy_ai',
@@ -109,6 +110,25 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
         const selection = bench.getState().selection
         if (previous && previous !== params.unit_id) bench.select(previous)
         return { content: text(selection), details: { ok: true, selection } }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_fields',
+      label: 'Reach and Threat',
+      description:
+        'Ask the engine what each side can reach and what each side can hit, across the whole board at once. Returned as rows of digits, one character per tile: the number of units of that side covering it, or "." for none. Threat counts a move first — a unit that could step two tiles and then swing threatens where it would land. Use this to answer "what can touch her?" and "where is it safe to stand?", and to show what a definition change did.',
+      promptSnippet: 'Read reach and threat across the whole board',
+      parameters: Type.Object({
+        side: Type.String({ description: 'pc | npc' }),
+        layer: Type.String({ description: 'reach | threat' }),
+      }),
+      execute: async (_id, params): Promise<BenchToolResult> => {
+        const side = params.side === 'npc' ? 'npc' : 'pc'
+        const layer = params.layer === 'reach' ? 'reach' : 'threat'
+        const rows = bench.fieldRows(side, layer)
+        const message = `${side} ${layer}:\n${rows.join('\n')}`
+        return { content: text(message), details: { ok: true, message, board: rows } }
       },
     })
 

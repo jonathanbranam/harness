@@ -79,6 +79,8 @@ export interface BenchState {
   }
   units: Unit[]
   selection: SelectionView | null
+  /** Reach and threat for both sides, recomputed from the engine on every read. */
+  fields: BoardFields
   /** NPC attack telegraphs from the last AI run, as the game would show them. */
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
@@ -87,6 +89,26 @@ export interface BenchState {
   bookmarks: BookmarkSummary[]
   /** Human-readable record of what has happened, newest last. */
   log: string[]
+}
+
+/**
+ * How far each side can move, and what each side can hit, for every tile on the
+ * board — the quantity this game makes continuously visible, the way a
+ * platformer makes trajectory visible.
+ *
+ * Values are counts: how many units of that side reach or threaten the tile. A
+ * tile two enemies can both hit is a different tile from one only a single enemy
+ * can reach, and the count is what makes that legible at a glance.
+ *
+ * Both fields are composed from engine queries only — `validMoveDests` for where
+ * a unit can go, `attackFootprint` for what it hits from a given tile. Threat
+ * composes them the same way the engine's own `attackSquares` does, taking the
+ * planned move target as the attack origin, because in this game a unit may move
+ * and then attack in one turn.
+ */
+export interface BoardFields {
+  reach: { pc: Record<string, number>; npc: Record<string, number> }
+  threat: { pc: Record<string, number>; npc: Record<string, number> }
 }
 
 export interface SelectionView {
@@ -195,6 +217,7 @@ export class BenchStore {
       board: { name: this.map.name, cols: gridCols(), rows: gridRows(), cells: this.state.cells },
       units: this.state.units,
       selection: this.selectionView(),
+      fields: this.computeFields(),
       telegraphs: this.state.npcPlans.map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
       defs: getAllDefs() as Record<UnitType, UnitDef>,
       canUndo: this.history.length > 0,
@@ -227,6 +250,97 @@ export class BenchStore {
       moveDests: validMoveDests(this.state, unit.id),
       attackByDir,
     }
+  }
+
+  /**
+   * Reach and threat for every unit on the board.
+   *
+   * Reach is where a unit can still move this turn. Threat is every tile it could
+   * attack *this turn* — from where it stands, and from anywhere it could move to
+   * first, since a unit may move and then attack. A unit that has already
+   * attacked threatens nothing and reaches nowhere, which is exactly what the
+   * engine reports for it.
+   */
+  /**
+   * Every tile a unit's attack could land on from `origin`, in any direction.
+   *
+   * For most shapes this is exactly the engine's own footprint. **One documented
+   * approximation:** a `single`-shape attack resolves on the tile at *min* range,
+   * but a unit whose targeting band is wider than that can select a target
+   * anywhere in the band — the NPC scanners in the engine walk `minRange` to
+   * `maxRange` along each cardinal. A short-range enemy therefore shoots two
+   * tiles, and a long-range enemy shoots across the board, even though each
+   * resolves on one tile. Using the footprint alone would tell the designer the
+   * enemy is far less dangerous than it is.
+   *
+   * So for `single` shapes the band is used. It ignores blocking — the scanners
+   * stop at the first unit or structure — which makes this an **upper bound**:
+   * every tile shown is one the unit could hit with a clear line, and none is
+   * missing. That is the right direction to err for a "what can touch me" view.
+   * The scanners themselves are internal to the engine, so this is derived from
+   * the same definition fields they read rather than by re-implementing them.
+   */
+  private threatTilesFrom(def: UnitDef, origin: Tile): Tile[] {
+    const { minRange, maxRange } = def.attack.targeting
+    if (def.attack.propagation.shape !== 'single' || maxRange <= minRange) {
+      return DIRECTIONS.flatMap((dir) => attackFootprint(def, origin, dir))
+    }
+
+    // The targeting band along each cardinal, board-clipped the way the engine
+    // clips its own footprints.
+    const banded: Tile[] = []
+    for (const [dc, dr] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as [number, number][]) {
+      for (let d = minRange; d <= maxRange; d++) {
+        const col = origin.col + dc * d
+        const row = origin.row + dr * d
+        if (col < 0 || row < 0 || col >= gridCols() || row >= gridRows()) break
+        banded.push({ col, row })
+      }
+    }
+    return banded
+  }
+
+  private computeFields(): BoardFields {
+    const fields: BoardFields = { reach: { pc: {}, npc: {} }, threat: { pc: {}, npc: {} } }
+
+    for (const unit of this.state.units) {
+      const side = unit.kind
+      const def = getDef(unit.unitType)
+      const dests = validMoveDests(this.state, unit.id)
+
+      for (const tile of dests) {
+        const key = `${tile.col},${tile.row}`
+        fields.reach[side][key] = (fields.reach[side][key] ?? 0) + 1
+      }
+
+      if (hasAttacked(this.state, unit.id)) continue
+
+      // Attack origins: where it stands, plus everywhere it could move to first.
+      const threatened = new Set<string>()
+      for (const origin of [{ col: unit.col, row: unit.row }, ...dests]) {
+        for (const tile of this.threatTilesFrom(def, origin)) threatened.add(`${tile.col},${tile.row}`)
+      }
+      for (const key of threatened) {
+        fields.threat[side][key] = (fields.threat[side][key] ?? 0) + 1
+      }
+    }
+
+    return fields
+  }
+
+  /**
+   * One field layer drawn as rows of digits — how the agent reads reach or threat
+   * without a screenshot. A digit is the number of units of that side covering the
+   * tile; `.` is none. Reading a shape is far easier than reading a coordinate map.
+   */
+  fieldRows(side: 'pc' | 'npc', layer: 'reach' | 'threat'): string[] {
+    const counts = this.computeFields()[layer][side]
+    return this.state.cells.map((row, rowIndex) =>
+      row.map((_cell, colIndex) => {
+        const count = counts[`${colIndex},${rowIndex}`] ?? 0
+        return count === 0 ? '.' : String(Math.min(9, count))
+      }).join(''),
+    )
   }
 
   /** The board as terrain rows — how the agent reads a board without a screenshot. */

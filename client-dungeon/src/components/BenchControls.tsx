@@ -1,4 +1,4 @@
-import { DIRECTIONS, NPC_TYPES, PC_TYPES, type BenchIntent, type BenchState, type Direction, type UnitType } from '../bench/types'
+import { DIRECTIONS, NPC_TYPES, PC_TYPES, type BenchIntent, type BenchState, type Direction, type FieldToggles, type UnitType } from '../bench/types'
 
 interface BenchControlsProps {
   state: BenchState | null
@@ -9,8 +9,17 @@ interface BenchControlsProps {
   armedDirection: Direction | null
   onArmDirection: (direction: Direction | null) => void
   onIntent: (intent: BenchIntent) => void
+  fields: FieldToggles
+  onFieldsChange: (fields: FieldToggles) => void
   lastError: string | null
 }
+
+const FIELD_LABELS: { id: keyof FieldToggles; label: string; hint: string }[] = [
+  { id: 'pcReach', label: 'PC reach', hint: 'Where player units can move this turn' },
+  { id: 'pcThreat', label: 'PC threat', hint: 'What player units can hit, counting a move first' },
+  { id: 'npcReach', label: 'Enemy reach', hint: 'Where enemy units can move this turn' },
+  { id: 'npcThreat', label: 'Enemy threat', hint: 'What enemy units can hit, counting a move first' },
+]
 
 const BUTTON = 'px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent'
 const ACTIVE = 'px-2 py-1 text-xs rounded border border-indigo-500 bg-indigo-500 text-white'
@@ -33,6 +42,8 @@ export function BenchControls({
   armedDirection,
   onArmDirection,
   onIntent,
+  fields,
+  onFieldsChange,
   lastError,
 }: BenchControlsProps) {
   const selection = state?.selection ?? null
@@ -72,6 +83,25 @@ export function BenchControls({
         <button type="button" className={BUTTON} disabled={!state?.canUndo} onClick={() => onIntent({ kind: 'undo' })}>
           Step back
         </button>
+      </div>
+
+      {/* Reach and threat are the quantities this game makes continuously
+          visible: not "where will the unit be" but "what can it touch, and what
+          can touch it". They read in a paused position, which is where the
+          designer actually is. */}
+      <div className="flex flex-wrap items-center gap-2 px-3 pb-2">
+        <span className="text-xs text-gray-500 dark:text-gray-400">Fields:</span>
+        {FIELD_LABELS.map(({ id, label, hint }) => (
+          <button
+            key={id}
+            type="button"
+            title={hint}
+            className={fields[id] ? ACTIVE : BUTTON}
+            onClick={() => onFieldsChange({ ...fields, [id]: !fields[id] })}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {mode === 'setup' && (
