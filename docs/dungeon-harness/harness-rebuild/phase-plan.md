@@ -27,7 +27,15 @@ Two consequences worth stating up front:
   unit editor and map editor are expected to **move into the harness**, so
   the harness generates its own boards rather than importing them.
 
-## Phase 1 — The hand-driven bench
+## Phase 1 — The hand-driven bench ✅ built 2026-08-18
+
+> Implemented as `openspec/changes/dungeon-bench` (still open: browser
+> verification is the one task outstanding — it needs the dev servers running).
+> Two things the plan did not anticipate, both now recorded in that change's
+> design: the enemy AI advances on **structures**, not PCs, so a generated board
+> needs a power center or "run the AI" does nothing; and `resolveNpcAction` does
+> not mark an NPC as having attacked, because the game resolves NPC attacks as
+> end-of-round telegraphs, so the bench adds that sequencing itself.
 
 **At the end you can:** open the harness, generate a board (or ask the
 agent for one), drop units anywhere on it, and play a full round by hand —
@@ -99,7 +107,7 @@ become the only good way to set up a board. Direct manipulation has to stay
 first-class in this phase — if placing three brutes is easier by typing than
 by clicking, the UI is not done.
 
-## Phase 2 — Bookmarks
+## Phase 2 — Bookmarks (next)
 
 **At the end you can:** name and save the board you are looking at, and pull
 it back up later from a rail.
