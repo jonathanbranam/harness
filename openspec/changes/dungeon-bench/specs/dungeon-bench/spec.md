@@ -161,3 +161,88 @@ outcome it did not obtain from the engine.
 
 - **WHEN** the agent wants to indicate something on the board
 - **THEN** it has no tool that draws, and must express it through units, terrain, or words
+
+### Requirement: Positions can be saved and returned to
+
+The bench SHALL let a designer save the current board under a name — including
+units wherever they stand mid-turn and any session definition tweaks in force —
+list what has been saved, jump back to any of them, and delete one. Saved
+positions SHALL survive a restart and SHALL NOT be writable through the agent's
+file tools.
+
+#### Scenario: A mid-play position is restored exactly
+
+- **WHEN** a board is saved after a unit has spent part of its movement, and later
+  reloaded
+- **THEN** the board, every unit's position and HP, the spent movement, and the
+  definition values in force at save time are all restored
+
+#### Scenario: Saving under an existing name replaces it
+
+- **WHEN** a position is saved under a name that already exists
+- **THEN** the earlier position under that name is replaced, and only one entry
+  with that name is listed
+
+#### Scenario: An unreadable saved file does not break the list
+
+- **WHEN** a file in the saved-position store cannot be read as a position
+- **THEN** the remaining positions are still listed
+
+### Requirement: Reach and threat are shown for every tile
+
+The bench SHALL report, for each side and every tile on the board, how many units
+can move onto it and how many can attack it, and SHALL make both available to the
+designer as board overlays and to the agent in a readable form. Threat SHALL
+account for a unit moving before it attacks, and SHALL exclude a unit that can no
+longer attack this turn.
+
+#### Scenario: Threat includes moving first
+
+- **WHEN** a unit could move several tiles and then attack
+- **THEN** the tiles it could attack from where it would land are shown as
+  threatened by that unit
+
+#### Scenario: A spent unit threatens nothing
+
+- **WHEN** a unit has already attacked this turn
+- **THEN** it contributes nothing to either the reach or the threat field
+
+#### Scenario: Overlapping coverage is distinguishable
+
+- **WHEN** two units of the same side can attack the same tile
+- **THEN** that tile reports a count of two, and reads more strongly than a tile
+  covered by one
+
+#### Scenario: Changing a number moves the field
+
+- **WHEN** a unit type's movement or attack range is changed
+- **THEN** the fields change accordingly on the next read, with no unit having
+  moved
+
+### Requirement: The session is a timeline that can be walked
+
+The bench SHALL record every action as a frame labelled with what produced it,
+and SHALL let the designer step back, step forward, and jump to any frame.
+Restoring a frame SHALL restore the board and the session's definition tweaks as
+well as the units. Acting after stepping back SHALL discard the frames ahead.
+
+#### Scenario: Scrubbing to an earlier moment
+
+- **WHEN** the designer jumps to an earlier frame
+- **THEN** the board returns to exactly its state at that point, and the action
+  that produced that frame is identified
+
+#### Scenario: A board change is walked back
+
+- **WHEN** the designer replaces the board and then steps back
+- **THEN** the previous board and its units return
+
+#### Scenario: A new action abandons the forward line
+
+- **WHEN** the designer steps back and then takes a different action
+- **THEN** stepping forward is no longer offered
+
+#### Scenario: The ends of the timeline
+
+- **WHEN** the designer steps back from the first frame, or forward from the last
+- **THEN** the bench reports that there is nowhere to go and changes nothing

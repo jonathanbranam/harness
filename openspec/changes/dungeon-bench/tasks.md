@@ -67,3 +67,36 @@
 - [x] 7.6 The server boots with the engine dependency
 - [ ] 7.7 Drive the bench in a browser — needs the dev servers running and the
       login password; not done in this session
+
+## 8. Bookmarks (phase 2)
+
+- [x] 8.1 `bench/bookmark-store.ts`: name-to-file storage beside the workspace,
+      with a slug that cannot escape the directory
+- [x] 8.2 Save, load, list, and delete on the bench; a load is a timeline frame
+- [x] 8.3 Bookmark tools for the agent
+- [x] 8.4 A rail in the client: save by name, click to load, hover to delete
+- [x] 8.5 Tests: mid-play restore, replace-by-name, corrupt file, missing name
+
+## 9. Reach and threat (phase 3)
+
+- [x] 9.1 Compute both fields for both sides from engine queries, counting units
+      per tile, with threat accounting for a move first
+- [x] 9.2 Widen threat to the targeting band for single-tile attacks, documented
+      as an upper bound, so enemy reach is not understated
+- [x] 9.3 Paint the fields as toggled tints whose opacity steps with the count
+- [x] 9.4 `dungeon_fields` renders a layer as rows of digits for the agent
+- [x] 9.5 Tests: reach per side, threat after moving, overlap counts, a spent
+      unit, and fields moving when a definition changes
+
+## 10. The timeline (phase 4)
+
+- [x] 10.1 Replace the snapshot stack with frames carrying state, board, and
+      definition overrides, each labelled with the action that produced it
+- [x] 10.2 Step back, step forward, and jump to any frame; acting discards the
+      frames ahead
+- [x] 10.3 Route board changes, bookmark loads, and definition tweaks through
+      frames so scrubbing undoes them too
+- [x] 10.4 `dungeon_redo` and `dungeon_step_to` for the agent
+- [x] 10.5 A transport strip in the client: step buttons, scrub bar, frame label
+- [x] 10.6 Tests: labels, step back/forward, scrubbing, abandoned lines, board
+      and definition restoration, both ends of the timeline

@@ -1,13 +1,20 @@
 # Dungeon-harness rebuild — designer bench
 
-> # 🚧 Design in progress — nothing here is built
+> # 🛠 Phases 1–4 built; phase 5 not started
 >
 > This folder is the design pass for the **ground-up harness rebuild**
 > called for in [`../STATUS.md`](../STATUS.md) ("What replaces it", item 2).
-> The previous dungeon-harness feature work is stopped and being backed out
-> ([`../backout-plan.md`](../backout-plan.md)); only the phase-01 scaffold
-> survives. Nothing in this folder is approved or implemented, and no code
-> should be written from it yet.
+> The previous dungeon-harness feature work has been backed out
+> ([`../backout-plan.md`](../backout-plan.md)).
+>
+> **Built (2026-08-18/19, branch `dungeon-harness-rebuild`):** the hand-driven
+> bench, bookmarks, reach and threat fields, and the transport strip — phases
+> 1 through 4 of [`phase-plan.md`](phase-plan.md), recorded as
+> `openspec/changes/dungeon-bench`. **Not built:** phase 5's scoped turn
+> machine, and everything deferred past it.
+>
+> **Not yet verified in a browser** — the automated gates pass (typecheck,
+> tests, client build, server boot) but nobody has driven the bench by hand.
 
 ## What this is
 

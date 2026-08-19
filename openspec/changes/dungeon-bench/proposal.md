@@ -3,10 +3,10 @@
 The dungeon harness has been backed out to its scaffold. What replaces it is a
 **bench**: one board from Dungeon Tactics that a designer sets up and plays
 through by hand, with every rule answered by the real game engine rather than by
-the agent. This is phase 1 of
-`docs/dungeon-harness/harness-rebuild/phase-plan.md`, and it exists so the next
-phases (bookmarks, threat overlays, a transport strip, turn machines) are
-additions to something usable rather than steps toward something that isn't.
+the agent. This covers phases 1–4 of
+`docs/dungeon-harness/harness-rebuild/phase-plan.md` — the hand-driven bench,
+saved positions, reach and threat fields, and a transport strip — leaving the
+scoped turn machine (phase 5) as its own change.
 
 The previous effort failed because the agent was asked to referee. The structural
 answer is that the harness holds no rules of its own: it imports
@@ -36,6 +36,17 @@ legality decision is an engine call.
 - **A React + SVG board** in the client showing terrain, structures, units with
   HP, the current selection, its reachable tiles and attack footprints, and enemy
   telegraphs — with setup/play controls.
+- **Bookmarks** (phase 2): name and save the board exactly as it stands, mid-turn
+  included, and jump back to it later. Files live beside the agent workspace, not
+  inside it, so a saved position cannot be rewritten by a `write`/`edit` call.
+- **Reach and threat fields** (phase 3): how far each side can move and what each
+  side can hit, for every tile, toggled per side and painted as tints whose
+  strength steps with how many units cover the tile — plus the same field as rows
+  of digits for the agent.
+- **A transport strip** (phase 4): every action is a frame, with step back, step
+  forward, and a scrub bar across the whole session. Frames carry the board and
+  the session's definition tweaks, so scrubbing past a board swap or a number
+  change undoes those too.
 
 ## Capabilities
 
