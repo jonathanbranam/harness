@@ -24,8 +24,13 @@
 > the pick is legal; the game and the bench both aim by tile, and the bench's
 > four direction buttons are gone. Three changes: `dungeon-engine-action-surface`
 > and `dungeon-game-action-adoption` in track-web,
-> `dungeon-bench-action-adoption` here, all archived. The turn sequencer and its
-> telegraph window remain deliberately deferred.
+> `dungeon-bench-action-adoption` here, all archived.
+>
+> **The turn sequencer is next**, and is no longer deferred — see
+> [`turn-sequencer-plan.md`](turn-sequencer-plan.md), approved 2026-08-20. It
+> moves the round structure and the telegraph window into the engine across five
+> phased changes, and lands *before* phase 5 because the turn machines hook the
+> round rather than define it.
 
 ## What this is
 
@@ -45,6 +50,8 @@ simulation.
 | Doc | What it covers |
 |---|---|
 | [`phase-plan.md`](phase-plan.md) | The build order: five shippable phases, each ending in something usable, starting from a single hand-driven board. **The plan of record.** |
+| [`action-surface-plan.md`](action-surface-plan.md) | The audit that moved "what may this unit do, and is this pick legal" into the engine. ✅ Landed 2026-08-19. |
+| [`turn-sequencer-plan.md`](turn-sequencer-plan.md) | The round itself moving into the engine — finding 5 of the audit above, planned as five phased changes across both repos. Approved 2026-08-20, not started. |
 | [`designer-ui-session.md`](designer-ui-session.md) | The designer-facing UI, as settled in a voice design session (2026-08-18). Verbatim outcome — layout, two modes, scenario cards, subjects vs. scaffolding, recording/editing workflows, approval, rule-set branching, and the reframing that landed: the primary artifact is the *interactive session*, not the saved test. |
 
 ## What it depends on

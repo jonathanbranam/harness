@@ -219,11 +219,17 @@ phase 5.
 In rough order of likely value:
 
 - **The turn sequencer and its telegraph window** — finding 5 of the
-  [action-surface plan](action-surface-plan.md): round/phase sequencing still
-  lives in each host, and the bench's differs from the game's. Deliberately
-  deferred because it touches the animation pipeline and is the finding most
-  likely to be reshaped by the turn-machine design. Specced but not opened as
-  `track-web:dungeon-turn-sequencer`.
+  [action-surface plan](action-surface-plan.md). **No longer deferred:** planned
+  in [`turn-sequencer-plan.md`](turn-sequencer-plan.md) (2026-08-20) as five
+  changes across both repos, approved to build.
+
+  It moved ahead of the turn machines rather than behind them. The original
+  deferral assumed the sequencer was the finding most likely to be *reshaped* by
+  the turn-machine design; reading that design shows the dependency runs the
+  other way — machines hook `round_start`/`round_end` and assume a
+  telegraph-shaped round, so they consume the round structure rather than
+  defining it. Leaving it host-defined would hand phase 5 two hosts that
+  disagree about when a round begins.
 - **Agent authoring of machines** — the role `STATUS.md` scopes the agent
   to; needs phase 5 first.
 - **Migrating track-web's unit editor and map editor into the harness.**

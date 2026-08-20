@@ -14,10 +14,15 @@
 > Findings 1, 2, 3, 4, 6, 7, 8 and 9 are fixed. The game and the bench both aim
 > **by tile**, and the bench's four direction buttons are gone.
 >
-> **Still open, deliberately:** finding 5 (the turn sequencer and its telegraph
-> window) — the deferred `dungeon-turn-sequencer` change, never opened; and
-> finding 10 (win/lose evaluation), recorded but not scheduled. Both are listed
-> under "Deferred past phase 5" in [`phase-plan.md`](phase-plan.md).
+> **Finding 5 (the turn sequencer and its telegraph window) is now planned**, not
+> deferred — see [`turn-sequencer-plan.md`](turn-sequencer-plan.md), which
+> supersedes §7's deferred `dungeon-turn-sequencer` row with five phased changes
+> across both repos. Note the enforcement model there differs from what a reader
+> might assume from this document: the engine owns the *rules* of a round, not a
+> *script* for one, because the bench must be free to drive enemies in any order
+> and make choices the AI never would.
+>
+> **Still open:** finding 10 (win/lose evaluation), recorded but not scheduled.
 >
 > The sections below are preserved as the audit and rationale — read them as the
 > record of *why* the surface looks the way it does, not as work outstanding.
@@ -417,7 +422,7 @@ this rebuild.
 | 1 ✅ | track-web | `dungeon-engine-action-surface` | `actions.ts`, validation, `threatTiles`, `reconcileHp`, tests. Purely additive — no host touched, no behaviour change. | — |
 | 2 ✅ | track-web | `dungeon-game-action-adoption` | Game host + scene + HUD + steps migrate. Fixes findings 2, 4, 9. | 1 |
 | 3 ✅ | harness | `dungeon-bench-action-adoption` | Bench store, wire format, controls, board view, agent tools. Fixes findings 1, 7, 8 on the bench side. | 1 |
-| — | track-web | `dungeon-turn-sequencer` | **Deferred.** Finding 5: move the round/phase machine into the engine, including the telegraph window, and adopt it in both hosts. | 1, 2, 3 |
+| — | track-web + harness | `dungeon-turn-sequencer` | **Superseded by [`turn-sequencer-plan.md`](turn-sequencer-plan.md)** (2026-08-20), which splits finding 5 into five phased changes rather than one. | 1, 2, 3 |
 
 **Why 1 is separate.** It is the only piece with no user-visible behaviour
 change, so it can land, be tested hard, and sit stable while two hosts migrate
