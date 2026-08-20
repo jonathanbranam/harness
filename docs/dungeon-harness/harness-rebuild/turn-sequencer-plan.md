@@ -398,6 +398,10 @@ with no counterpart in the game.
 - Resolution driven by `advance`; phase 1's split re-expressed on the engine's
   phases rather than the bench's own sequencing.
 - **Upcoming-action display** from `nextAction`, shown while scrubbing.
+- **Telegraph legibility.** The marker is nearly invisible at normal zoom (see
+  the TODO under "Recorded, not scheduled" in [`phase-plan.md`](phase-plan.md)).
+  This phase makes the telegraph window the centre of the bench's enemy turn, so
+  fix it here rather than shipping a window whose contents cannot be read.
 - Agent tools for each, 1:1 over the engine calls, per the standing rule that no
   tool computes or describes a rule outcome itself.
 

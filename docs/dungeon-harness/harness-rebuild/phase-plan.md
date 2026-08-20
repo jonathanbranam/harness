@@ -259,6 +259,23 @@ worth a change of their own:
   generator works around it; the engine does not address it.
 - **Win/lose evaluation** — declared in content data (`contentTypes.ts`), with
   no evaluator anywhere in either host.
+- **TODO: telegraph markers are nearly invisible.** Found while browser-verifying
+  the telegraph window (2026-08-20). `BoardView` draws a telegraph as a dark red
+  `#b91c1c` X inset in the tile. It renders correctly — confirmed in the DOM —
+  but at normal zoom it reads as almost nothing, and it was missed entirely on a
+  first look at a full-page screenshot. Over a structure tile's brown fill it is
+  worse.
+
+  This matters more than a cosmetic nit: the telegraph is the one thing a
+  designer is supposed to read *during* the window, and phase 3 of the
+  [turn sequencer](turn-sequencer-plan.md) makes that window the centre of the
+  bench's enemy turn. It is the same class of problem as the threat fields that
+  "turned into a muddy wash with more than one layer on" — overlay legibility
+  under composition, not a one-off colour choice. Worth solving for telegraphs,
+  reach, and threat together rather than three times.
+
+  Pre-existing; untouched by the telegraph-window change, which only fixed
+  *when* the marker is shown, not how it reads.
 
 ## Decisions (2026-08-18)
 
