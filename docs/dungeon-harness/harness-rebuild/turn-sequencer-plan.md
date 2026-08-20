@@ -284,7 +284,7 @@ never will.
    from the unit's post-move position, sharing validation with `commitNpcTurn`.
    Refuses on a dead unit, an unplanned unit, a call outside `player`, or a call
    made in `'game'` mode (§6.1).
-2. **Bench timeline — phase 3.** The retroactive rewrite: replace that unit's
+2. **Bench timeline — phase 3b.** The retroactive rewrite: replace that unit's
    entry in `npcPlans` across every frame from the planning point to the
    cursor, so a replay shows the amended telegraph from the moment it locked.
    A slice-map over frames, bench-only, no engine involvement.
@@ -330,16 +330,18 @@ guarding a condition.
 
 ## 8. The phases
 
-Five changes. Every one leaves both hosts working — no phase requires the other
+Six changes across five phases — phase 3 splits into 3a and 3b, leaving the
+other numbers unchanged. Every one leaves both hosts working — no phase requires the other
 repo to land first to stay green.
 
 | # | Repo | Change | Depends on |
 |---|---|---|---|
 | 1 | harness | `dungeon-bench-telegraph-window` | — |
 | 2 | track-web | `dungeon-turn-sequencer` | — |
-| 3 | harness | `dungeon-bench-sequencer-adoption` | 2 |
+| 3a | harness | `dungeon-bench-sequencer-adoption` | 2 |
+| 3b | harness | `dungeon-bench-enemy-planning` | 3a |
 | 4 | track-web | `dungeon-game-sequencer-adoption` | 2 |
-| 5 | track-web | `dungeon-sequencer-guards` | 3, 4 |
+| 5 | track-web | `dungeon-sequencer-guards` | 3b, 4 |
 
 ### Phase 1 — `dungeon-bench-telegraph-window` (harness)
 
@@ -378,14 +380,33 @@ change, no `TurnPhase` change.**
 Lands and sits stable while two hosts migrate against it, exactly as
 `dungeon-engine-action-surface` did.
 
-### Phase 3 — `dungeon-bench-sequencer-adoption` (harness)
+### Phase 3a — `dungeon-bench-sequencer-adoption` (harness)
 
-**The bench adopts and becomes phase-aware.**
+**The bench runs on the engine's round.** No new authoring UI.
 
 The bench currently pins `phase: 'player'` at construction
-(`bench-store.ts:202`) and never leaves it. Real phases arrive here, and with
-them the designer's planning pass — the largest piece of this change and the one
-with no counterpart in the game.
+(`bench-store.ts:202`) and never leaves it. Real phases arrive here.
+
+- **Phase awareness**: the bench tracks `TurnPhase` and moves through it via the
+  engine rather than sitting in one phase forever.
+- **Resolution driven by `advance`**, with phase 1's plan/resolve split
+  re-expressed on the engine's phases instead of the bench's own sequencing.
+- **The existing AI-driven enemy turn is preserved** — the designer can still
+  hand the whole enemy side to the AI, now through the engine's round.
+- **Upcoming-action display** from `nextAction`, shown while scrubbing.
+- **Telegraph legibility.** The marker is nearly invisible at normal zoom (see
+  the TODO under "Recorded, not scheduled" in [`phase-plan.md`](phase-plan.md)).
+  Fixed here rather than in 3b, because 3b paints more overlay content into the
+  same tiles and would compound the problem rather than reveal it.
+- Agent tools follow the same operations, 1:1 over engine calls.
+
+Mostly mechanical, and it de-risks the engine API cheaply — which is the stated
+reason the bench adopts before the game. A working bench at the end of it.
+
+### Phase 3b — `dungeon-bench-enemy-planning` (harness)
+
+**The designer takes over planning from the AI.** The genuinely new interaction
+design, and the part most likely to want iteration once 3a has been used.
 
 - **Planning UI** for `npc-move`: per-enemy move and attack intent, planned one
   enemy at a time with the board updating as each move executes, showing which
@@ -394,20 +415,11 @@ with no counterpart in the game.
 - **Run AI for this enemy** — `advanceNpc`.
 - **Run AI for all remaining** — `advance` until the phase transitions.
 - **Amend a locked telegraph** during the player phase, plus the retroactive
-  frame rewrite and its semantics (§6).
-- Resolution driven by `advance`; phase 1's split re-expressed on the engine's
-  phases rather than the bench's own sequencing.
-- **Upcoming-action display** from `nextAction`, shown while scrubbing.
-- **Telegraph legibility.** The marker is nearly invisible at normal zoom (see
-  the TODO under "Recorded, not scheduled" in [`phase-plan.md`](phase-plan.md)).
-  This phase makes the telegraph window the centre of the bench's enemy turn, so
-  fix it here rather than shipping a window whose contents cannot be read.
+  frame rewrite and its semantics (§6). This is the one place the bench
+  deliberately breaks a game rule, and it gets its own reviewable change here
+  rather than riding along inside a larger one.
 - Agent tools for each, 1:1 over the engine calls, per the standing rule that no
   tool computes or describes a rule outcome itself.
-
-The bench adopts before the game because it has no animation pipeline, so the
-API gets exercised cheaply and shape problems surface before the riskier
-migration.
 
 ### Phase 4 — `dungeon-game-sequencer-adoption` (track-web)
 
@@ -428,7 +440,7 @@ what to do instead of walking a host-held array.
 - Round chaining (`endRound` → `runNpcMovePhase`) becomes an engine transition.
 
 The riskiest phase, deliberately last among the adoptions, with the shape
-already proven by phase 3.
+already proven by 3a and 3b.
 
 ### Phase 5 — `dungeon-sequencer-guards` (track-web)
 

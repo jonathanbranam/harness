@@ -267,7 +267,7 @@ worth a change of their own:
   worse.
 
   This matters more than a cosmetic nit: the telegraph is the one thing a
-  designer is supposed to read *during* the window, and phase 3 of the
+  designer is supposed to read *during* the window, and phase 3a of the
   [turn sequencer](turn-sequencer-plan.md) makes that window the centre of the
   bench's enemy turn. It is the same class of problem as the threat fields that
   "turned into a muddy wash with more than one layer on" — overlay legibility
