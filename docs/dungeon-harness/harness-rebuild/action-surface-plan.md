@@ -17,10 +17,11 @@
 > **Finding 5 (the turn sequencer and its telegraph window) is now planned**, not
 > deferred — see [`turn-sequencer-plan.md`](turn-sequencer-plan.md), which
 > supersedes §7's deferred `dungeon-turn-sequencer` row with five phased changes
-> across both repos. Note the enforcement model there differs from what a reader
-> might assume from this document: the engine owns the *rules* of a round, not a
-> *script* for one, because the bench must be free to drive enemies in any order
-> and make choices the AI never would.
+> across both repos. The model there: an enemy turn is **planned**, then
+> **executed**. Planning is a decision the bench designer may take over from the
+> AI; execution is a rule the engine always drives. The plan is one artifact in
+> one shape regardless of who authored it, which is what lets the designer stand
+> in for the AI without the bench growing a round structure of its own.
 >
 > **Still open:** finding 10 (win/lose evaluation), recorded but not scheduled.
 >
