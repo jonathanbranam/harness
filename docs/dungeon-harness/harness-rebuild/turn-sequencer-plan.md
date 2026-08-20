@@ -357,8 +357,8 @@ attacks at 559, then stores those same plans as `npcPlans` at 562 — and
 - Two controls where there was one; two frames on the transport strip where
   there was one, so the telegraph window is a scrubbable interval.
 
-Independently useful, and a strict subset of phase 3. Ships first because the
-misleading overlay is live today and phase 3 is gated on phase 2.
+Independently useful, and a strict subset of phase 3a. Ships first because the
+misleading overlay is live today and 3a is gated on phase 2.
 
 ### Phase 2 — `dungeon-turn-sequencer` (track-web)
 
