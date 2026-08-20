@@ -209,6 +209,7 @@ action-surface plan. Hosts display the sentence; they do not pre-filter.
 | Leave `npc-move` with an enemy unplanned | The round is incomplete |
 | Resolve a telegraph out of planned order | Not the engine's next step |
 | Act with a PC outside the `player` phase | Not the player's turn (phase 5) |
+| Call a bench-only operation while in `game` mode | Not available in the game — see §6.1 |
 
 ---
 
@@ -243,11 +244,46 @@ which were made while looking at the old telegraph. That is a semantic wrinkle,
 not a correctness one, and it is the price of the feature being retroactive
 rather than an event.
 
+### 6.1 Engine mode: the guard that keeps this bench-only
+
+A deliberate rule-break needs a fence, or it becomes a rule. The engine gains an
+explicit notion of **which host is running it**:
+
+```ts
+export type EngineMode = 'game' | 'bench'
+
+// Defaults to 'game' — the conservative setting. A host that wants bench-only
+// affordances must say so; forgetting to opt in fails closed, and no amount of
+// forgetting can open the game up.
+setEngineMode(mode: EngineMode): void
+getEngineMode(): EngineMode
+```
+
+`amendTelegraph` refuses unless the mode is `'bench'`. The refusal uses the same
+`{ ok: false, reason }` shape as every other refusal in §5 rather than throwing,
+so it is uniform, testable, and surfaces through the host's existing refusal
+path. (A throw would be louder for what is arguably a programming error; the
+uniformity is worth more, and the game never renders a control for this in the
+first place.)
+
+**Defaulting to `'game'` means unit tests must opt in.** Any test exercising a
+bench-only operation sets `setEngineMode('bench')` in its setup and restores it
+afterwards — the same discipline the existing `defStore`/`contentStore` tests
+already follow for module-level state. `dungeon-harness-server` sets it once at
+startup; `client-games` never sets it and gets the default.
+
+This is process-global rather than per-`GameState` on purpose: one process is
+either the game or the bench, and it never changes at runtime. It is *not* the
+same category as the board and unit-def singletons the README flags for
+instance-scoping — those need per-instance values for the survey grid, and this
+never will.
+
 ### The two halves
 
 1. **Engine — phase 2.** `amendTelegraph(state, unitId, tile)`, validated legal
    from the unit's post-move position, sharing validation with `commitNpcTurn`.
-   Refuses on a dead unit, an unplanned unit, or a call outside `player`.
+   Refuses on a dead unit, an unplanned unit, a call outside `player`, or a call
+   made in `'game'` mode (§6.1).
 2. **Bench timeline — phase 3.** The retroactive rewrite: replace that unit's
    entry in `npcPlans` across every frame from the planning point to the
    cursor, so a replay shows the amended telegraph from the moment it locked.
@@ -333,7 +369,8 @@ change, no `TurnPhase` change.**
   with the completeness rule on the transition to `player`.
 - Execution: `advance`'s `npc-attack` behaviour, in `npcPlans` order.
 - Queries: `nextAction`, `unplannedNpcs`, `plannedTelegraph`.
-- `amendTelegraph` (§6), validated.
+- `EngineMode` (`setEngineMode`/`getEngineMode`), defaulting to `'game'` (§6.1).
+- `amendTelegraph` (§6), validated and bench-gated.
 - `endRound` stops setting `phase: 'player'` for a host to immediately overwrite
   with `'npc-move'` — the transient lie finding 5 flagged.
 - Every refusal in §5, each with a test; plus the double-act regression (§7).
@@ -422,6 +459,8 @@ recurring in a third host.
 - **Designer authoring of PC turns.** PCs are played, not planned.
 - **Amending an executed move.** Movement is immutable once planned; only the
   telegraph is amendable (§6).
+- **Runtime mode switching.** `EngineMode` is set once at host startup, not
+  toggled per call or per board (§6.1).
 
 ---
 
