@@ -67,11 +67,22 @@ attacks and reported success.
 
 ## 6. Verify in a browser
 
-- [ ] 6.1 Against the already-running dev servers (do not start or restart them),
-      drive the bench with `playwright-cli`: generate a board with a power center
-      and enemies, plan the enemy turn, confirm telegraph markers appear with no
-      damage dealt, move a PC, resolve, and confirm the markers clear.
-- [ ] 6.2 Scrub back into the window and confirm the board shows pending
-      telegraphs with the PCs undamaged.
-- [ ] 6.3 Drive the same sequence from chat to confirm both agent tools work and
-      the agent is not still reaching for `dungeon_run_enemy_ai`.
+- [x] 6.1 Verified 2026-08-20. Loaded the "Melee vs sniper" bookmark, planned
+      until the long-range NPC closed to range: one telegraph locked on the PC's
+      tile `(5, 4)`, PC still at 3 HP. Resolving reported `melee-1 3→2 HP` and
+      cleared the telegraph. Plan and End round both correctly disable while a
+      telegraph is pending; Resolve shows its count and disables when empty.
+- [x] 6.2 Verified 2026-08-20. Stepping back one frame from resolved telegraphs
+      restores the pending-telegraph frame: telegraph count 1, label
+      `long-range-2 → (5, 4)`, and the PC renders 3 HP pips against 2 in the
+      frame after. Stepping forward returns to the damaged state.
+- [ ] 6.3 **BLOCKED — no model credentials.** The prompt reached the agent
+      (WebSocket connected, message in the transcript) but no reply came back
+      after ~95s with nothing logged server-side. `~/.pi/agent/auth.json` is
+      empty, so `ModelRuntime.create()` has no usable credential. This is
+      environmental, not a defect in this change.
+
+      Verified statically instead: `dungeon_plan_enemy_turn` and
+      `dungeon_resolve_telegraphs` are both in the tool allowlist and defined
+      with accurate descriptions, and `dungeon_run_enemy_ai` is gone. Re-run this
+      task once `pi login` is done.
