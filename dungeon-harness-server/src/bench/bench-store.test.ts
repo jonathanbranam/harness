@@ -143,7 +143,7 @@ describe('playing by hand', () => {
     expect(bench.commitSelected('attack', { col: 6, row: 4 })).toMatchObject({ ok: false })
   })
 
-  it('runs the game AI for the enemy side on request', () => {
+  it('plans the enemy turn: moves resolve immediately toward the objective', () => {
     // The NPC goal is a structure, not a PC — so the board needs one for the AI
     // to have anywhere to go. See board-gen's `powerCenters`.
     const bench = new BenchStore()
@@ -153,30 +153,104 @@ describe('playing by hand', () => {
     bench.placeUnit('short-range', 0, 0)
     const start = bench.getState().units[0]
 
-    expect(bench.runEnemyAi().ok).toBe(true)
+    expect(bench.planEnemyTurn().ok).toBe(true)
 
     const npc = bench.getState().units.find((u) => u.kind === 'npc')!
     const distance = (u: { col: number; row: number }) => Math.abs(u.col - 4) + Math.abs(u.row - 2)
     expect(distance(npc)).toBeLessThan(distance(start))
   })
 
-  it('has the enemy AI stay put when there is nothing on the board to attack', () => {
+  it('plans the enemy turn: the NPC stays put when there is nothing to attack', () => {
     // Documents real engine behavior rather than papering over it: NPCs walk
     // toward structures and shoot PCs that stray into range; with neither, the
     // right answer is to do nothing.
     const bench = openBench()
     bench.placeUnit('short-range', 4, 0)
-    expect(bench.runEnemyAi().ok).toBe(true)
+    expect(bench.planEnemyTurn().ok).toBe(true)
     expect(bench.getState().units.find((u) => u.kind === 'npc')!.row).toBe(0)
   })
 
-  it('has the enemy AI telegraph an attack on a PC in its band', () => {
+  // Regression coverage for the defect this change fixes: planning must report
+  // a telegraph for an attack that has not landed. Against the old, unsplit
+  // `runEnemyAi` this failed, because the attack was resolved and only
+  // afterward stored as the "telegraph" the board painted — the PC had already
+  // lost HP by the time the marker appeared. Keep it as a standing regression
+  // check even though the round-trip test below now covers the same ground.
+  it('reports a telegraph before its attack has landed, not after', () => {
     const bench = openBench()
     bench.placeUnit('melee', 4, 1)
     bench.placeUnit('short-range', 4, 0)
-    bench.runEnemyAi()
+    bench.planEnemyTurn()
     expect(bench.getState().telegraphs).toEqual([{ unitId: expect.any(String), targetCol: 4, targetRow: 1 }])
-    expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(2)
+    expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(3)
+  })
+
+  // The engine's `endRound` clears `npcPlans`, so without this guard a designer
+  // could plan an enemy turn, end the round, and watch locked attacks vanish
+  // having never landed — with the bench reporting success.
+  it('refuses to end the round while telegraphs are pending', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    bench.planEnemyTurn()
+
+    expect(bench.endRound()).toMatchObject({ ok: false })
+    expect(bench.getState().telegraphs).toHaveLength(1)
+
+    bench.resolveTelegraphs()
+    expect(bench.endRound().ok).toBe(true)
+  })
+
+  it('locks a telegraph on planning and lands it on resolving — the original assertions, split across the window', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+
+    bench.planEnemyTurn()
+    expect(bench.getState().telegraphs).toEqual([{ unitId: expect.any(String), targetCol: 4, targetRow: 1 }])
+    expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(3) // not yet landed
+
+    bench.resolveTelegraphs()
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(2) // landed
+  })
+
+  it('resolves a telegraph against the tile it was locked onto, even after the PC that was there moves away', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    const pc = bench.getState().units.find((u) => u.kind === 'pc')!
+
+    bench.planEnemyTurn()
+    expect(bench.getState().telegraphs).toEqual([{ unitId: expect.any(String), targetCol: 4, targetRow: 1 }])
+
+    bench.select(pc.id)
+    expect(bench.commitSelected('move', { col: 1, row: 1 }).ok).toBe(true)
+
+    bench.resolveTelegraphs()
+    expect(bench.getState().telegraphs).toEqual([])
+    // The telegraph landed on (4, 1), which is now empty — the PC that left is
+    // unharmed at its new tile.
+    expect(bench.getState().units.find((u) => u.kind === 'pc')!).toMatchObject({ col: 1, row: 1, hp: 3 })
+  })
+
+  it('skips a telegraph whose owner died inside the window instead of landing it', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0, 1) // 1 HP: one melee hit kills it
+    const pc = bench.getState().units.find((u) => u.kind === 'pc')!
+
+    bench.planEnemyTurn()
+    expect(bench.getState().telegraphs).toEqual([{ unitId: expect.any(String), targetCol: 4, targetRow: 1 }])
+
+    // The designer kills the enemy inside the window instead of moving away.
+    bench.select(pc.id)
+    expect(bench.commitSelected('attack', { col: 4, row: 0 }).ok).toBe(true)
+    expect(bench.getState().units.some((u) => u.kind === 'npc')).toBe(false)
+
+    bench.resolveTelegraphs()
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(3) // the dead enemy's attack never lands
   })
 
   it('ends a round and restores movement', () => {
@@ -187,6 +261,63 @@ describe('playing by hand', () => {
     expect(bench.getState().selection!.remainingMove).toBe(1)
     bench.endRound()
     expect(bench.getState().selection!.remainingMove).toBe(4)
+  })
+})
+
+describe('the telegraph window', () => {
+  it('is a scrubbable interval: stepping back once returns to the pending board, twice to before the enemy turn', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    const beforeUnits = bench.getState().units
+
+    bench.planEnemyTurn()
+    const pendingUnits = bench.getState().units
+    const pendingTelegraphs = bench.getState().telegraphs
+    expect(pendingTelegraphs.length).toBeGreaterThan(0)
+
+    bench.resolveTelegraphs()
+    expect(bench.getState().telegraphs).toEqual([])
+
+    bench.undo() // step back into the window
+    expect(bench.getState().units).toEqual(pendingUnits)
+    expect(bench.getState().telegraphs).toEqual(pendingTelegraphs)
+
+    bench.undo() // step back to before the enemy turn was planned
+    expect(bench.getState().units).toEqual(beforeUnits)
+    expect(bench.getState().telegraphs).toEqual([])
+  })
+})
+
+describe('enemy turn refusals', () => {
+  it('refuses to plan with no NPCs on the board', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    const result = bench.planEnemyTurn()
+    expect(result).toMatchObject({ ok: false })
+    if (!result.ok) expect(result.error).toMatch(/no npcs/i)
+  })
+
+  it('refuses to plan again while telegraphs are still pending', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    bench.planEnemyTurn()
+
+    const result = bench.planEnemyTurn()
+    expect(result).toMatchObject({ ok: false })
+    if (!result.ok) expect(result.error).toMatch(/pending telegraphs|resolve first/i)
+    // The refusal changed nothing: still exactly one telegraph pending.
+    expect(bench.getState().telegraphs).toHaveLength(1)
+  })
+
+  it('refuses to resolve when nothing has been planned', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    const result = bench.resolveTelegraphs()
+    expect(result).toMatchObject({ ok: false })
+    expect(bench.getState().telegraphs).toEqual([])
   })
 })
 

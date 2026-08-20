@@ -47,6 +47,7 @@ import {
   type Cell,
   type ContentMap,
   type GameState,
+  type NpcAttackPlan,
   type NpcType,
   type PcType,
   type Unit,
@@ -546,27 +547,68 @@ export class BenchStore {
     return preview(this.state, this.selectedId, action, tile)
   }
 
-  /** Hand the enemy side to the game's own AI for one round, for comparison with
-   *  driving it by hand. Moves resolve first, then the attack telegraphs. */
-  runEnemyAi(): BenchResult {
+  /**
+   * Hand the enemy side to the game's own AI for the **planning** half of its
+   * turn, for comparison with driving it by hand. Every enemy's move resolves
+   * immediately; its attack is chosen and locked as a telegraph, not resolved —
+   * `resolveTelegraphs` is the other half. This is the shipped game's own split
+   * (`runNpcMovePhase` / `runNpcAttackPhase`), restored here so the board shows
+   * what is coming rather than what already happened.
+   *
+   * Refused while a previous plan's telegraphs are still pending: overwriting
+   * them would silently discard locked attacks the designer is looking at.
+   */
+  planEnemyTurn(): BenchResult {
     this.ensureActive()
+    if (this.state.npcPlans.length > 0) {
+      return fail(`Pending telegraphs must resolve first: ${describeTelegraphs(this.state.npcPlans)}`)
+    }
     if (!this.state.units.some((u) => u.kind === 'npc')) return fail('No NPCs on the board')
 
     const { moves, attackPlans } = computeNpcTurns(this.state)
-    const before = this.state
     let next = this.state
     for (const move of moves) next = resolveNpcAction(next, move)
-    for (const plan of attackPlans) next = resolveNpcAction(next, plan)
 
-    this.commit(
-      { ...next, npcPlans: attackPlans },
-      `Enemy AI ran: ${moves.length} move(s), ${attackPlans.length} attack(s). ${describeChanges(before, next)}`,
-    )
-    return ok(`Enemy AI ran ${moves.length} move(s) and ${attackPlans.length} attack(s).`)
+    const summary = `Enemy turn planned: ${moves.length} move(s). ${describeTelegraphs(attackPlans)}`
+    this.commit({ ...next, npcPlans: attackPlans }, summary)
+    return ok(summary)
   }
 
+  /**
+   * Play out the telegraphs a planned enemy turn locked, in the order they were
+   * planned — the other half of `planEnemyTurn`. A telegraph whose owner died
+   * inside the window is skipped rather than resolved, matching the shipped
+   * game's `runNpcAttackPhase`: killing the enemy really does stop the attack.
+   */
+  resolveTelegraphs(): BenchResult {
+    this.ensureActive()
+    if (this.state.npcPlans.length === 0) return fail('Nothing to resolve — no enemy turn has been planned.')
+
+    const before = this.state
+    let next = this.state
+    for (const plan of this.state.npcPlans) {
+      if (!next.units.some((u) => u.id === plan.unitId)) continue
+      next = resolveNpcAction(next, plan)
+    }
+
+    this.commit({ ...next, npcPlans: [] }, `Telegraphs resolved. ${describeChanges(before, next)}`)
+    return ok(`Telegraphs resolved. ${describeChanges(before, next)}`)
+  }
+
+  /**
+   * Refuses while telegraphs are pending. The engine's `endRound` clears
+   * `npcPlans`, so ending a round mid-window would silently discard locked
+   * attacks — the designer would watch telegraphs vanish having never landed,
+   * which is the same quiet wrongness the plan/resolve split exists to remove.
+   * Stepping back is how a plan gets abandoned deliberately.
+   */
   endRound(): BenchResult {
     this.ensureActive()
+    if (this.state.npcPlans.length > 0) {
+      return fail(
+        `Pending telegraphs must resolve before the round ends: ${describeTelegraphs(this.state.npcPlans)}`,
+      )
+    }
     this.commit(endRound(this.state), 'Round ended — movement and attacks are available again.')
     return ok('Round ended.')
   }
@@ -707,6 +749,13 @@ export class BenchStore {
     this.commit(this.state, 'Unit definitions reset to the shipped values.')
     return ok('Unit definitions reset to the shipped values.')
   }
+}
+
+/** What a set of locked attack plans will do, phrased for the log — the
+ *  telegraph half of the enemy turn, not what it has already done. */
+function describeTelegraphs(plans: NpcAttackPlan[]): string {
+  if (plans.length === 0) return 'No attacks telegraphed.'
+  return `${plans.length} attack(s) telegraphed: ${plans.map((p) => `${p.unitId} → (${p.targetCol}, ${p.targetRow})`).join(', ')}.`
 }
 
 /**

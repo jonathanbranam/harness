@@ -19,7 +19,8 @@ export type BenchIntent =
   | { kind: 'setHp'; unitId: string; hp: number }
   | { kind: 'clearUnits' }
   | { kind: 'newBoard'; cols?: number; rows?: number; preset?: BoardPreset; seed?: number; powerCenters?: number; rowsText?: string[] }
-  | { kind: 'runEnemyAi' }
+  | { kind: 'planEnemyTurn' }
+  | { kind: 'resolveTelegraphs' }
   | { kind: 'endRound' }
   | { kind: 'undo' }
   | { kind: 'redo' }
@@ -55,8 +56,10 @@ export function applyIntent(bench: BenchStore, intent: BenchIntent): BenchResult
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Could not build that board' }
       }
-    case 'runEnemyAi':
-      return bench.runEnemyAi()
+    case 'planEnemyTurn':
+      return bench.planEnemyTurn()
+    case 'resolveTelegraphs':
+      return bench.resolveTelegraphs()
     case 'endRound':
       return bench.endRound()
     case 'undo':

@@ -47,6 +47,7 @@ export function BenchControls({
   lastError,
 }: BenchControlsProps) {
   const selection = state?.selection ?? null
+  const pendingTelegraphs = (state?.telegraphs.length ?? 0) > 0
 
   return (
     <div className="border-b border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200">
@@ -74,10 +75,37 @@ export function BenchControls({
 
         <span className="w-px h-5 bg-gray-200 dark:bg-gray-800" />
 
-        <button type="button" className={BUTTON} onClick={() => onIntent({ kind: 'runEnemyAi' })}>
-          Run enemy AI
+        {/* Two halves of one enemy turn, not two unrelated buttons: plan locks
+            each enemy's move and telegraphs its attack; resolve plays those
+            telegraphs out. The gap between them is the window the designer
+            acts in — Plan disables while a previous plan's telegraphs are
+            still pending, Resolve disables until there is something pending. */}
+        <span className="text-xs text-gray-500 dark:text-gray-400">Enemy turn:</span>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={!state || pendingTelegraphs}
+          title={pendingTelegraphs ? 'Resolve the pending telegraphs first' : "Let the game's AI plan the enemy turn"}
+          onClick={() => onIntent({ kind: 'planEnemyTurn' })}
+        >
+          Plan
         </button>
-        <button type="button" className={BUTTON} onClick={() => onIntent({ kind: 'endRound' })}>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={!pendingTelegraphs}
+          title={pendingTelegraphs ? 'Play out the locked telegraphs' : 'Nothing pending — plan a turn first'}
+          onClick={() => onIntent({ kind: 'resolveTelegraphs' })}
+        >
+          Resolve{pendingTelegraphs ? ` (${state!.telegraphs.length})` : ''}
+        </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={pendingTelegraphs}
+          title={pendingTelegraphs ? 'Resolve the pending telegraphs first' : 'Refill movement and clear attacks'}
+          onClick={() => onIntent({ kind: 'endRound' })}
+        >
           End round
         </button>
       </div>

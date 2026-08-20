@@ -44,7 +44,13 @@ describe('bench intents', () => {
     expect(applyIntent(store, { kind: 'select', unitId: npc.id })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'commit', action: 'attack', col: 3, row: 3 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'endRound' })).toMatchObject({ ok: true })
-    expect(applyIntent(store, { kind: 'runEnemyAi' })).toMatchObject({ ok: true })
+    // Adjacent to the NPC, so planning is guaranteed to lock a telegraph.
+    expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 3, row: 1 })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: true })
+    expect(store.getState().telegraphs.length).toBeGreaterThan(0)
+    expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: false }) // pending telegraphs
+    expect(applyIntent(store, { kind: 'resolveTelegraphs' })).toMatchObject({ ok: true })
+    expect(store.getState().telegraphs).toHaveLength(0)
     expect(applyIntent(store, { kind: 'tweakDef', unitType: 'melee', moveRange: 6 })).toMatchObject({ ok: true })
     expect(store.getState().defs.melee.movement.range).toBe(6)
     expect(applyIntent(store, { kind: 'resetDefs' })).toMatchObject({ ok: true })

@@ -32,7 +32,8 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_move_unit',
   'dungeon_attack',
   'dungeon_preview_action',
-  'dungeon_run_enemy_ai',
+  'dungeon_plan_enemy_turn',
+  'dungeon_resolve_telegraphs',
   'dungeon_end_round',
   'dungeon_undo',
   'dungeon_redo',
@@ -284,13 +285,23 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
     })
 
     pi.registerTool({
-      name: 'dungeon_run_enemy_ai',
-      label: 'Run Enemy AI',
+      name: 'dungeon_plan_enemy_turn',
+      label: 'Plan Enemy Turn',
       description:
-        "Hand the enemy side to the game's own AI for one round, instead of driving it by hand — useful for comparing what the AI does with what you were about to do. NPCs walk toward power centers and attack PCs or structures in their scan band.",
-      promptSnippet: "Let the game's AI take the enemy turn",
+        "Hand the enemy side to the game's own AI for the planning half of its turn, instead of driving it by hand — useful for comparing what the AI does with what you were about to do. Every enemy's move resolves immediately; its attack is chosen and locked as a telegraph, not resolved. Call dungeon_resolve_telegraphs to play those telegraphs out once the designer has had a chance to react. NPCs walk toward power centers and attack PCs or structures in their scan band. Refused while an earlier plan's telegraphs are still pending — resolve them first.",
+      promptSnippet: "Let the game's AI plan the enemy turn: moves resolve, attacks lock as telegraphs",
       parameters: Type.Object({}),
-      execute: async () => outcome(bench, bench.runEnemyAi()),
+      execute: async () => outcome(bench, bench.planEnemyTurn()),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_resolve_telegraphs',
+      label: 'Resolve Telegraphs',
+      description:
+        "Play out the attacks a planned enemy turn locked as telegraphs, in the order they were planned — the other half of dungeon_plan_enemy_turn. An enemy killed inside the window does not land its attack. Refused when nothing is pending.",
+      promptSnippet: 'Resolve the pending enemy telegraphs',
+      parameters: Type.Object({}),
+      execute: async () => outcome(bench, bench.resolveTelegraphs()),
     })
 
     pi.registerTool({

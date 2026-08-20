@@ -133,7 +133,8 @@ export type BenchIntent =
   | { kind: 'setHp'; unitId: string; hp: number }
   | { kind: 'clearUnits' }
   | { kind: 'newBoard'; cols?: number; rows?: number; preset?: 'open' | 'scattered' | 'arena'; seed?: number; powerCenters?: number; rowsText?: string[] }
-  | { kind: 'runEnemyAi' }
+  | { kind: 'planEnemyTurn' }
+  | { kind: 'resolveTelegraphs' }
   | { kind: 'endRound' }
   | { kind: 'undo' }
   | { kind: 'redo' }

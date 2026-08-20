@@ -31,7 +31,7 @@ Unit types — PCs: `melee`, `ranger`, `magic-user`, `rogue`. NPCs:
 `short-range`, `long-range`.
 
 **The enemy AI walks toward power centers**, and attacks a PC only when one
-is inside its scan band. On a board with no structures, `dungeon_run_enemy_ai`
+is inside its scan band. On a board with no structures, `dungeon_plan_enemy_turn`
 correctly does nothing at all. If the designer expects the enemy to hunt the
 player, tell them what the AI actually does rather than making a board that
 hides it.
@@ -80,8 +80,19 @@ Playing — both sides, by hand:
   the tiles it covers, what it would damage, whether anything would die, and
   whether it would hit nothing at all. An attack that hits nothing is still
   legal, so "it accomplishes nothing" is a real answer worth giving.
-- `dungeon_run_enemy_ai` hands the enemy turn to the game's own AI instead.
-- `dungeon_end_round` refills movement and clears attacks.
+- The enemy turn is two steps, matching the shipped game's round: every
+  enemy's move resolves and its attack locks as a telegraph, then the
+  telegraphs resolve. `dungeon_plan_enemy_turn` hands the planning half to the
+  game's own AI — moves happen, attacks are locked and reported as
+  telegraphs, but nothing has been hit yet. That is your and the designer's
+  window to react: move a PC out of a telegraphed tile, or kill the enemy
+  that telegraphed it, before calling `dungeon_resolve_telegraphs` to play
+  the locked attacks out. `dungeon_plan_enemy_turn` refuses while telegraphs
+  from an earlier plan are still pending — resolve them first rather than
+  expecting it to overwrite what the designer is looking at.
+- `dungeon_end_round` refills movement and clears attacks. It refuses while
+  telegraphs are pending — ending the round would discard locked attacks that
+  never landed. Resolve them, or step back to abandon the plan on purpose.
 - `dungeon_undo` steps back one action and `dungeon_redo` steps forward
   again; `dungeon_step_to` jumps to any frame in the session by index.
   `dungeon_board_state` lists every frame with the action that produced it.

@@ -78,6 +78,25 @@ reported for an attack that has already landed.
 - **THEN** that enemy's attack does not land, and the remaining telegraphs
   resolve normally
 
+### Requirement: A pending telegraph cannot be discarded without resolving
+
+The bench SHALL refuse any operation that would clear a pending telegraph
+without resolving it, and SHALL name the pending telegraphs in the refusal.
+Ending the round is such an operation. Stepping back on the timeline is how a
+planned enemy turn is abandoned deliberately.
+
+#### Scenario: Ending the round mid-window
+
+- **WHEN** the designer ends the round while telegraphs from a planned enemy turn
+  are still pending
+- **THEN** the bench refuses with a reason naming the pending telegraphs, the
+  round does not end, and the telegraphs remain pending
+
+#### Scenario: Ending the round after resolving
+
+- **WHEN** the telegraphs have resolved and the designer ends the round
+- **THEN** the round ends normally
+
 ### Requirement: The telegraph window is a scrubbable interval
 
 Planning the enemy turn and resolving its telegraphs SHALL each record their own
