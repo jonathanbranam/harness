@@ -1,3 +1,15 @@
+> # ⏸ PAUSED — proposed 2026-08-16, not started
+>
+> Proposal only: no design, no specs, no `tasks.md`, no code. The first task
+> it lists is itself an **investigation** (whether the pi SDK exposes any way
+> to seed an `AgentSession`'s conversation state), so its feasibility is
+> genuinely unknown — that is part of why it has not been picked up.
+>
+> Paused, not abandoned: the underlying defect is real and confirmed by hand
+> (exiting replay leaves the live session's context out of sync with the
+> restored files). All harness effort is currently on the dungeon-harness
+> rebuild — see `docs/dungeon-harness/harness-rebuild/phase-plan.md`.
+
 ## Why
 
 Exiting replay is meant to let the user pick up exactly where the replayed

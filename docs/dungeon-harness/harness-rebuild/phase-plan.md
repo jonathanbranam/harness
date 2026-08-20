@@ -1,10 +1,28 @@
 # Rebuild phase plan
 
-> **Status: agreed sequencing (2026-08-18).** The direction and the phase
-> boundaries are settled; the detail inside each phase is not, and no code
-> has been written. Companion to [`README.md`](README.md) (orientation +
-> decisions) and [`designer-ui-session.md`](designer-ui-session.md) (the
-> designer-facing UI this builds toward).
+> **Status: THE PLAN OF RECORD. Phases 1–4 built; phase 5 is next and not
+> started.** (Sequencing agreed 2026-08-18; progress updated 2026-08-19.)
+> Companion to [`README.md`](README.md) (orientation + decisions) and
+> [`designer-ui-session.md`](designer-ui-session.md) (the designer-facing UI
+> this builds toward).
+>
+> | Phase | Status |
+> |---|---|
+> | 1 — Hand-driven bench | ✅ built 2026-08-18 |
+> | 2 — Bookmarks | ✅ built 2026-08-18 |
+> | 3 — Threat and reach overlays | ✅ built 2026-08-19 |
+> | 4 — Transport strip | ✅ built 2026-08-19 |
+> | 5 — Scoped turn machine v1 | ⬜ not started — **rules layer still unapproved** |
+>
+> **Note on the count:** this plan originally had six phases. The live-def-reload
+> phase was dropped (see "Dropped" under phase 5), so the turn machine moved
+> from 6 to **5**. Anything still saying "phase 6" is stale.
+>
+> **Landed out of band:** the [action surface](action-surface-plan.md)
+> (2026-08-19) was not in this plan. It came out of reviewing phase 1's attack
+> UI against the game's, and moved "what may this unit do, and is this pick
+> legal" into the engine across both hosts. It is a prerequisite the
+> turn-machine work inherits.
 
 ## The rule these phases obey
 
@@ -29,9 +47,11 @@ Two consequences worth stating up front:
 
 ## Phase 1 — The hand-driven bench ✅ built 2026-08-18
 
-> Implemented as `openspec/changes/dungeon-bench` (still open: browser
-> verification is the one task outstanding — it needs the dev servers running).
-> Two things the plan did not anticipate, both now recorded in that change's
+> Implemented as `openspec/changes/archive/2026-08-19-dungeon-bench`
+> (**archived — browser verification done**, which surfaced and fixed three
+> defects: a log that reported structural damage as a miss, a board alphabet
+> the agent was never taught, and threat fields that washed out with more than
+> one layer on). Two things the plan did not anticipate, both now recorded in that change's
 > design: the enemy AI advances on **structures**, not PCs, so a generated board
 > needs a power center or "run the AI" does nothing; and `resolveNpcAction` does
 > not mark an NPC as having attacked, because the game resolves NPC attacks as
@@ -50,9 +70,10 @@ setup-and-play interface itself.
 
 Tasks:
 
-1. **Extract `track-web/packages/dungeon-engine`.** Specced as
-   `track-web:openspec/changes/dungeon-engine-package` (proposal, spec,
-   design, tasks written 2026-08-18; not implemented). Move the Phaser-free
+1. **Extract `track-web/packages/dungeon-engine`.** ✅ **Done** — commit
+   `bd226c6`, specced as `track-web:openspec/changes/dungeon-engine-package`
+   (all 27 tasks complete; the change directory is still un-archived, which is
+   tracking debt, not work outstanding). Move the Phaser-free
    rules modules (`types`, `turn`, `pc`, `npc`, `pathfinding`,
    `attackFootprint`, `unitDefs`, plus the `defStore`/`contentStore`
    *state* and *getters*) into the package, next to the existing
@@ -139,17 +160,17 @@ cheaply on purpose so it can be discarded if the answer is no.
 > same field as rows of digits. Threat counts a move first, since a unit may
 > move and then attack.
 >
-> **One documented approximation lives here.** An NPC attack *resolves* on a
-> single tile at min range, but the engine's internal scanners select a target
-> anywhere in the targeting band — a long-range enemy shoots across the board
-> even though its shot lands on one tile. Using the engine's footprint alone
-> would have shown the enemy as far less dangerous than it is, so for
-> single-tile attacks the threat field covers the whole band. It ignores
-> blocking, which the scanners respect, making it an upper bound: nothing
-> threatening is missing, and some shown tiles need a clear line. This is the
-> only place the harness derives anything rules-shaped that it did not get
-> from an engine call, and it is derived from the same definition fields the
-> scanners read.
+> **The approximation that lived here is gone.** As built, the bench derived
+> the threat band itself: an NPC attack *resolves* on a single tile at min
+> range, but the engine's internal scanners select a target anywhere in the
+> targeting band, so using the engine's footprint alone showed a long-range
+> enemy as far less dangerous than it is. The bench compensated by covering the
+> whole band — the one place it derived something rules-shaped from an engine
+> call it did not make.
+>
+> **The [action surface](action-surface-plan.md) removed it** (finding 7). The
+> engine now exports `threatTiles(state, unitId)`, and the bench calls it. The
+> invariant is intact again: the harness derives no rules of its own.
 
 ## Phase 4 — Transport strip ✅ built 2026-08-19
 
@@ -165,7 +186,13 @@ one-way animation into an inspectable trajectory.
 > designer walks a trajectory that includes their own edits. Acting after a
 > step back discards the frames ahead, the way an editor's undo history does.
 
-## Phase 5 — Scoped turn machine v1
+## Phase 5 — Scoped turn machine v1 ⬜ next, not started
+
+> **Gate:** [`../turn-machines/`](../turn-machines/README.md) is still marked
+> **under evaluation, not approved.** Phase 5 cannot start until that slice is
+> reviewed and given an explicit go-ahead. It now inherits the
+> [action surface](action-surface-plan.md), which is the API a machine's output
+> is dispatched through.
 
 **At the end you can:** play the bench against machine-driven units and see
 it behave identically to the legacy path.
@@ -191,6 +218,12 @@ phase 5.
 
 In rough order of likely value:
 
+- **The turn sequencer and its telegraph window** — finding 5 of the
+  [action-surface plan](action-surface-plan.md): round/phase sequencing still
+  lives in each host, and the bench's differs from the game's. Deliberately
+  deferred because it touches the animation pipeline and is the finding most
+  likely to be reshaped by the turn-machine design. Specced but not opened as
+  `track-web:dungeon-turn-sequencer`.
 - **Agent authoring of machines** — the role `STATUS.md` scopes the agent
   to; needs phase 5 first.
 - **Migrating track-web's unit editor and map editor into the harness.**
@@ -199,7 +232,8 @@ In rough order of likely value:
   is built against today's `UnitDef`, and why the harness generates its own
   boards rather than importing track-web's.
 - **Survey grid (multiple boards at once).** Requires instance-scoping the
-  engine — see README, "Blocking prerequisite". Single-board phases 1–5
+  engine — see README, "Deferred prerequisite: instance-scoping the engine".
+  Single-board phases 1–5
   deliberately avoid that cost.
 - **Recording, approval, watched facts** — the "opt-in second act" of the
   session doc.
@@ -208,6 +242,17 @@ In rough order of likely value:
 - **Unit editing in the harness, for real** — a persisted, UI-driven
   editor, only once turn machines have replaced the model being thrown
   away.
+
+### Recorded, not scheduled
+
+Small items from the action-surface review that belong somewhere but were not
+worth a change of their own:
+
+- **NPC AI on a structureless board** — the enemy AI advances on structures, so
+  a board with no power center cannot exercise enemy movement at all. The bench
+  generator works around it; the engine does not address it.
+- **Win/lose evaluation** — declared in content data (`contentTypes.ts`), with
+  no evaluator anywhere in either host.
 
 ## Decisions (2026-08-18)
 

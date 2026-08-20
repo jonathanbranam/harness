@@ -1,3 +1,14 @@
+> # ⏸ PAUSED — proposed 2026-08-16, not started
+>
+> No `tasks.md` was ever written and no code landed. Paused, not abandoned:
+> the design is still considered sound, and its dependency (the
+> `introspect/pane-layout` capability from `redesign-introspect-ui`) **has
+> since shipped**, so this is unblocked whenever it is picked back up.
+>
+> All harness effort is currently on the dungeon-harness rebuild — see
+> `docs/dungeon-harness/harness-rebuild/phase-plan.md`. Do not treat this as
+> in-progress work.
+
 ## Why
 
 Session recordings capture every agent lifecycle event (messages, tool calls, usage) but nothing about what the user was doing in the browser. Once `redesign-introspect-ui` lands, pane layout (widths, and which pane is minimized/maximized) becomes something the user actively changes while working — replaying a recording should be able to show where the user was focused, not just what the agent did, so a review of a recorded session can reconstruct the full picture of the interaction, not only the agent side of it.

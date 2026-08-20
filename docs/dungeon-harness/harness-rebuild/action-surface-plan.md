@@ -1,6 +1,29 @@
 # The action surface: gameplay that escaped the engine
 
-**Status:** proposal, for review. Spans both repos (`track-web`, `harness`).
+> # ✅ LANDED 2026-08-19 — this plan was executed
+>
+> **Changes 1–3 of §7 are implemented and archived.** The engine owns the
+> action surface, and both hosts dispatch through it:
+>
+> | Change | Repo | Archived as |
+> |---|---|---|
+> | `dungeon-engine-action-surface` | track-web | `2026-08-19-dungeon-engine-action-surface` |
+> | `dungeon-game-action-adoption` | track-web | `2026-08-19-dungeon-game-action-adoption` |
+> | `dungeon-bench-action-adoption` | harness | `2026-08-19-dungeon-bench-action-adoption` |
+>
+> Findings 1, 2, 3, 4, 6, 7, 8 and 9 are fixed. The game and the bench both aim
+> **by tile**, and the bench's four direction buttons are gone.
+>
+> **Still open, deliberately:** finding 5 (the turn sequencer and its telegraph
+> window) — the deferred `dungeon-turn-sequencer` change, never opened; and
+> finding 10 (win/lose evaluation), recorded but not scheduled. Both are listed
+> under "Deferred past phase 5" in [`phase-plan.md`](phase-plan.md).
+>
+> The sections below are preserved as the audit and rationale — read them as the
+> record of *why* the surface looks the way it does, not as work outstanding.
+
+**Status:** ✅ implemented (changes 1–3); sequencer deferred. Spans both repos
+(`track-web`, `harness`).
 **Date:** 2026-08-19.
 **Trigger:** the bench's attack UI asks the designer for a *direction*; the game
 asks for a *tile*. Reviewing that divergence turned up a class of problems, not
@@ -391,9 +414,9 @@ this rebuild.
 
 | # | Repo | Change | Contents | Depends on |
 |---|---|---|---|---|
-| 1 | track-web | `dungeon-engine-action-surface` | `actions.ts`, validation, `threatTiles`, `reconcileHp`, tests. Purely additive — no host touched, no behaviour change. | — |
-| 2 | track-web | `dungeon-game-action-adoption` | Game host + scene + HUD + steps migrate. Fixes findings 2, 4, 9. | 1 |
-| 3 | harness | `dungeon-bench-action-adoption` | Bench store, wire format, controls, board view, agent tools. Fixes findings 1, 7, 8 on the bench side. | 1 |
+| 1 ✅ | track-web | `dungeon-engine-action-surface` | `actions.ts`, validation, `threatTiles`, `reconcileHp`, tests. Purely additive — no host touched, no behaviour change. | — |
+| 2 ✅ | track-web | `dungeon-game-action-adoption` | Game host + scene + HUD + steps migrate. Fixes findings 2, 4, 9. | 1 |
+| 3 ✅ | harness | `dungeon-bench-action-adoption` | Bench store, wire format, controls, board view, agent tools. Fixes findings 1, 7, 8 on the bench side. | 1 |
 | — | track-web | `dungeon-turn-sequencer` | **Deferred.** Finding 5: move the round/phase machine into the engine, including the telegraph window, and adopt it in both hosts. | 1, 2, 3 |
 
 **Why 1 is separate.** It is the only piece with no user-visible behaviour

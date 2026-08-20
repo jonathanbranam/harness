@@ -1,9 +1,28 @@
 # Dungeon-harness: work stopped, 2026-08-18
 
+> # 📍 Where things stand now (updated 2026-08-19)
+>
+> **This file is the decision record for the *stopped* effort. It is not the
+> current plan.** The replacement is under way and partly shipped:
+> [`harness-rebuild/phase-plan.md`](harness-rebuild/phase-plan.md) is the
+> plan of record, and [`harness-rebuild/README.md`](harness-rebuild/README.md)
+> is the orientation doc.
+>
+> - **Backout: complete.** Executed by `f5aff46` (harness) and `8f9fe9c`
+>   (track-web); see [`backout-plan.md`](backout-plan.md).
+> - **Engine extracted: done.** `@repo/dungeon-engine` lives in track-web's
+>   `packages/`, consumed here by relative `file:` path.
+> - **Rebuild phases 1–4: built and browser-verified** (bench, bookmarks,
+>   reach/threat overlays, transport strip).
+> - **Action surface: landed** — the engine now owns what a unit may do and
+>   whether a pick is legal, in both hosts.
+> - **Next up: phase 5**, the scoped turn machine — *not started, and its
+>   rules layer is still unapproved.*
+
 **The dungeon-harness implementation documented in
 [`proposal.md`](proposal.md) and [`phases/`](phases/README.md) is stopped
-and is being backed out.** This file is the single source of truth for
-that decision, what actually landed before the stop, and what happens to
+and has been backed out.** This file is the single source of truth for
+that decision, what actually landed before the stop, and what happened to
 each piece. Every other doc in this folder now carries a banner pointing
 here.
 
@@ -36,6 +55,9 @@ never be the thing that makes the harness correct.
 
 ## What landed before the stop
 
+*The **Disposition** column below was the plan at the time of the stop. It has
+since been **fully executed** — see the closing section.*
+
 | # | Repo | Phase | Status | Disposition |
 |---|---|---|---|---|
 | 01 | harness | Harness scaffold | ✅ Complete (`2026-08-16-dungeon-harness-scaffold`) | **Keep** — auth, session store, jailed workspace, chat UI are substrate-independent |
@@ -58,35 +80,70 @@ placeholder to resume the exploration).
 
 ## What replaces it
 
-Two separate efforts, neither of which is committed to yet.
+Two separate efforts. **One is now largely built; the other is still
+unapproved.**
 
 **1. A shared rules engine and a declarative unit language.** The candidate
 design is [`turn-machines/`](turn-machines/README.md): a small guarded
 state machine per unit plus a tiny expression language, in one pure-TS
 interpreter imported by *both* the game and the harness, so there is no
-port step and no drift. **This design is under evaluation and not
+port step and no drift. **This design is still under evaluation and not
 approved** — it is a good direction, not a decision. Its own README carries
-that caveat.
+that caveat. Only a scoped-down slice of it is scheduled, as rebuild phase 5.
 
-**2. A ground-up harness rebuild.** Not a modification of the current
-harness — a different tool, built on the "Inventing on Principle"
-principle: the designer changes a rule or a value and *immediately sees*
-the effect, with **multiple scenarios previewing and playing out
-simultaneously** beside the edit. The agent's role narrows to being the
-*interface* for expressing unit behavior (authoring the turn machine); the
-**real game engine** does all simulation. That design pass is under way in
-[`harness-rebuild/`](harness-rebuild/README.md): the designer-facing UI is
-settled ([`designer-ui-session.md`](harness-rebuild/designer-ui-session.md)),
+What *has* been settled is the sharing mechanism it depends on. The game's
+Phaser-free rules modules were extracted into **`@repo/dungeon-engine`**
+(track-web `packages/dungeon-engine`, commit `bd226c6`), which this repo
+consumes over a relative `file:` path — one set of rules, no copy, no drift.
+On top of that, the **action surface** landed on 2026-08-19: the engine now
+owns what a unit may do, what the player may pick, and whether a pick is
+legal, so no host re-derives rules for itself. See
+[`harness-rebuild/action-surface-plan.md`](harness-rebuild/action-surface-plan.md).
+
+**2. A ground-up harness rebuild.** Not a modification of the old harness —
+a different tool, built on the "Inventing on Principle" principle: the
+designer changes a rule or a value and *immediately sees* the effect, with
+**multiple scenarios previewing and playing out simultaneously** beside the
+edit. The agent's role narrows to being the *interface* for expressing unit
+behavior; the **real game engine** does all simulation.
+
+That rebuild is under way in
+[`harness-rebuild/`](harness-rebuild/README.md). The designer-facing UI is
+settled ([`designer-ui-session.md`](harness-rebuild/designer-ui-session.md))
 and the build order is agreed
-([`phase-plan.md`](harness-rebuild/phase-plan.md), 2026-08-18) — six
-shippable phases starting from a single hand-driven board, with a
-scoped-down turn machine arriving in phase 6 rather than gating the work.
-Nothing is built yet.
+([`phase-plan.md`](harness-rebuild/phase-plan.md)) — five shippable phases
+starting from a single hand-driven board, with a scoped-down turn machine
+arriving in phase 5 rather than gating the work.
+
+| Phase | What it gives the designer | Status |
+|---|---|---|
+| 1 | Hand-driven bench: generate a board, place units, play a full round through the real engine | ✅ built 2026-08-18 |
+| 2 | Bookmarks — save and reload an interesting position | ✅ built 2026-08-18 |
+| 3 | Reach and threat overlays | ✅ built 2026-08-19 |
+| 4 | Transport strip — step and scrub through a played sequence | ✅ built 2026-08-19 |
+| 5 | Scoped turn machine v1 (today's six archetypes only) | ⬜ not started |
+
+Phases 1–4 shipped as `openspec/changes/archive/2026-08-19-dungeon-bench`
+and were verified end to end in a browser, including driving the bench from
+chat. The action-surface adoption followed as
+`2026-08-19-dungeon-bench-action-adoption` here, plus
+`dungeon-engine-action-surface` and `dungeon-game-action-adoption` in
+track-web.
 
 What survives from the old harness is the scaffold (phase 01) and the
 lesson: **the engine referees, never the agent.**
 
-## Backout plan
+## Backout plan — executed
 
 See [`backout-plan.md`](backout-plan.md) for the concrete
-remove/disable/keep breakdown across both repos.
+remove/disable/keep breakdown across both repos. **It has been carried out
+in full:**
+
+- **harness** — `f5aff46` "Back out the dungeon harness's stopped feature
+  work", tracked as `openspec/changes/archive/2026-08-18-dungeon-harness-backout`.
+- **track-web** — `8f9fe9c` "Remove track-web's dungeon-harness surface;
+  refile PC archetypes", tracked as
+  `openspec/changes/archive/2026-08-18-dungeon-tactics-harness-backout`.
+
+Nothing on the removal list remains in either repo. The Gherkin runner and
+the extracted `.feature` files were kept, as directed.

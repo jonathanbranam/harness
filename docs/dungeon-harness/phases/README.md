@@ -1,4 +1,4 @@
-> # ⛔ STOPPED — this plan is being backed out
+> # ⛔ ARCHIVED — this plan is dead; the backout is complete
 >
 > **As of 2026-08-18 this entire phase plan is stopped.** It executed
 > [`../proposal.md`](../proposal.md)'s Gherkin-authoring approach, which put

@@ -10,30 +10,40 @@ live presentation-editing chat UI — see `docs/talks/deck-harness/planning.md`
 for its design. The second harness is `introspect-harness-server` +
 `client-introspect`, a browser chat that drives an in-process `AgentSession`
 and visualizes the agent's context window. A third harness,
-`dungeon-harness-server` + `client-dungeon`, is currently just that
-scaffold (auth, one long-lived `AgentSession` per login, a jailed agent
-workspace, chat UI) — its feature work was backed out and is being rebuilt;
-see the note below.
+`dungeon-harness-server` + `client-dungeon`, is a **design bench for the
+Dungeon Tactics game**: a board played through the real game engine, with the
+agent driving it alongside the designer. Its original feature work was backed
+out and it is being rebuilt — see the note below.
 
-> **⛔ The dungeon harness's previous feature work has been backed out**
-> (2026-08-18). The Gherkin-authoring approach put the LLM in the referee's
-> chair for game rules and never produced a usable design tool; the freehand
-> board tools let it draw a board it had no way to be right about. The
+> **⛔ History: the dungeon harness's original feature work was backed out**
+> (2026-08-18, complete). The Gherkin-authoring approach put the LLM in the
+> referee's chair for game rules and never produced a usable design tool; the
+> freehand board tools let it draw a board it had no way to be right about. The
 > Gherkin authoring core, baseline/changeset surface, freehand board tools,
-> board state, and `BoardCanvas` are **deleted** — only the phase-01 scaffold
-> remains (auth, one `AgentSession` per login, jailed workspace, chat UI,
-> permission gate, `dungeon_board_view`). `docs/dungeon-harness/STATUS.md` is
-> the decision record and `backout-plan.md` the executed removal plan.
+> board state, and `BoardCanvas` are **deleted** and are not coming back.
+> `docs/dungeon-harness/STATUS.md` is the decision record and
+> `backout-plan.md` the executed removal plan.
 >
 > The harness is being **rebuilt** around simulation driven by the real game
-> engine, now shipped as `@repo/dungeon-engine` in the sibling track-web
-> repo. Design and build order live in `docs/dungeon-harness/harness-rebuild/`
-> (`phase-plan.md` is the plan of record: shippable phases starting from a
-> single hand-driven board). The candidate rules layer is
-> `docs/dungeon-harness/turn-machines/` (**under evaluation, not approved**;
-> only a scoped-down slice is planned, in phase 5).
+> engine, now shipped as `@repo/dungeon-engine` in the sibling track-web repo
+> (`packages/dungeon-engine`, consumed here over a relative `file:` path).
+> Design and build order live in `docs/dungeon-harness/harness-rebuild/`;
+> **`phase-plan.md` is the plan of record.**
+>
+> **Phases 1–4 are built and browser-verified** (2026-08-19): the hand-driven
+> bench, bookmarks, reach/threat overlays, and the transport strip — see
+> `dungeon-harness-server/src/bench/`, `src/pi-extensions/bench-bridge.ts`, and
+> `client-dungeon/src/bench/`. The **action surface** also landed: the engine
+> owns what a unit may do and whether a pick is legal, so **the harness derives
+> no game rules of its own** — every bench and agent-tool call is a thin wrapper
+> over an engine function. Preserve that invariant; it is the lesson the
+> previous effort died on.
+>
+> **Phase 5 (scoped turn machine) is next and not started.** Its rules layer,
+> `docs/dungeon-harness/turn-machines/`, is **under evaluation and not
+> approved** — do not implement from it without an explicit go-ahead.
 > `docs/dungeon-harness/proposal.md` and `phases/` are historical — do not
-> implement from them.
+> implement from them either.
 
 See
 `docs/arch/track-web-architecture.md` for the patterns this project

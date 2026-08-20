@@ -44,7 +44,7 @@ simulation.
 
 | Doc | What it covers |
 |---|---|
-| [`phase-plan.md`](phase-plan.md) | The build order: six shippable phases, each ending in something usable, starting from a single hand-driven board. The plan of record. |
+| [`phase-plan.md`](phase-plan.md) | The build order: five shippable phases, each ending in something usable, starting from a single hand-driven board. **The plan of record.** |
 | [`designer-ui-session.md`](designer-ui-session.md) | The designer-facing UI, as settled in a voice design session (2026-08-18). Verbatim outcome — layout, two modes, scenario cards, subjects vs. scaffolding, recording/editing workflows, approval, rule-set branching, and the reframing that landed: the primary artifact is the *interactive session*, not the saved test. |
 
 ## What it depends on
@@ -52,20 +52,23 @@ simulation.
 - **The rules layer** — [`../turn-machines/`](../turn-machines/README.md)
   proposes a declarative per-unit state machine plus a shared pure-TS
   interpreter. **Under evaluation, not approved**, and deliberately *not* a
-  prerequisite: phases 1–5 run against today's rules, and phase 6 takes only
+  prerequisite: phases 1–4 run against today's rules, and phase 5 takes only
   the slice of the language needed for the six existing archetypes.
   `../turn-machines/harness-integration.md` sketches a tool surface and a
   machine panel against the *old* single-board harness — treat it as input,
   not as this folder's design.
-- **The real game engine** — lives in the sibling track-web repo at
-  `client-games/src/games/dungeon-tactics-solo/`. The rules modules
-  (`turn.ts`, `pc.ts`, `npc.ts`, `pathfinding.ts`, `attackFootprint.ts`,
-  `unitDefs.ts`, `types.ts`, ~1k lines) are **already Phaser-free**, so
-  sharing them is a packaging problem, not a rewrite. `DungeonTacticsScene.ts`
-  and `boardRender.ts` are the Phaser rendering on top.
+- **The real game engine** — ✅ **extracted.** The Phaser-free rules modules
+  (`turn`, `pc`, `npc`, `pathfinding`, `attackFootprint`, `unitDefs`, `types`,
+  plus `actions` from the action surface) now live in the sibling track-web
+  repo at `packages/dungeon-engine`, published as `@repo/dungeon-engine` and
+  consumed here over a relative `file:` path (`dungeon-harness-server/package.json`).
+  `DungeonTacticsScene.ts` and `boardRender.ts` stay behind in `client-games`
+  as the Phaser rendering on top. Sharing was a packaging problem, not a
+  rewrite, as predicted.
 - **The scaffold** — `dungeon-harness-server` + `client-dungeon` (auth, one
-  long-lived `AgentSession` per login, jailed workspace, chat UI) is kept.
-  Everything else currently in those packages is on the removal list.
+  long-lived `AgentSession` per login, jailed workspace, chat UI) is kept. The
+  old feature code around it has been removed; what sits there now is the
+  bench (`src/bench/`, `src/pi-extensions/bench-bridge.ts`).
 
 ## Decisions taken (2026-08-18)
 
@@ -74,7 +77,7 @@ In brief:
 
 **1. Bench first, turn machines second.** A scoped-down single-board harness
 is built against today's rules; a scoped-down turn machine covering only the
-six existing archetypes follows in phase 6. Neither gates the other, and the
+six existing archetypes follows in phase 5. Neither gates the other, and the
 setup/play interface survives the rules-layer swap.
 
 **2. No unit-def editing in the harness.** Today's `UnitDef` model is
@@ -115,7 +118,7 @@ grid.
 
 The single-board phases 1–5 **deliberately avoid paying this cost**: one
 board, one def table, singletons are fine. The debt comes due when multiple
-boards do, and not before.
+boards do, and not before. Phases 1–4 shipped without paying it, as planned.
 
 ## Prior art, and where it is going
 
@@ -153,7 +156,7 @@ the phases themselves answer the rest.
 2. **The rule-set version graph.** Labels, branches, per-card binding,
    colour assignment, persistence across sessions.
 3. **The turn-machine block editor** (Scratch-style) — explicitly deferred
-   in the session; needs phase 6's language slice settled first.
+   in the session; needs phase 5's language slice settled first.
 4. **How much of the survey grid is worth it**, once phase 3 has shown
    whether reach-and-threat overlays carry the value the session doc
    predicts. The grid is the expensive feature (it forces instance-scoping);
