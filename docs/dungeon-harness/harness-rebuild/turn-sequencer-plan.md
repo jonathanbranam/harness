@@ -282,8 +282,17 @@ never will.
 
 1. **Engine — phase 2.** `amendTelegraph(state, unitId, tile)`, validated legal
    from the unit's post-move position, sharing validation with `commitNpcTurn`.
-   Refuses on a dead unit, an unplanned unit, a call outside `player`, or a call
-   made in `'game'` mode (§6.1).
+   Refuses on a dead unit, an unplanned unit, a telegraph that has already
+   resolved, or a call made in `'game'` mode (§6.1).
+
+   **Gated on "not yet resolved", not on the `player` phase.** An earlier draft
+   of this plan said "outside `player`"; that is narrower than the window this
+   feature is defined by. The window is *after locked, before resolves*, and a
+   telegraph still pending partway through `npc-attack` is squarely inside it —
+   which matters in the bench, where the designer can scrub into the middle of
+   resolution. Resolution state is the correctly general form of the constraint
+   and subsumes the player-phase case. (Corrected 2026-08-20, during
+   implementation.)
 2. **Bench timeline — phase 3b.** The retroactive rewrite: replace that unit's
    entry in `npcPlans` across every frame from the planning point to the
    cursor, so a replay shows the amended telegraph from the moment it locked.
@@ -317,14 +326,29 @@ hand-drive an enemy through the validated path, which records its movement, then
 run the AI, and the AI plans a fresh full move for that same unit. It acts twice
 in one round.
 
-This follows from reading the code; it has **not been reproduced by running
-it**. Reproduce it first, then keep the reproduction as a regression test.
+**Reproduced 2026-08-20**, as planned, before anything was asserted about it:
+hand-driving an NPC one tile via `commitAction` (which records `movedThisTurn`)
+and then calling `computeNpcTurns` on the result returns a fresh action for that
+same unit, which a host would apply as its second of the round. Kept as a
+regression test.
 
-Worth noting *why* it disappears: not because phase 2 adds a check, but because
-planning is the single gate every author passes through and
-`npcPlannedThisRound` is checked there. A unit whose turn is spent cannot be
-planned again by anyone. The regression test proves the gate holds rather than
-guarding a condition.
+Worth being precise about what fixes it, because an earlier draft of this
+section overstated it. `npcPlannedThisRound` is **separate bookkeeping** from
+`movedThisTurn`/`attackedThisTurn`, and the sequencer never reads the latter.
+`commitAction` and `computeNpcTurns` are deliberately untouched — the tripwire
+in phase 2 forbids changing them.
+
+So the legacy combination still double-acts in isolation: hand-drive an enemy
+through the action surface, then plan it through `computeNpcTurns`, and it acts
+twice. What phase 2 establishes is narrower and sufficient: **once a host drives
+its enemy turn through the sequencer**, both the hand-drive and the AI plan pass
+the same `npcPlannedThisRound` gate, and a unit whose turn is spent cannot be
+planned again by anyone. That is what phases 3a, 3b and 4 have the hosts adopt.
+
+No host mixes the two mechanisms in one round today, so this is not a live bug —
+but it is not closed by phase 2 either, and phase 5's guards are what finally
+retire the legacy path. The regression test asserts the sequencer's gate, not a
+fix to `computeNpcTurns`.
 
 ---
 
@@ -454,6 +478,11 @@ them.
   `availableActions` currently never reads `state.phase`.
 - **`resolveNpcAction` demoted** to package-internal, or exported only as the
   raw applier with `advance` named as its sole intended caller.
+- **Retire the legacy double-act path** (§7). With both hosts on the sequencer,
+  nothing should still be able to reach `computeNpcTurns` and apply its result
+  as a second action for a unit already planned. This is the phase where that
+  becomes enforceable, because it is the first point at which changing
+  `computeNpcTurns`' callers is safe.
 - Confirm every refusal path in §5 has a plain-English reason and a test.
 
 **This phase is what makes the work enforcement rather than convention.** Phase
