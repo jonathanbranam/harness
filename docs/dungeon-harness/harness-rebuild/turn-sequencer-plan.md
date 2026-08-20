@@ -20,201 +20,279 @@ This is the same class of failure the action surface fixed one level down, and
 the fix has the same shape: **the engine owns the round, hosts drive the
 pacing.**
 
-The structure this plan turns on:
+The round itself does not change. What changes is that the engine, rather than
+each host, is the thing that knows it:
 
-> An enemy turn is **planned**, then **executed**. Planning is a decision and
-> the bench designer may take it over from the AI. Execution is a rule and the
-> engine always drives it.
-
-The plan is one artifact in one shape, and it does not care who authored it.
-That is what lets the designer stand in for the AI without the bench acquiring
-a round structure of its own.
+> An enemy's turn is **planned once** — its move executes as it is planned, its
+> attack is chosen and **locked**. Later, the locked attacks **play out in the
+> order they were planned**. Who does the planning is a decision the bench may
+> take over from the AI. Everything after it is a rule the engine enforces.
 
 ---
 
-## 2. Plan, then execute
-
-The round, as the shipped game already plays it:
+## 2. The round, unchanged
 
 ```
-ROUND START
-  npc-plan    the enemy turn is planned          ← AI, or the designer
-  npc-move    planned moves EXECUTE              ← engine, immutable after
-              attack intents become telegraphs
-  player      PCs act, seeing what is coming
-  npc-attack  telegraphs RESOLVE                 ← engine
-  endRound    → next round
+npc-move    each enemy is planned, one at a time:
+              its move EXECUTES immediately and is immutable thereafter
+              its attack is CHOSEN and LOCKED as a telegraph
+            ── AI does this in one tick (game)
+            ── designer does it at their own pace (bench)
+  player    PCs act, seeing the locked telegraphs
+npc-attack  telegraphs RESOLVE, in the order they were planned
+ endRound   → next round
 ```
 
-The bench mirrors this exactly. The only thing that differs is **who fills the
-plan** during `npc-plan`, and how long that phase lasts: in the game the AI
-fills it in one tick, and in the bench the designer sits in it for as long as
-they like.
+There is **no separate planning phase**. Planning and movement are the same
+pass, exactly as `runNpcMovePhase` already does it: each NPC "has its move
+applied and animated immediately against the live board; its intended attack is
+stored as a telegraph."
+
+That the move executes *during* planning is what makes mixed authorship
+compose. Plan enemy 2 into a doorway and enemy 3 is planned against a board
+where enemy 2 already stands there — the same reason `computeNpcTurns` threads
+a mutating `workingUnits` through its loop (`npc.ts:153-215`).
 
 Movement being immutable once executed is load-bearing and already relied on:
-`applyDefChange` (`DungeonTacticsGame.tsx:94`) re-plans telegraphs mid-player-
-phase but explicitly not movement, "because movement for the round has already
-executed and is immutable."
+`applyDefChange` (`DungeonTacticsGame.tsx:94`) re-plans telegraphs
+mid-player-phase but explicitly not movement, "because movement for the round
+has already executed and is immutable."
+
+**`TurnPhase` is unchanged.** No new phase value, so no host breaks on a widened
+union.
 
 ### Who owns what
 
 | Concern | Owner | Why |
 |---|---|---|
-| What each enemy intends this round | **Host decides, engine validates** | A designer choice in the bench; the AI's in the game |
-| Enemy turn order | **Host decides, engine validates** | Part of the plan, chosen when the plan is authored |
-| Whether an intent is legal for that unit | **Engine** | Rule |
-| That every living enemy has exactly one entry | **Engine** | Rule |
-| That the plan executes in the order planned | **Engine** | Rule |
+| What each enemy does this round | **Host decides, engine validates** | The AI's choice in the game; the designer's in the bench |
+| Enemy turn order | **Host decides, engine validates** | It is simply the order they are planned in |
+| Whether a move or attack is legal for that unit | **Engine** | Rule |
+| That each living enemy is planned exactly once | **Engine** | Rule |
+| That a planned move executes immediately and stays put | **Engine** | Rule |
+| That telegraphs resolve in planned order, at resolution | **Engine** | Rule — the game's core tension |
 | Phase transitions, and that none is skipped | **Engine** | Rule |
-| That telegraphs resolve at resolution, not on commit | **Engine** | Rule — the game's core tension |
-| *When* the next step happens in wall-clock time | **Host** | Pacing — animation in the game, instant in the bench |
+| Amending a locked telegraph mid-round | **Bench only** — see §6 | Deliberate rule-break |
+| *When* the next step happens in wall-clock time | **Host** | Pacing |
 
-The designer may plan anything legal, including things the AI would never
-choose — every enemy holding is a valid plan of all-`stay` entries. What they
-cannot do is skip a unit, give one two entries, plan an illegal intent, execute
-out of plan order, or resolve a telegraph early.
+The designer may plan anything legal, including what the AI never would — every
+enemy holding is a valid round of all-`stay` plans. What they cannot do is skip
+an enemy, plan one twice, plan an illegal move or attack, or resolve a telegraph
+early.
 
-**This mirrors §9.2 of the action-surface plan** (bench *setup* is direct state
-editing, outside the action surface). Write the boundary into the spec so a
-later reader does not "fix" it.
+**This sits alongside §9.2 of the action-surface plan** (bench *setup* is direct
+state editing, outside the action surface). Both are deliberate boundaries;
+write them into the spec so a later reader does not "fix" them.
 
 ---
 
-## 3. The plan lives in `GameState`
+## 3. What moves into `GameState`
 
 The enforcement gap today is structural, not a missing check. `computeNpcTurns`
-returns `{ moves, attackPlans }` and **the host keeps `moves` in a local
-variable**, executes them, and stores only the attack half as `npcPlans`. The
-engine never sees the movement plan at all, so it cannot enforce an order, a
-count, or a phase. `resolveNpcAction` validates movement blocking
-(`npc.ts:326`) and nothing about sequencing.
+returns `{ moves, attackPlans }` and **the host keeps the movement half in a
+local variable**. The engine never sees it, so it cannot enforce a count or an
+order. `resolveNpcAction` validates movement blocking (`npc.ts:326`) and nothing
+about sequencing — no phase check, no already-planned check.
 
-For the designer to author a plan, and for the engine to enforce and execute it,
-the plan has to be in state:
+Because moves execute as they are planned, there is no pending move plan to
+store. The additions are small:
 
 ```ts
-// The enemy turn for this round, planned during `npc-plan` — by the AI in the
-// game, by the designer or a mix of both in the bench. Ordered: the entry order
-// IS the turn order. Exactly one entry per living NPC.
-npcTurnPlan: NpcPlanEntry[] | null
+// Enemies already planned this round: move executed, attack locked. The engine's
+// record that a unit's turn is spent, whoever authored it.
+npcPlannedThisRound: string[]
 
-interface NpcPlanEntry {
-  unitId: string
-  move: NpcAction                 // 'move' | 'stay' | 'exit'
-  telegraph?: NpcAttackPlan       // attack intent, resolved in `npc-attack`
-  author: 'ai' | 'designer'       // provenance, so the bench can show it
-}
-
-// Execution progress, by unit id rather than index so the record survives a
-// unit dying mid-phase and survives the bench rewinding into the middle of one.
-npcMovesExecuted: string[]
+// Telegraphs already resolved this `npc-attack` phase, by unit id rather than
+// index so the record survives a unit dying mid-resolution and survives the
+// bench rewinding into the middle of the phase.
 npcPlansResolved: string[]
 ```
 
-`npcPlans` stays as the telegraph list the player sees; it is derived from the
-entries' `telegraph` fields when `npc-move` completes.
+`npcPlans` already exists, already holds the locked telegraphs, and is already
+in planning order — `computeNpcTurns` pushes to it in unit-iteration order and
+`runNpcAttackPhase` walks it by index. **It is already the plan.** It just has
+no engine-side notion of progress through it, and no companion record for the
+movement half.
 
-`TurnPhase` gains `'npc-plan'`:
-`'placement' | 'npc-plan' | 'npc-move' | 'player' | 'npc-attack'`.
+Three properties follow from tracking this in state rather than beside it:
 
-Three properties fall out of putting the plan in state rather than beside it:
-
-1. **The bench's transport strip reverses planning and execution alike**, for
-   free. Frames are full states, so rewinding into `npc-plan` restores a
-   half-authored plan and the designer can choose differently — the behaviour
-   asked for, with no extra machinery.
-2. **Double-acting becomes structurally impossible** rather than checked. One
-   entry per unit is a shape constraint, not a guard that can be forgotten.
-   See §7 for the defect this closes.
+1. **The bench's transport strip reverses round progress for free.** Frames are
+   full states, so rewinding into a half-planned enemy phase restores exactly
+   who had been planned, and the designer can choose differently.
+2. **Planning a unit twice becomes unrepresentable**, not merely checked — see
+   §7.
 3. **The agent cannot desynchronise it**, because there is no second copy.
 
 ---
 
-## 4. The two APIs
+## 4. The API
 
-### Planning — `npc-plan` phase
-
-Three authors, one entry shape, all validated identically.
+### Planning — during `npc-move`
 
 | Operation | Call | Who chooses |
 |---|---|---|
-| AI plans the whole side | `planNpcTurn(state)` | Engine |
-| AI plans one named unit | `planNpcUnit(state, unitId)` | Engine, for that unit |
-| Designer authors an entry | `setNpcPlanEntry(state, entry)` | Designer |
-| Designer sets turn order | `reorderNpcPlan(state, unitIds)` | Designer |
-| Freeze and begin executing | `commitNpcPlan(state)` | — |
+| Designer plans one enemy | `commitNpcTurn(state, unitId, move, telegraph?)` | Designer |
+| AI plans one named enemy | `advanceNpc(state, unitId)` | Engine, for that unit |
+| AI plans the next unplanned enemy | `advance(state)` | Engine |
+| AI plans all remaining | `advance` until the phase transitions | Engine |
 
-`commitNpcPlan` is where completeness is enforced: every living NPC has exactly
-one entry, every entry is legal from that unit's current position, and every
-telegraph is legal from that unit's *post-move* position. It refuses with a
-plain-English reason per §9.4 of the action-surface plan, and it is the only way
-to leave `npc-plan`.
+All of them execute the move and lock the telegraph in one step, because that is
+what planning an enemy *is*. All validate identically: the move must be legal
+from the unit's current position, the telegraph legal from its **post-move**
+position, and the unit must not already be in `npcPlannedThisRound`.
 
-`planNpcUnit` plans against **current** state, which is what makes mixed
-authorship compose: if the designer has planned enemy 2 into a doorway, asking
-the AI to plan enemy 1 gets a plan that accounts for it.
+`stay` is always a legal move, so "every enemy holds" needs no special case.
 
-`stay` is always a legal entry, so "every enemy holds" needs no special case.
+There is no reorder operation. **Turn order is the order enemies are planned
+in** — choosing who to plan next *is* choosing the order.
+
+`advance` with every enemy planned performs the **phase transition** to
+`player`, and refuses to transition while any living enemy is unplanned. A
+skipped enemy is always an error, never an accident.
 
 #### The per-unit planner
 
-`computeNpcTurns` plans the whole side in one pass, threading a mutating
-`workingUnits` so each NPC accounts for where earlier ones moved
-(`npc.ts:153-215`). `planNpcUnit` needs one unit planned in isolation, so the
-per-unit body is extracted and `computeNpcTurns` becomes a fold over it. This is
-a decomposition, not a rewrite: the loop body is already `continue`-terminated
-per unit, and the shared setup (`towerImmune`, `towerPos`, `npcFilter`) lifts
-into a context argument. `replanIds` (`npc.ts:137-151`) is existing precedent
-for planning a subset.
+`planNpcUnit(state, unitId)` — what the AI would choose for one unit, against
+current state, as a pure query. `computeNpcTurns` refolds onto it. This is a
+decomposition, not a rewrite: the loop body is already `continue`-terminated per
+unit, and the shared setup (`towerImmune`, `towerPos`, `npcFilter`) lifts into a
+context argument. `replanIds` (`npc.ts:137-151`) is existing precedent for
+planning a subset.
 
-### Execution — `npc-move` and `npc-attack` phases
+### Execution — during `npc-attack`
 
 ```ts
 advance(state): { ok: true; state; step: ExecutedStep } | { ok: false; reason }
 ```
 
-One entry point, and **it takes no unit id**. The plan already fixed the order,
-so a host cannot execute out of order — it can only decide *when* the next step
-happens. During `npc-move` it executes the next unexecuted entry's move; during
-`npc-attack` it resolves the next unresolved telegraph; when the current phase's
-work is done it performs the phase transition.
+**It takes no unit id.** The plan already fixed the order, so a host cannot
+resolve out of order — it can only decide *when* the next resolution happens.
+`advance` resolves the next unresolved entry of `npcPlans`, then transitions and
+chains into the next round when the list is spent.
 
 `resolveNpcAction` stops being host-facing and becomes the raw applier `advance`
 calls. That demotion is what makes the enforcement real: today it is the public
 entry point and it checks nothing.
 
----
-
-## 5. The query layer
-
-Both hosts need to see what is coming before it happens — the bench to show the
-upcoming action while scrubbing, the game to plan animation.
+### Queries
 
 ```ts
 nextAction(state): NextStep | null
-  // What advance() will do next:
-  //   { kind: 'unit-move'; unitId; move }
-  //   { kind: 'telegraph'; unitId; attack }
-  //   { kind: 'phase-transition'; from: TurnPhase; to: TurnPhase }
+  //   { kind: 'plan-enemy'; unitId; suggested: NpcAction }   during npc-move
+  //   { kind: 'telegraph';  unitId; attack }                 during npc-attack
+  //   { kind: 'phase-transition'; from; to }
 
-unplannedNpcs(state): string[]      // living NPCs with no entry yet
-plannedEntry(state, unitId): NpcPlanEntry | null
+unplannedNpcs(state): string[]
+plannedTelegraph(state, unitId): NpcAttackPlan | null
 ```
 
-Because the plan is stored, `nextAction` is a **pure read of the next
-unexecuted entry** — not a re-derivation that might disagree with `advance`.
-That is a real simplification over predicting an AI decision, and it is worth
-protecting: if `nextAction` ever has to *compute* an answer rather than read
-one, the plan has drifted out of state and the design has been lost.
-
-The discipline here is the one `preview` already follows —
-`actions.ts:259-266` records why hand-written previews are dangerous: they are
-exactly how the game's attack animations drifted from `attackFootprint` and
-began lying about an edited definition.
+During `npc-attack`, `nextAction` is a **pure read of the next unresolved
+telegraph** — not a re-derivation that might disagree with `advance`. Protect
+that: if it ever has to *compute* the answer, the plan has drifted out of state
+and the design has been lost. The discipline is the one `preview` already
+follows, and `actions.ts:259-266` records why hand-written previews are
+dangerous — they are how the game's attack animations drifted from
+`attackFootprint` and began lying about an edited definition.
 
 ---
 
-## 6. The phases
+## 5. Refusals a host must surface
+
+Every one returns `{ ok: false, reason }` in plain English, per §9.4 of the
+action-surface plan. Hosts display the sentence; they do not pre-filter.
+
+| Attempt | Refused because |
+|---|---|
+| Plan an enemy already planned this round | Its turn is spent |
+| Plan a move outside its range, or through a blocked path | Illegal move |
+| Lock a telegraph not reachable from its post-move position | Illegal attack |
+| Leave `npc-move` with an enemy unplanned | The round is incomplete |
+| Resolve a telegraph out of planned order | Not the engine's next step |
+| Act with a PC outside the `player` phase | Not the player's turn (phase 5) |
+
+---
+
+## 6. The one rule the bench breaks: amending a locked telegraph
+
+In the game a telegraph is locked once planned — that is the round's core
+tension, and the player has no way to change it. **The bench designer does.**
+
+The need is real: noticing a bad enemy attack plan halfway through the PC turn
+should not cost a rewind back through the entire turn. The transport strip
+exists to remove exactly that friction.
+
+And the amendment is **retroactive**. Per the requirement: the change alters the
+plan *and* the outcome, so that on replay it reads as though the designer had
+planned it correctly from the start. There is no "designer changed their mind"
+event in the history.
+
+### Why this is safe
+
+**Nothing reads `npcPlans` between lock and resolution.** Verified: no reads in
+`actions.ts`, `pc.ts`, or `pathfinding.ts`; the only engine read is
+`npc.ts:139`, the `replanIds` path, which *preserves* prior telegraphs rather
+than consuming them. A telegraph is display-only until `npc-attack` walks it.
+
+So rewriting one across the intervening frames leaves every other piece of state
+consistent — there is no downstream value derived from it to invalidate. There
+is precedent, too: `applyDefChange` already mutates `npcPlans` mid-player-phase
+when a definition changes, attack-only, movement untouched.
+
+What it does *not* stay consistent with is the designer's own PC decisions,
+which were made while looking at the old telegraph. That is a semantic wrinkle,
+not a correctness one, and it is the price of the feature being retroactive
+rather than an event.
+
+### The two halves
+
+1. **Engine — phase 2.** `amendTelegraph(state, unitId, tile)`, validated legal
+   from the unit's post-move position, sharing validation with `commitNpcTurn`.
+   Refuses on a dead unit, an unplanned unit, or a call outside `player`.
+2. **Bench timeline — phase 3.** The retroactive rewrite: replace that unit's
+   entry in `npcPlans` across every frame from the planning point to the
+   cursor, so a replay shows the amended telegraph from the moment it locked.
+   A slice-map over frames, bench-only, no engine involvement.
+
+### Semantics to write into the spec
+
+- Rewind to **before** this round's planning and re-plan → the amendment is
+  gone. It belonged to a plan that no longer exists.
+- Rewind to any frame **at or after** the lock → the amended telegraph shows.
+  This is what "looks like it was planned correctly initially" means.
+- **The unit died since planning** → refuse. There is no telegraph to amend.
+- **Amending never un-executes the move.** Movement stays immutable; this
+  changes the attack only, exactly as `applyDefChange` does.
+
+### Build it now, not deferred
+
+The engine half is small and shares validation with work already in phase 2. The
+timeline half is a slice-map. Deferring it ships a planning model whose only
+escape hatch is rewinding through the whole PC turn — the friction the transport
+strip was built to remove — and retrofitting retroactive semantics onto a
+timeline is much more expensive than specifying them once, now.
+
+---
+
+## 7. The double-act defect
+
+`computeNpcTurns` does not read `movedThisTurn` or `attackedThisTurn` — the only
+occurrences in `npc.ts` (304-305, 361-362) are resets, not reads. So today:
+hand-drive an enemy through the validated path, which records its movement, then
+run the AI, and the AI plans a fresh full move for that same unit. It acts twice
+in one round.
+
+This follows from reading the code; it has **not been reproduced by running
+it**. Reproduce it first, then keep the reproduction as a regression test.
+
+Worth noting *why* it disappears: not because phase 2 adds a check, but because
+planning is the single gate every author passes through and
+`npcPlannedThisRound` is checked there. A unit whose turn is spent cannot be
+planned again by anyone. The regression test proves the gate holds rather than
+guarding a condition.
+
+---
+
+## 8. The phases
 
 Five changes. Every one leaves both hosts working — no phase requires the other
 repo to land first to stay green.
@@ -236,8 +314,8 @@ attacks at 559, then stores those same plans as `npcPlans` at 562 — and
 `BoardView.tsx:156` draws a red X on each target tile. The designer sees
 "incoming attack" markers for attacks that already landed.
 
-- Split `runEnemyAi` into **run enemy moves (telegraph attacks)** and **resolve
-  telegraphs**, with the designer acting in between.
+- Split `runEnemyAi` into **plan the enemy turn (moves execute, attacks lock)**
+  and **resolve telegraphs**, with the designer acting in between.
 - Two controls where there was one; two frames on the transport strip where
   there was one, so the telegraph window is a scrubbable interval.
 
@@ -246,40 +324,41 @@ misleading overlay is live today and phase 3 is gated on phase 2.
 
 ### Phase 2 — `dungeon-turn-sequencer` (track-web)
 
-**The engine gains the plan and the round. Purely additive — no host touched,
-no behaviour change.**
+**The engine gains the round. Purely additive — no host touched, no behaviour
+change, no `TurnPhase` change.**
 
-- `npcTurnPlan`, `npcMovesExecuted`, `npcPlansResolved` in `GameState`; the
-  `'npc-plan'` phase added to `TurnPhase` (§3).
+- `npcPlannedThisRound` and `npcPlansResolved` in `GameState` (§3).
 - `planNpcUnit` extracted; `computeNpcTurns` refolded onto it (§4).
-- Planning API: `planNpcTurn`, `planNpcUnit`, `setNpcPlanEntry`,
-  `reorderNpcPlan`, `commitNpcPlan` with completeness validation.
-- Execution API: `advance`.
-- Query API: `nextAction`, `unplannedNpcs`, `plannedEntry`.
+- Planning: `commitNpcTurn`, `advanceNpc`, and `advance`'s `npc-move` behaviour,
+  with the completeness rule on the transition to `player`.
+- Execution: `advance`'s `npc-attack` behaviour, in `npcPlans` order.
+- Queries: `nextAction`, `unplannedNpcs`, `plannedTelegraph`.
+- `amendTelegraph` (§6), validated.
 - `endRound` stops setting `phase: 'player'` for a host to immediately overwrite
   with `'npc-move'` — the transient lie finding 5 flagged.
-- **Tests, including the double-act regression** — see §7.
+- Every refusal in §5, each with a test; plus the double-act regression (§7).
 
 Lands and sits stable while two hosts migrate against it, exactly as
-`dungeon-engine-action-surface` did. The new phase is unreachable until a host
-drives the sequencer, so neither host breaks in the interval.
+`dungeon-engine-action-surface` did.
 
 ### Phase 3 — `dungeon-bench-sequencer-adoption` (harness)
 
-**The bench adopts, becomes phase-aware, and gains a planning mode.**
+**The bench adopts and becomes phase-aware.**
 
 The bench currently pins `phase: 'player'` at construction
 (`bench-store.ts:202`) and never leaves it. Real phases arrive here, and with
-them the `npc-plan` window the designer authors in — the largest piece of this
-change, and the one with no counterpart in the game.
+them the designer's planning pass — the largest piece of this change and the one
+with no counterpart in the game.
 
-- **Planning mode UI** for `npc-plan`: per-enemy intent, turn order, and the
-  provenance of each entry (designer-authored vs AI-filled).
-- **Plan this enemy by hand** — `setNpcPlanEntry`.
-- **Run AI for this enemy** — `planNpcUnit`.
-- **Run AI for all remaining** — `planNpcUnit` across `unplannedNpcs`.
-- **Begin the round** — `commitNpcPlan`, with refusals shown verbatim.
-- Execution driven by `advance`; phase 1's split re-expressed on the engine's
+- **Planning UI** for `npc-move`: per-enemy move and attack intent, planned one
+  enemy at a time with the board updating as each move executes, showing which
+  enemies are still unplanned and who authored each plan.
+- **Plan this enemy by hand** — `commitNpcTurn`.
+- **Run AI for this enemy** — `advanceNpc`.
+- **Run AI for all remaining** — `advance` until the phase transitions.
+- **Amend a locked telegraph** during the player phase, plus the retroactive
+  frame rewrite and its semantics (§6).
+- Resolution driven by `advance`; phase 1's split re-expressed on the engine's
   phases rather than the bench's own sequencing.
 - **Upcoming-action display** from `nextAction`, shown while scrubbing.
 - Agent tools for each, 1:1 over the engine calls, per the standing rule that no
@@ -299,15 +378,12 @@ recursions driven by `animateNpcAction` callbacks. The recursion stays — it is
 pacing, which is the host's job. What changes is that each step asks the engine
 what to do instead of walking a host-held array.
 
-- Round start becomes `planNpcTurn` → `commitNpcPlan`, passing through
-  `npc-plan` in a single tick.
 - `step(idx)` over a local `moves` array → `advance`, driven from the animation
-  completion callback.
+  completion callback, through both `npc-move` and `npc-attack`.
 - `nextAction` feeds animation planning, so the scene knows what is coming
   without re-deriving it.
-- The `replanIds` path (`applyDefChange`) is re-expressed as amending the
-  `telegraph` field of specific plan entries, leaving executed moves alone —
-  which is what it already does, now said in the plan's own terms.
+- The `replanIds` path (`applyDefChange`) is re-expressed in terms of
+  `amendTelegraph`, which is the same operation it already performs.
 - Round chaining (`endRound` → `runNpcMovePhase`) becomes an engine transition.
 
 The riskiest phase, deliberately last among the adoptions, with the shape
@@ -325,7 +401,7 @@ them.
   `availableActions` currently never reads `state.phase`.
 - **`resolveNpcAction` demoted** to package-internal, or exported only as the
   raw applier with `advance` named as its sole intended caller.
-- Confirm every refusal path has a plain-English reason and a test.
+- Confirm every refusal path in §5 has a plain-English reason and a test.
 
 **This phase is what makes the work enforcement rather than convention.** Phase
 1 will feel like it fixed the visible problem; phases 2-5 are what stop it
@@ -333,26 +409,7 @@ recurring in a third host.
 
 ---
 
-## 7. The double-act defect
-
-`computeNpcTurns` does not read `movedThisTurn` or `attackedThisTurn` — the only
-occurrences in `npc.ts` (304-305, 361-362) are resets, not reads. So today:
-hand-drive an enemy through the validated path, which records its movement, then
-run the AI, and the AI plans a fresh full move for that same unit. It acts twice
-in one round.
-
-This follows from reading the code; it has **not been reproduced by running
-it**. Reproduce it first, then keep the reproduction as a regression test.
-
-Worth noting *why* it disappears: not because phase 2 adds a check, but because
-one-entry-per-unit is a shape constraint on `npcTurnPlan`. There is no longer a
-representable state in which a unit acts twice. That is the better kind of fix,
-and the regression test exists to prove the shape holds rather than to guard a
-condition.
-
----
-
-## 8. Explicitly out of scope
+## 9. Explicitly out of scope
 
 - **Reactions and interrupts.** `turn-machines/expansion.md:260-270` calls
   reactions "the one part of this folder that touches the round loop" and
@@ -362,12 +419,13 @@ condition.
 - **Bench setup** — placement, HP setting, board generation stay direct state
   editing per §9.2.
 - **Instance-scoping the engine** — still deferred until multiple boards.
-- **Designer authoring of PC turns.** PCs are played, not planned; the plan
-  structure here covers the enemy side only, as the AI's does today.
+- **Designer authoring of PC turns.** PCs are played, not planned.
+- **Amending an executed move.** Movement is immutable once planned; only the
+  telegraph is amendable (§6).
 
 ---
 
-## 9. Relationship to phase 5 of the rebuild
+## 10. Relationship to phase 5 of the rebuild
 
 This was originally deferred partly on the grounds that it was "the finding most
 likely to be reshaped by the turn-machine design." That reasoning does not
@@ -383,12 +441,11 @@ So the turn machines depend on this being well-defined rather than reshaping it.
 If `round_start` and `round_end` stay host-defined and the two hosts disagree,
 phase 5's machines inherit the divergence instead of resolving it.
 
-There is a second, stronger connection. A turn machine's output *is* a plan
-entry: the machine decides what a unit intends this round, and the engine
-executes it. `npcTurnPlan` is therefore the seam the machines plug into —
-`planNpcUnit` becomes "ask the machine" instead of "ask the hand-written AI,"
-and nothing downstream changes. Building it now is not a detour from phase 5;
-it is the interface phase 5 needs.
+There is a second, stronger connection. A turn machine decides what a unit does
+on its turn — which is exactly what `planNpcUnit` answers. Phase 5 replaces the
+hand-written planner behind that one function and nothing downstream changes.
+Building the sequencer now is not a detour from phase 5; it is the seam phase 5
+plugs into.
 
 **This work should therefore land before the turn-machine review, not after.**
 The deferral rationale in [`phase-plan.md`](phase-plan.md) and
