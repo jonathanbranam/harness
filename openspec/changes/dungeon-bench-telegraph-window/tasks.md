@@ -76,13 +76,16 @@ attacks and reported success.
       restores the pending-telegraph frame: telegraph count 1, label
       `long-range-2 → (5, 4)`, and the PC renders 3 HP pips against 2 in the
       frame after. Stepping forward returns to the damaged state.
-- [ ] 6.3 **BLOCKED — no model credentials.** The prompt reached the agent
-      (WebSocket connected, message in the transcript) but no reply came back
-      after ~95s with nothing logged server-side. `~/.pi/agent/auth.json` is
-      empty, so `ModelRuntime.create()` has no usable credential. This is
-      environmental, not a defect in this change.
+- [x] 6.3 Verified 2026-08-20. The agent called `dungeon_plan_enemy_turn` →
+      `dungeon_board_state` → `dungeon_resolve_telegraphs` → `dungeon_board_state`
+      and reported: "One attack telegraph: long-range-2 → tile (5, 4). Tile
+      (5, 4) is occupied by your PC melee-1 (2 HP). Nothing had been damaged yet
+      — telegraphs were still pending," then "melee-1 took 1 damage: 2 HP → 1 HP.
+      The telegraph list is now empty." It never reached for the old
+      `dungeon_run_enemy_ai`.
 
-      Verified statically instead: `dungeon_plan_enemy_turn` and
-      `dungeon_resolve_telegraphs` are both in the tool allowlist and defined
-      with accurate descriptions, and `dungeon_run_enemy_ai` is gone. Re-run this
-      task once `pi login` is done.
+      Note for whoever runs this next: the first reply took over two minutes.
+      An earlier attempt was abandoned at ~95s and wrongly written up as a
+      credentials failure — the harness agent does not use `~/.pi/agent/auth.json`
+      and gets its key from the environment. Wait longer before concluding
+      anything is broken.
