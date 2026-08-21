@@ -620,6 +620,13 @@ guard is what breaks bench setup and change 2 is what gives it a legal home.
 **4. Waves and flight (engine + harness).** §8.5. Purely additive, reaches one
 phase, and safe to do last.
 
+**Between 3 and 4, a setup-usability change.** Driving the bench by hand as soon
+as change 2 landed turned up an interaction model that fights the designer —
+every click places, nothing drags, and selecting a piece costs you your palette.
+It is written up in [`usability.md`](usability.md), which is a living document
+the designer appends to; it becomes an OpenSpec change after change 3, because
+the phase guard changes what a selected unit shows during placement.
+
 Then, later and one at a time, any further bench exception (§8.6 first, if it is
 still wanted after bookmarks are reconsidered).
 
