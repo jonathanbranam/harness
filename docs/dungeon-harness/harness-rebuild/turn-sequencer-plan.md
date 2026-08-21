@@ -480,8 +480,14 @@ what to do instead of walking a host-held array.
   completion callback, through both `npc-move` and `npc-attack`.
 - `nextAction` feeds animation planning, so the scene knows what is coming
   without re-deriving it.
-- The `replanIds` path (`applyDefChange`) is re-expressed in terms of
-  `amendTelegraph`, which is the same operation it already performs.
+- The `replanIds` path (`applyDefChange`) **stays as it is.** An earlier draft
+  said to re-express it via `amendTelegraph`; that is wrong, and would not even
+  run — `amendTelegraph` is bench-gated and the game is in `'game'` mode. The two
+  are different operations that happen to touch the same field: `amendTelegraph`
+  is *a person retargeting a locked attack*, which the game must never allow,
+  while `applyDefChange`'s replan is *a definition change invalidating a
+  telegraph the AI derived from it*, which both hosts must do. Corrected
+  2026-08-20.
 - Round chaining (`endRound` → `runNpcMovePhase`) becomes an engine transition.
 
 The riskiest phase, deliberately last among the adoptions, with the shape
