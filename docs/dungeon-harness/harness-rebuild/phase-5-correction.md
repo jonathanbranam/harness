@@ -43,7 +43,7 @@ Both trees are clean and committed.
 
 | Change | Repo | State |
 |---|---|---|
-| `dungeon-round-transitions` | track-web | **Step 1 — built, validated `--strict`, NOT archived** (awaiting review) |
+| `dungeon-round-transitions` | track-web | ✅ **Step 1 — archived 2026-08-21** after the developer verified gameplay by hand |
 | `dungeon-sequencer-guards` | track-web | **Built on the wrong premise. NOT archived.** Amended by step 3 — do not archive it as-is |
 | `add-ui-layout-recording`, `restore-live-state-on-replay-exit` | harness | Paused introspect proposals, unrelated |
 | `dungeon-tactics-sprite-rendering`, `food`, `add-from-tmdb-search`, `watch-ratings-filter-search-prototype` | track-web | Unrelated, unstarted |
@@ -580,9 +580,10 @@ disruption. That is a question for the pass, not a recommendation here.
 This is now materially larger than "correct phase 5" — §8.2 turns it into a real
 engine setup API. It should be **four changes, not one**:
 
-**1. Phase ownership (engine, both hosts).** ✅ **Done 2026-08-21** —
-`dungeon-round-transitions` (track-web `c6e3999`, harness `2c7d161`; validated
-`--strict`, **not archived**, awaiting review). `startScenario` and
+**1. Phase ownership (engine, both hosts).** ✅ **Done and archived 2026-08-21** —
+`dungeon-round-transitions` (track-web `c6e3999`, harness `2c7d161`; archived as
+`2026-08-21-dungeon-round-transitions` after the developer played the game by
+hand and confirmed it). `startScenario` and
 `endPlayerTurn` moved into the engine (§8.7). No behaviour change — every
 transition already happened; this only moved who performs it. **Type-level
 enforcement was explicitly not part of it** (§8.7.1).

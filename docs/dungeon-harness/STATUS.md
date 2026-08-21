@@ -30,8 +30,8 @@
 >   further bench exceptions get argued back one at a time.
 >   [`harness-rebuild/phase-5-correction.md`](harness-rebuild/phase-5-correction.md)
 >   is the plan of record for fixing it — **four changes, of which step 1 (the
->   engine owning every phase transition) landed 2026-08-21.** Step 2, the bench
->   setup surface, is next.
+>   engine owning every phase transition) landed and was archived 2026-08-21.**
+>   Step 2, the bench setup surface, is next.
 > - **Then: rebuild phase 5**, the scoped turn machine — *not started,
 >   and its rules layer is still unapproved.*
 
