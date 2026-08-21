@@ -21,24 +21,23 @@
 //    even though both sides share the movement API.
 
 import {
+  advance,
   applyLoaded,
   applyMap,
   availableActions,
   boardCells,
   clampDef,
   commitAction,
-  computeNpcTurns,
-  endRound,
   getAllDefs,
   getDef,
   getMaxHp,
   gridCols,
   gridRows,
   hasAttacked,
+  nextAction,
   preview,
   reconcileHp,
   remainingMove,
-  resolveNpcAction,
   threatTiles,
   validMoveDests,
   type ActionId,
@@ -47,9 +46,11 @@ import {
   type Cell,
   type ContentMap,
   type GameState,
-  type NpcAttackPlan,
+  type NpcAction,
   type NpcType,
   type PcType,
+  type SequencerStep,
+  type TurnPhase,
   type Unit,
   type UnitDef,
 } from '@repo/dungeon-engine'
@@ -107,7 +108,19 @@ export interface BenchState {
   selection: SelectionView | null
   /** Reach and threat for both sides, recomputed from the engine on every read. */
   fields: BoardFields
-  /** NPC attack telegraphs from the last AI run, as the game would show them. */
+  /** Which phase the engine's round is in right now. Moved through by the
+   *  engine, not the bench — see `step`/`planEnemyTurn`/`resolveTelegraphs`. */
+  phase: TurnPhase
+  /**
+   * What the engine's round will do next, straight from `nextAction` — never
+   * derived here. `null` outside `npc-move`/`npc-attack`, where there is no
+   * round step to report (the player phase is a designer's decision, not a
+   * step the engine takes).
+   */
+  nextStep: SequencerStep | null
+  /** NPC attack telegraphs still pending resolution this `npc-attack` phase —
+   *  filtered against `npcPlansResolved`, since the engine keeps a resolved
+   *  entry in `npcPlans` until the round ends rather than removing it. */
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
@@ -191,21 +204,54 @@ function nextSeqFrom(units: Unit[]): number {
   return highest
 }
 
+/**
+ * A bookmark saved before this change carries a whole `GameState` written
+ * verbatim by `saveBookmark`, from before `npcPlannedThisRound`/
+ * `npcPlansResolved` existed and before the bench moved through `phase` at
+ * all — every bookmark on disk today is one of these, so this is the normal
+ * load path, not an edge case (design.md, "Bookmarks saved before this change
+ * must be normalised on load"). `advance` reads both round-progress fields
+ * unconditionally; loading one of these verbatim and pressing Step would
+ * throw on `undefined.includes`.
+ *
+ * A bookmark saved *by* this change already carries real values for all
+ * three, which round-trip through unchanged — this only fills gaps, never
+ * overrides what is actually there.
+ */
+function normalizeLoadedState(state: GameState): GameState {
+  return {
+    ...state,
+    phase: state.phase ?? 'player',
+    npcPlannedThisRound: state.npcPlannedThisRound ?? [],
+    npcPlansResolved: state.npcPlansResolved ?? [],
+  }
+}
+
 function kindOf(unitType: UnitType): 'pc' | 'npc' {
   return (PC_TYPES as string[]).includes(unitType) ? 'pc' : 'npc'
 }
 
+/**
+ * A new board's state — where the engine's own round starts. `endRound`
+ * (called internally by `advance` at the `npc-attack → npc-move` transition)
+ * moves every round, including the first, into `npc-move`: see its comment in
+ * `npc.ts` ("The old `phase: 'player'` here was never observed"). Starting a
+ * fresh bench board anywhere else would make its first round disagree with
+ * every later one.
+ */
 function emptyState(cells: Cell[][]): GameState {
   return {
     cells,
     units: [],
     spawners: [],
-    phase: 'player',
+    phase: 'npc-move',
     planningPhase: 'none',
     selectedUnitId: null,
     plans: {},
     planOrder: [],
     npcPlans: [],
+    npcPlannedThisRound: [],
+    npcPlansResolved: [],
     undoStack: [],
     movedThisTurn: {},
     attackedThisTurn: [],
@@ -294,7 +340,11 @@ export class BenchStore {
       units: this.state.units,
       selection: this.selectionView(),
       fields: this.computeFields(),
-      telegraphs: this.state.npcPlans.map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
+      phase: this.state.phase,
+      nextStep: nextAction(this.state),
+      telegraphs: this.state.npcPlans
+        .filter((p) => !this.state.npcPlansResolved.includes(p.unitId))
+        .map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
       defs: getAllDefs() as Record<UnitType, UnitDef>,
       canUndo: this.cursor > 0,
       canRedo: this.cursor < this.frames.length - 1,
@@ -548,69 +598,101 @@ export class BenchStore {
   }
 
   /**
+   * Perform exactly one step of the engine's round — whatever `nextAction`
+   * says comes next — as its own timeline frame. The granularity the
+   * scrubbable enemy-phase interval is built on: `planEnemyTurn` and
+   * `resolveTelegraphs` are this, looped.
+   *
+   * Refuses whenever the engine does — most commonly outside `npc-move` /
+   * `npc-attack`, since ending the player's turn is the bench's own decision
+   * (`endPlayerTurn`), not a step the engine takes. The refusal is the
+   * engine's own reason, forwarded rather than reworded.
+   */
+  step(): BenchResult {
+    this.ensureActive()
+    const result = advance(this.state)
+    if (!result.ok) return fail(result.reason)
+    const message = describeStep(result.step)
+    this.commit(result.state, message)
+    return ok(message)
+  }
+
+  /**
    * Hand the enemy side to the game's own AI for the **planning** half of its
    * turn, for comparison with driving it by hand. Every enemy's move resolves
    * immediately; its attack is chosen and locked as a telegraph, not resolved —
    * `resolveTelegraphs` is the other half. This is the shipped game's own split
-   * (`runNpcMovePhase` / `runNpcAttackPhase`), restored here so the board shows
-   * what is coming rather than what already happened.
+   * (`runNpcMovePhase` / `runNpcAttackPhase`), now the engine's `npc-move`
+   * phase — restored here so the board shows what is coming rather than what
+   * already happened.
    *
-   * Refused while a previous plan's telegraphs are still pending: overwriting
-   * them would silently discard locked attacks the designer is looking at.
+   * `advance` is called once per enemy (and once more for the phase
+   * transition out), each its own frame — never collapsed into one, or
+   * stepping back into the middle of a planned turn would have nowhere to
+   * land (design.md, "One frame per engine step").
    */
   planEnemyTurn(): BenchResult {
-    this.ensureActive()
-    if (this.state.npcPlans.length > 0) {
-      return fail(`Pending telegraphs must resolve first: ${describeTelegraphs(this.state.npcPlans)}`)
-    }
-    if (!this.state.units.some((u) => u.kind === 'npc')) return fail('No NPCs on the board')
-
-    const { moves, attackPlans } = computeNpcTurns(this.state)
-    let next = this.state
-    for (const move of moves) next = resolveNpcAction(next, move)
-
-    const summary = `Enemy turn planned: ${moves.length} move(s). ${describeTelegraphs(attackPlans)}`
-    this.commit({ ...next, npcPlans: attackPlans }, summary)
-    return ok(summary)
+    return this.advanceThroughPhase('npc-move', 'enemy turn planning')
   }
 
   /**
-   * Play out the telegraphs a planned enemy turn locked, in the order they were
-   * planned — the other half of `planEnemyTurn`. A telegraph whose owner died
-   * inside the window is skipped rather than resolved, matching the shipped
-   * game's `runNpcAttackPhase`: killing the enemy really does stop the attack.
+   * Play out the telegraphs a planned enemy turn locked, in the order they
+   * were planned — the other half of `planEnemyTurn`, now the engine's
+   * `npc-attack` phase. A telegraph whose owner died inside the window is
+   * skipped rather than resolved (the engine's `skip-telegraph` step),
+   * matching the shipped game's `runNpcAttackPhase`.
    */
   resolveTelegraphs(): BenchResult {
-    this.ensureActive()
-    if (this.state.npcPlans.length === 0) return fail('Nothing to resolve — no enemy turn has been planned.')
-
-    const before = this.state
-    let next = this.state
-    for (const plan of this.state.npcPlans) {
-      if (!next.units.some((u) => u.id === plan.unitId)) continue
-      next = resolveNpcAction(next, plan)
-    }
-
-    this.commit({ ...next, npcPlans: [] }, `Telegraphs resolved. ${describeChanges(before, next)}`)
-    return ok(`Telegraphs resolved. ${describeChanges(before, next)}`)
+    return this.advanceThroughPhase('npc-attack', 'telegraph resolution')
   }
 
   /**
-   * Refuses while telegraphs are pending. The engine's `endRound` clears
-   * `npcPlans`, so ending a round mid-window would silently discard locked
-   * attacks — the designer would watch telegraphs vanish having never landed,
-   * which is the same quiet wrongness the plan/resolve split exists to remove.
-   * Stepping back is how a plan gets abandoned deliberately.
+   * Loop `step`'s single `advance` call while the round is still in `phase`,
+   * committing one frame per call — the composite `planEnemyTurn` and
+   * `resolveTelegraphs` are built from, per design.md's "`advance` is exposed
+   * both single-step and composite".
+   *
+   * Refuses up front, without calling the engine, if the round is not
+   * currently in `phase` at all: `advance` has no notion of which composite
+   * is asking, so calling it anyway would silently perform whatever *other*
+   * phase's step is next — planning an enemy under "Resolve telegraphs", say —
+   * rather than doing nothing. That refusal is the bench's own, not the
+   * engine's, because there is no engine call this forwards it from.
    */
-  endRound(): BenchResult {
+  private advanceThroughPhase(phase: TurnPhase, label: string): BenchResult {
     this.ensureActive()
-    if (this.state.npcPlans.length > 0) {
-      return fail(
-        `Pending telegraphs must resolve before the round ends: ${describeTelegraphs(this.state.npcPlans)}`,
-      )
+    if (this.state.phase !== phase) {
+      return fail(`Nothing to do for ${label} — the round's phase is "${this.state.phase}", not "${phase}".`)
     }
-    this.commit(endRound(this.state), 'Round ended — movement and attacks are available again.')
-    return ok('Round ended.')
+
+    let steps = 0
+    let message = ''
+    while (this.state.phase === phase) {
+      const result = advance(this.state)
+      if (!result.ok) return fail(result.reason)
+      steps++
+      message = describeStep(result.step)
+      this.commit(result.state, message)
+    }
+    return ok(`${label}: ${steps} step(s). ${message}`)
+  }
+
+  /**
+   * The one phase transition the bench performs itself rather than the
+   * engine: ending the player's turn is a decision, not a rule (design.md).
+   * Matches the shipped game's `handleConfirmEndTurn`
+   * (`DungeonTacticsGame.tsx:430`), which sets `phase: 'npc-attack'` directly.
+   *
+   * Refused outside the `player` phase — not an engine refusal (nothing here
+   * calls the engine), but the bench's own: this is the one transition it
+   * owns, so it is the one place it has to guard itself.
+   */
+  endPlayerTurn(): BenchResult {
+    if (this.state.phase !== 'player') {
+      return fail(`Can't end the player's turn from the "${this.state.phase}" phase.`)
+    }
+    this.commit({ ...this.state, phase: 'npc-attack' }, 'Player turn ended — enemy attacks are about to resolve.')
+    return ok('Player turn ended.')
   }
 
   // ─── The timeline ───────────────────────────────────────────────────────────
@@ -730,7 +812,7 @@ export class BenchStore {
     this.ensureActive()
     // Unit ids came from the saved state; keep new placements from colliding.
     this.unitSeq = nextSeqFrom(bookmark.state.units)
-    this.commit(bookmark.state, `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
+    this.commit(normalizeLoadedState(bookmark.state), `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
     return ok(`Loaded "${bookmark.name}".`)
   }
 
@@ -751,11 +833,45 @@ export class BenchStore {
   }
 }
 
-/** What a set of locked attack plans will do, phrased for the log — the
- *  telegraph half of the enemy turn, not what it has already done. */
-function describeTelegraphs(plans: NpcAttackPlan[]): string {
-  if (plans.length === 0) return 'No attacks telegraphed.'
-  return `${plans.length} attack(s) telegraphed: ${plans.map((p) => `${p.unitId} → (${p.targetCol}, ${p.targetRow})`).join(', ')}.`
+/** What one `NpcAction` did, phrased for `describeStep`. `attack` never
+ *  reaches here — the sequencer reports an enemy's attack as a separate
+ *  telegraph, not folded into its move — but the type carries it, so it is
+ *  covered rather than asserted away. */
+function describeNpcAction(action: NpcAction): string {
+  switch (action.kind) {
+    case 'move':
+      return `moved to (${action.toCol}, ${action.toRow})`
+    case 'stay':
+      return 'stayed in place'
+    case 'exit':
+      return 'exited the board'
+    case 'attack':
+      return `attacked (${action.targetCol}, ${action.targetRow})`
+  }
+}
+
+/**
+ * What one engine step did, phrased for the timeline label and the log — the
+ * text `step` and every composite's loop share, so scrubbing to a frame and
+ * reading the log agree about what happened there. Built from the engine's
+ * own `SequencerStep`, not a re-derivation of what advancing does.
+ */
+function describeStep(step: SequencerStep): string {
+  switch (step.kind) {
+    case 'plan-enemy': {
+      const move = describeNpcAction(step.action)
+      const telegraph = step.attackPlan
+        ? `, attack telegraphed at (${step.attackPlan.targetCol}, ${step.attackPlan.targetRow})`
+        : ', no attack'
+      return `${step.unitId} planned: ${move}${telegraph}.`
+    }
+    case 'resolve-telegraph':
+      return `${step.unitId}'s telegraphed attack resolved at (${step.attack.targetCol}, ${step.attack.targetRow}).`
+    case 'skip-telegraph':
+      return `${step.unitId}'s telegraphed attack was skipped — it didn't survive to resolve it.`
+    case 'phase-transition':
+      return `Phase: ${step.from} → ${step.to}.`
+  }
 }
 
 /**

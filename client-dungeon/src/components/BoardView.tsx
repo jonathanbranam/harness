@@ -154,12 +154,39 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
                   )}
 
                   {telegraphed.has(tileKey) && (
-                    <path
-                      d={`M ${x + 10} ${y + 10} L ${x + CELL_SIZE - 10} ${y + CELL_SIZE - 10} M ${x + CELL_SIZE - 10} ${y + 10} L ${x + 10} ${y + CELL_SIZE - 10}`}
-                      stroke="#b91c1c"
-                      strokeWidth={3}
-                      strokeLinecap="round"
-                    />
+                    // A telegraph has to read over any terrain or structure
+                    // fill *and* under a reach/threat field on the same tile
+                    // (both can paint the whole tile, up to 0.8 opacity) *and*
+                    // over the unit token standing on the threatened tile —
+                    // which, for an enemy telegraph, is usually exactly where
+                    // the PC it is aimed at stands. A single-color X (the
+                    // marker this replaces, `#b91c1c` — the same red as the
+                    // npc-threat hatch) loses all three fights at once: no
+                    // fixed color survives being drawn under an arbitrary
+                    // fill, and a token's solid disc simply covers a mark
+                    // centered on the tile.
+                    //
+                    // This is a halo ring instead: white behind near-black,
+                    // the two ends of the lightness scale, so at least one
+                    // band contrasts against any single fill color — the same
+                    // technique a map pin uses to stay legible over an
+                    // arbitrary basemap. Dashed to read as *pending*, not a
+                    // steady-state indicator like the solid reach/footprint
+                    // squares. Sized to sit just outside a unit token's own
+                    // radius (`CELL_SIZE / 2 - 6` = 18) so it rings the token
+                    // rather than disappearing under it.
+                    <g pointerEvents="none">
+                      <circle cx={x + CELL_SIZE / 2} cy={y + CELL_SIZE / 2} r={20} fill="none" stroke="#ffffff" strokeWidth={5.5} />
+                      <circle
+                        cx={x + CELL_SIZE / 2}
+                        cy={y + CELL_SIZE / 2}
+                        r={20}
+                        fill="none"
+                        stroke="#111827"
+                        strokeWidth={2.5}
+                        strokeDasharray="5 4"
+                      />
+                    </g>
                   )}
                 </g>
               )

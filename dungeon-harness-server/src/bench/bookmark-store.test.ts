@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -55,18 +55,58 @@ describe('saving and reloading a position', () => {
 
   it('saves mid-play state, spent movement and all', () => {
     const store = bench()
+    store.planEnemyTurn() // no NPCs: one step returns straight to `player`
     store.placeUnit('melee', 0, 0)
     store.select(store.getState().units[0].id)
     store.commitSelected('move', { col: 3, row: 0 })
     store.saveBookmark('Half moved')
 
     // Round end refreshes the budget; the bookmark should still hold the spent one.
-    store.endRound()
+    store.endPlayerTurn()
+    store.resolveTelegraphs() // nothing pending: one step chains into the next round
     expect(store.getState().selection!.remainingMove).toBe(4)
 
     store.loadBookmark('Half moved')
     store.select(store.getState().units[0].id)
     expect(store.getState().selection!.remainingMove).toBe(1)
+  })
+
+  // Task 3.2: every bookmark on disk predates this change and carries
+  // `phase: 'player'` (the pre-3a bench pinned it there for the whole
+  // session) but no `npcPlannedThisRound`/`npcPlansResolved` at all — those
+  // fields did not exist yet. `advance` reads them unconditionally once the
+  // round leaves `player`, so loading one and continuing to play is the case
+  // that would throw without `loadBookmark`'s normalisation.
+  it('loads a bookmark shaped like one saved before this change, and stepping the round past it does not throw', () => {
+    const store = bench()
+    store.placeUnit('melee', 1, 1)
+    store.placeUnit('short-range', 1, 0)
+    store.planEnemyTurn() // locks a real telegraph, landing in `player`
+    expect(store.getState().telegraphs.length).toBeGreaterThan(0)
+    store.saveBookmark('Legacy shape')
+
+    // Rewrite the file on disk to match what every bookmark saved before this
+    // change actually looks like: strip the two round-progress fields that
+    // did not exist yet, keeping everything else — including the pending
+    // telegraph in `npcPlans`, which is exactly what makes `advance` reach
+    // the missing field instead of short-circuiting past it.
+    const path = join(dir, 'legacy-shape.json')
+    const raw = JSON.parse(readFileSync(path, 'utf8'))
+    delete raw.state.npcPlannedThisRound
+    delete raw.state.npcPlansResolved
+    writeFileSync(path, JSON.stringify(raw), 'utf8')
+
+    const fresh = bench()
+    expect(fresh.loadBookmark('Legacy shape').ok).toBe(true)
+    expect(fresh.getState().phase).toBe('player')
+    expect(fresh.getState().telegraphs.length).toBeGreaterThan(0)
+
+    // Continuing to play from here is what reaches the un-normalised field:
+    // `endPlayerTurn` moves to `npc-attack`, and resolving reads
+    // `npcPlansResolved` inside `advance`.
+    expect(fresh.endPlayerTurn().ok).toBe(true)
+    expect(() => fresh.resolveTelegraphs()).not.toThrow()
+    expect(fresh.getState().telegraphs).toEqual([])
   })
 
   it('lists what is saved, newest first, and deletes on request', () => {

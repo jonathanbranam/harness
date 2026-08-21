@@ -1,4 +1,4 @@
-import { NPC_TYPES, PC_TYPES, type ActionId, type BenchIntent, type BenchState, type FieldToggles, type UnitType } from '../bench/types'
+import { NPC_TYPES, PC_TYPES, type ActionId, type BenchIntent, type BenchState, type FieldToggles, type SequencerStep, type UnitType } from '../bench/types'
 
 interface BenchControlsProps {
   state: BenchState | null
@@ -23,6 +23,30 @@ const FIELD_LABELS: { id: keyof FieldToggles; label: string; hint: string }[] = 
 
 const BUTTON = 'px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:hover:bg-transparent'
 const ACTIVE = 'px-2 py-1 text-xs rounded border border-indigo-500 bg-indigo-500 text-white'
+
+const PHASE_LABELS: Record<BenchState['phase'], string> = {
+  placement: 'placement',
+  player: 'player',
+  'npc-move': 'enemy planning',
+  'npc-attack': 'enemy resolution',
+}
+
+/** What the engine's round will do next, in plain words — straight from
+ *  `nextStep`, never re-derived from board state. `null` outside an enemy
+ *  phase, where there is no round step to report. */
+function describeNextStep(step: SequencerStep | null): string {
+  if (!step) return 'nothing — the round is not in an enemy phase'
+  switch (step.kind) {
+    case 'plan-enemy':
+      return `${step.unitId} will move${step.attackPlan ? ' and telegraph an attack' : ''}`
+    case 'resolve-telegraph':
+      return `${step.unitId}'s telegraph will resolve at (${step.attack.targetCol}, ${step.attack.targetRow})`
+    case 'skip-telegraph':
+      return `${step.unitId}'s telegraph will be skipped — it didn't survive`
+    case 'phase-transition':
+      return `phase will move from ${step.from} to ${step.to}`
+  }
+}
 
 /**
  * Direct manipulation for the bench: board setup, unit placement, and both sides'
@@ -75,39 +99,59 @@ export function BenchControls({
 
         <span className="w-px h-5 bg-gray-200 dark:bg-gray-800" />
 
-        {/* Two halves of one enemy turn, not two unrelated buttons: plan locks
-            each enemy's move and telegraphs its attack; resolve plays those
-            telegraphs out. The gap between them is the window the designer
-            acts in — Plan disables while a previous plan's telegraphs are
-            still pending, Resolve disables until there is something pending. */}
-        <span className="text-xs text-gray-500 dark:text-gray-400">Enemy turn:</span>
+        {/*
+          The round as the engine sequences it, not as the bench used to fake
+          it: `phase` and `nextStep` come straight from the engine (never
+          derived here), and each control is enabled only when the engine
+          would actually accept it — Plan during `npc-move`, End turn during
+          `player`, Resolve during `npc-attack`. Step performs exactly
+          `nextStep`, one engine call at a time; Plan/Resolve are it, looped
+          through a whole phase.
+        */}
+        <span className="text-xs text-gray-500 dark:text-gray-400">
+          Round: <strong>{state ? PHASE_LABELS[state.phase] : '—'}</strong>
+        </span>
         <button
           type="button"
           className={BUTTON}
-          disabled={!state || pendingTelegraphs}
-          title={pendingTelegraphs ? 'Resolve the pending telegraphs first' : "Let the game's AI plan the enemy turn"}
+          disabled={!state || state.nextStep === null}
+          title={state ? describeNextStep(state.nextStep) : undefined}
+          onClick={() => onIntent({ kind: 'step' })}
+        >
+          Step
+        </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={!state || state.phase !== 'npc-move'}
+          title={state?.phase === 'npc-move' ? "Let the game's AI plan the whole enemy turn" : 'Only available while the round awaits enemy movement'}
           onClick={() => onIntent({ kind: 'planEnemyTurn' })}
         >
-          Plan
+          Plan enemy turn
         </button>
         <button
           type="button"
           className={BUTTON}
-          disabled={!pendingTelegraphs}
-          title={pendingTelegraphs ? 'Play out the locked telegraphs' : 'Nothing pending — plan a turn first'}
+          disabled={!state || state.phase !== 'player'}
+          title={state?.phase === 'player' ? "End the player's turn and resolve enemy telegraphs" : 'Only available during the player phase'}
+          onClick={() => onIntent({ kind: 'endPlayerTurn' })}
+        >
+          End turn
+        </button>
+        <button
+          type="button"
+          className={BUTTON}
+          disabled={!state || state.phase !== 'npc-attack'}
+          title={state?.phase === 'npc-attack' ? 'Play out the locked telegraphs' : 'Only available while the round awaits telegraph resolution'}
           onClick={() => onIntent({ kind: 'resolveTelegraphs' })}
         >
-          Resolve{pendingTelegraphs ? ` (${state!.telegraphs.length})` : ''}
+          Resolve telegraphs{pendingTelegraphs ? ` (${state!.telegraphs.length})` : ''}
         </button>
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={pendingTelegraphs}
-          title={pendingTelegraphs ? 'Resolve the pending telegraphs first' : 'Refill movement and clear attacks'}
-          onClick={() => onIntent({ kind: 'endRound' })}
-        >
-          End round
-        </button>
+        {state && (
+          <span className="text-xs text-gray-500 dark:text-gray-400" title="What the round will do next, from the engine">
+            Next: {describeNextStep(state.nextStep)}
+          </span>
+        )}
       </div>
 
       {/* Reach and threat are the quantities this game makes continuously

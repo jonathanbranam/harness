@@ -52,7 +52,8 @@ single indivisible step.
 #### Scenario: No enemies on the board
 
 - **WHEN** an enemy turn is planned with no enemy units on the board
-- **THEN** the bench reports that there are no enemies and changes nothing
+- **THEN** the enemy phase completes with nothing to plan and the round moves on
+  to the player, exactly as it would once every enemy had been planned
 
 ### Requirement: A pending telegraph cannot be discarded without resolving
 
@@ -123,6 +124,17 @@ bench. The report SHALL be visible while stepping through the timeline.
 
 - **WHEN** the round has no next step available
 - **THEN** the bench reports that rather than showing a stale one
+
+### Requirement: A telegraph is reported only until it resolves
+
+The bench SHALL report a telegraph as pending only while it is still awaiting
+resolution. A telegraph that has resolved SHALL NOT be reported as pending, even
+while other telegraphs from the same round are still outstanding.
+
+#### Scenario: Partway through resolution
+
+- **WHEN** some of a round's telegraphs have resolved and others have not
+- **THEN** only the unresolved ones are reported as pending
 
 ### Requirement: A telegraph is legible on the board
 

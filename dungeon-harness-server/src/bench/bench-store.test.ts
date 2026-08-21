@@ -185,20 +185,25 @@ describe('playing by hand', () => {
     expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(3)
   })
 
-  // The engine's `endRound` clears `npcPlans`, so without this guard a designer
-  // could plan an enemy turn, end the round, and watch locked attacks vanish
-  // having never landed — with the bench reporting success.
-  it('refuses to end the round while telegraphs are pending', () => {
+  // `BenchStore.endRound` is gone (design.md, "`endRound` as a bench operation
+  // is retired"): the engine ends the round as the `npc-attack` phase
+  // transition, which only happens once every telegraph has resolved or been
+  // skipped. There is no longer any call that could discard a pending one —
+  // not a guard to test, a call that no longer exists to make.
+  it('has no way to end the round while telegraphs are pending — only to resolve or abandon them', () => {
     const bench = openBench()
     bench.placeUnit('melee', 4, 1)
     bench.placeUnit('short-range', 4, 0)
     bench.planEnemyTurn()
-
-    expect(bench.endRound()).toMatchObject({ ok: false })
     expect(bench.getState().telegraphs).toHaveLength(1)
 
+    bench.endPlayerTurn()
+    expect(bench.getState().phase).toBe('npc-attack')
+    expect(bench.getState().telegraphs).toHaveLength(1) // still pending — nothing skipped it
+
     bench.resolveTelegraphs()
-    expect(bench.endRound().ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().phase).toBe('npc-move') // the round only ends once it's resolved
   })
 
   it('locks a telegraph on planning and lands it on resolving — the original assertions, split across the window', () => {
@@ -210,6 +215,7 @@ describe('playing by hand', () => {
     expect(bench.getState().telegraphs).toEqual([{ unitId: expect.any(String), targetCol: 4, targetRow: 1 }])
     expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(3) // not yet landed
 
+    bench.endPlayerTurn()
     bench.resolveTelegraphs()
     expect(bench.getState().telegraphs).toEqual([])
     expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(2) // landed
@@ -227,6 +233,7 @@ describe('playing by hand', () => {
     bench.select(pc.id)
     expect(bench.commitSelected('move', { col: 1, row: 1 }).ok).toBe(true)
 
+    bench.endPlayerTurn()
     bench.resolveTelegraphs()
     expect(bench.getState().telegraphs).toEqual([])
     // The telegraph landed on (4, 1), which is now empty — the PC that left is
@@ -248,6 +255,7 @@ describe('playing by hand', () => {
     expect(bench.commitSelected('attack', { col: 4, row: 0 }).ok).toBe(true)
     expect(bench.getState().units.some((u) => u.kind === 'npc')).toBe(false)
 
+    bench.endPlayerTurn()
     bench.resolveTelegraphs()
     expect(bench.getState().telegraphs).toEqual([])
     expect(bench.getState().units.find((u) => u.kind === 'pc')!.hp).toBe(3) // the dead enemy's attack never lands
@@ -255,23 +263,34 @@ describe('playing by hand', () => {
 
   it('ends a round and restores movement', () => {
     const bench = openBench()
+    bench.planEnemyTurn() // no NPCs: one step returns straight to `player`
     bench.placeUnit('melee', 0, 0)
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('move', { col: 3, row: 0 })
     expect(bench.getState().selection!.remainingMove).toBe(1)
-    bench.endRound()
+
+    bench.endPlayerTurn()
+    bench.resolveTelegraphs() // nothing pending: one step chains into the next round
     expect(bench.getState().selection!.remainingMove).toBe(4)
   })
 })
 
 describe('the telegraph window', () => {
-  it('is a scrubbable interval: stepping back once returns to the pending board, twice to before the enemy turn', () => {
+  // Every `advance` is now its own frame (design.md, "One frame per engine
+  // step, including inside composites"), so the number of undos between "just
+  // resolved" and "still pending" is no longer fixed at one — `planEnemyTurn`
+  // alone can commit several. Scrub by captured cursor instead of counting
+  // `undo()` calls, which is what the designer's scrub bar does too.
+  it('is a scrubbable interval: scrubbing back returns to the pending board, and further back to before the enemy turn', () => {
     const bench = openBench()
     bench.placeUnit('melee', 4, 1)
     bench.placeUnit('short-range', 4, 0)
+    const beforePlanningCursor = bench.getState().timeline.cursor
     const beforeUnits = bench.getState().units
 
     bench.planEnemyTurn()
+    bench.endPlayerTurn()
+    const pendingCursor = bench.getState().timeline.cursor
     const pendingUnits = bench.getState().units
     const pendingTelegraphs = bench.getState().telegraphs
     expect(pendingTelegraphs.length).toBeGreaterThan(0)
@@ -279,45 +298,137 @@ describe('the telegraph window', () => {
     bench.resolveTelegraphs()
     expect(bench.getState().telegraphs).toEqual([])
 
-    bench.undo() // step back into the window
+    bench.stepTo(pendingCursor) // scrub back into the window
     expect(bench.getState().units).toEqual(pendingUnits)
     expect(bench.getState().telegraphs).toEqual(pendingTelegraphs)
 
-    bench.undo() // step back to before the enemy turn was planned
+    bench.stepTo(beforePlanningCursor) // scrub back to before the enemy turn was planned
     expect(bench.getState().units).toEqual(beforeUnits)
     expect(bench.getState().telegraphs).toEqual([])
+  })
+
+  it('commits one frame per enemy planned, not one for the whole composite', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 8, rows: 5, preset: 'open', powerCenters: 1 }))
+    bench.placeUnit('short-range', 0, 0)
+    bench.placeUnit('short-range', 7, 3) // not the bottom row, or the AI reads it as leaving the board
+    const beforePlanning = bench.getState().timeline.cursor
+
+    bench.planEnemyTurn()
+    const afterPlanning = bench.getState().timeline.cursor
+    // Two enemies planned plus the transition into `player`: at least three
+    // steps happened, each its own frame — not one for the whole composite.
+    expect(afterPlanning).toBeGreaterThanOrEqual(beforePlanning + 3)
+
+    bench.stepTo(afterPlanning - 1) // one enemy planned, the other not yet reached
+    const midPlan = bench.getState().units.filter((u) => u.kind === 'npc')
+    expect(midPlan).toHaveLength(2) // both still on the board — planning moves, never removes
   })
 })
 
 describe('enemy turn refusals', () => {
-  it('refuses to plan with no NPCs on the board', () => {
+  // Previously a bench-side guard refusing outright ("No NPCs on the board").
+  // That guard is deleted (task 2.5) and not replaced: the engine has no
+  // concept of "no enemies", only "no enemy step left to take" — with zero
+  // NPCs, the `npc-move` phase has nothing to plan and the round simply moves
+  // straight through to `player`, same as it would once every real NPC had
+  // been planned. Forwarding the engine verbatim means forwarding this too.
+  it('planning with no NPCs on the board succeeds trivially and still advances the phase', () => {
     const bench = openBench()
     bench.placeUnit('melee', 0, 0)
+    expect(bench.getState().phase).toBe('npc-move')
+
     const result = bench.planEnemyTurn()
-    expect(result).toMatchObject({ ok: false })
-    if (!result.ok) expect(result.error).toMatch(/no npcs/i)
+    expect(result.ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().phase).toBe('player')
   })
 
-  it('refuses to plan again while telegraphs are still pending', () => {
+  it('refuses to plan again once the round has moved past npc-move', () => {
     const bench = openBench()
     bench.placeUnit('melee', 4, 1)
     bench.placeUnit('short-range', 4, 0)
     bench.planEnemyTurn()
+    expect(bench.getState().phase).toBe('player')
 
     const result = bench.planEnemyTurn()
     expect(result).toMatchObject({ ok: false })
-    if (!result.ok) expect(result.error).toMatch(/pending telegraphs|resolve first/i)
+    if (!result.ok) expect(result.error).toMatch(/phase/i)
     // The refusal changed nothing: still exactly one telegraph pending.
     expect(bench.getState().telegraphs).toHaveLength(1)
   })
 
-  it('refuses to resolve when nothing has been planned', () => {
+  it('refuses to resolve when the round is not awaiting telegraph resolution', () => {
     const bench = openBench()
     bench.placeUnit('melee', 4, 1)
     bench.placeUnit('short-range', 4, 0)
     const result = bench.resolveTelegraphs()
     expect(result).toMatchObject({ ok: false })
     expect(bench.getState().telegraphs).toEqual([])
+  })
+})
+
+describe('refusals come from the engine, not a reworded copy', () => {
+  it('step forwards advance()\'s exact reason for refusing outside an enemy phase', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0) // no NPCs: planEnemyTurn lands straight in `player`
+    bench.planEnemyTurn()
+    expect(bench.getState().phase).toBe('player')
+
+    const result = bench.step()
+    expect(result).toMatchObject({ ok: false })
+    if (!result.ok) {
+      // The sequencer's own wording (sequencer.ts, `advance`) — not
+      // paraphrased or re-derived here.
+      expect(result.error).toBe(
+        'The round is not in an enemy phase — there is no enemy step for the engine to advance.',
+      )
+    }
+  })
+})
+
+describe('the engine sequences the round end to end', () => {
+  it('runs a full round: enemies plan one at a time, phase moves to player, ending the turn moves to npc-attack, telegraphs resolve, and the round chains into the next npc-move', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 8, rows: 5, preset: 'open', powerCenters: 1 }))
+    bench.placeUnit('melee', 0, 0)
+    bench.placeUnit('short-range', 4, 1)
+    bench.placeUnit('long-range', 4, 3)
+    expect(bench.getState().phase).toBe('npc-move')
+
+    expect(bench.planEnemyTurn().ok).toBe(true)
+    expect(bench.getState().phase).toBe('player')
+    expect(bench.getState().units.filter((u) => u.kind === 'npc')).toHaveLength(2) // planning moves, never removes
+
+    expect(bench.endPlayerTurn().ok).toBe(true)
+    expect(bench.getState().phase).toBe('npc-attack')
+
+    expect(bench.resolveTelegraphs().ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().phase).toBe('npc-move') // chained straight into the next round
+
+    // The round really did end: the same enemies can be planned again.
+    expect(bench.planEnemyTurn().ok).toBe(true)
+    expect(bench.getState().phase).toBe('player')
+  })
+
+  it('reports the next step from the engine, matches what step() then does, and rereading it changes nothing', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+
+    const before = bench.getState()
+    const predicted = before.nextStep
+    expect(predicted?.kind).toBe('plan-enemy')
+    if (predicted?.kind !== 'plan-enemy') throw new Error('unreachable — asserted above')
+
+    // Reading it again changes nothing.
+    expect(bench.getState().nextStep).toEqual(predicted)
+    expect(bench.getState().units).toEqual(before.units)
+    expect(bench.getState().timeline.cursor).toBe(before.timeline.cursor)
+
+    bench.step()
+    expect(bench.getState().log.at(-1)).toContain(predicted.unitId)
   })
 })
 
@@ -656,9 +767,11 @@ describe('the action log', () => {
     bench.placeUnit('melee', 1, 1)
     const id = bench.getState().units[0].id
     for (let i = 0; i < 3; i++) {
+      bench.planEnemyTurn() // no NPCs: one step returns straight to `player`
       bench.select(id)
       bench.commitSelected('attack', { col: 2, row: 1 })
-      bench.endRound()
+      bench.endPlayerTurn()
+      bench.resolveTelegraphs() // nothing pending: one step chains into the next round
     }
     expect(bench.getState().log.some((line) => /levelled/.test(line))).toBe(true)
   })

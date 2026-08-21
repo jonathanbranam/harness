@@ -41,7 +41,12 @@ hides it.
 Reading:
 
 - `dungeon_board_state` — the whole bench: board rows, units, current
-  selection with its options, telegraphs, unit definitions, recent log.
+  selection with its options, the round's phase, pending telegraphs, unit
+  definitions, recent log.
+- `dungeon_round_status` — just the round's phase and what it will do next
+  (which enemy would plan, which telegraph would resolve or be skipped, or
+  which phase transition would happen) — from the engine, before you take it.
+  Cheaper than `dungeon_board_state` when phase and next-step are all you need.
 - `dungeon_unit_options` — what one unit can do *right now*: its actions
   (move, attack), whether each is available and why not when it isn't, the
   exact tiles each may be aimed at, movement left, and whether it has
@@ -80,19 +85,34 @@ Playing — both sides, by hand:
   the tiles it covers, what it would damage, whether anything would die, and
   whether it would hit nothing at all. An attack that hits nothing is still
   legal, so "it accomplishes nothing" is a real answer worth giving.
-- The enemy turn is two steps, matching the shipped game's round: every
-  enemy's move resolves and its attack locks as a telegraph, then the
-  telegraphs resolve. `dungeon_plan_enemy_turn` hands the planning half to the
-  game's own AI — moves happen, attacks are locked and reported as
-  telegraphs, but nothing has been hit yet. That is your and the designer's
-  window to react: move a PC out of a telegraphed tile, or kill the enemy
-  that telegraphed it, before calling `dungeon_resolve_telegraphs` to play
-  the locked attacks out. `dungeon_plan_enemy_turn` refuses while telegraphs
-  from an earlier plan are still pending — resolve them first rather than
-  expecting it to overwrite what the designer is looking at.
-- `dungeon_end_round` refills movement and clears attacks. It refuses while
-  telegraphs are pending — ending the round would discard locked attacks that
-  never landed. Resolve them, or step back to abandon the plan on purpose.
+- **The enemy turn is the engine's round, not something this harness
+  sequences itself.** The round moves through three phases —
+  `npc-move` (the enemy AI plans, one unit at a time), `player` (the
+  designer acts), `npc-attack` (locked telegraphs resolve, then the round
+  chains straight into the next `npc-move`) — and every tool that advances it
+  is refused outside the phase it belongs to. `dungeon_round_status` (or
+  `dungeon_board_state`) tells you which phase you're in before you call one.
+- `dungeon_plan_enemy_turn` hands the whole `npc-move` phase to the game's own
+  AI: every enemy's move resolves and its attack locks as a telegraph, not
+  resolved, then the phase ends and play moves to `player`. Nothing has been
+  hit yet — that is your and the designer's window to react: move a PC out of
+  a telegraphed tile, or kill the enemy that telegraphed it, before ending the
+  turn. Only available during `npc-move`.
+- `dungeon_end_turn` ends the player's turn and moves to `npc-attack` — the
+  one transition the designer decides rather than the engine, matching the
+  shipped game's own end-turn button. Only available during `player`.
+- `dungeon_resolve_telegraphs` plays out every locked attack in the order it
+  was planned, then the round ends and the next `npc-move` begins on its own —
+  there is no separate "end round" tool; a round only ends once everything it
+  locked has resolved or been skipped, and the engine simply does not offer a
+  way to end one early. Only available during `npc-attack`.
+- `dungeon_step` performs exactly the round's next step — one enemy planned,
+  one telegraph resolved or skipped, or one phase transition — rather than a
+  whole phase. `dungeon_plan_enemy_turn` and `dungeon_resolve_telegraphs` are
+  this, looped; reach for `dungeon_step` when the designer wants to watch one
+  enemy at a time rather than the whole phase at once.
+- A refusal from any of these is the engine's own, not something to route
+  around or reword — same rule as everywhere else on the bench.
 - `dungeon_undo` steps back one action and `dungeon_redo` steps forward
   again; `dungeon_step_to` jumps to any frame in the session by index.
   `dungeon_board_state` lists every frame with the action that produced it.

@@ -10,6 +10,28 @@ export type PcType = 'melee' | 'ranger' | 'magic-user' | 'rogue'
 export type NpcType = 'short-range' | 'long-range'
 export type UnitType = PcType | NpcType
 
+/** The engine's own round phases (mirrored from `@repo/dungeon-engine`'s
+ *  `TurnPhase`). The bench never uses `placement` — units go straight on the
+ *  board — but the type carries it. */
+export type TurnPhase = 'placement' | 'player' | 'npc-move' | 'npc-attack'
+
+/** What one step of the engine's round is or did — mirrored from the
+ *  engine's `SequencerStep`. Reported by `dungeon_round_status`/`BenchState.
+ *  nextStep` before it happens, and is what `step`'s log line describes after. */
+export type SequencerStep =
+  | { kind: 'plan-enemy'; unitId: string; action: NpcAction; attackPlan: NpcAttackPlan | null }
+  | { kind: 'resolve-telegraph'; unitId: string; attack: NpcAttackPlan }
+  | { kind: 'skip-telegraph'; unitId: string; attack: NpcAttackPlan }
+  | { kind: 'phase-transition'; from: TurnPhase; to: TurnPhase }
+
+export type NpcAction =
+  | { kind: 'move'; unitId: string; fromCol: number; fromRow: number; toCol: number; toRow: number; path: Tile[] }
+  | { kind: 'attack'; unitId: string; targetCol: number; targetRow: number }
+  | { kind: 'exit'; unitId: string; fromCol: number; fromRow: number }
+  | { kind: 'stay'; unitId: string }
+
+export type NpcAttackPlan = { kind: 'attack'; unitId: string; targetCol: number; targetRow: number }
+
 export const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
 export const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
 
@@ -115,6 +137,13 @@ export interface BenchState {
   units: Unit[]
   selection: SelectionView | null
   fields: BoardFields
+  /** Which phase the engine's round is in right now — moved through by the
+   *  engine, not the bench. */
+  phase: TurnPhase
+  /** What the engine's round will do next, straight from the engine's
+   *  `nextAction` — `null` outside `npc-move`/`npc-attack`, where there is no
+   *  round step to report. */
+  nextStep: SequencerStep | null
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
@@ -133,9 +162,10 @@ export type BenchIntent =
   | { kind: 'setHp'; unitId: string; hp: number }
   | { kind: 'clearUnits' }
   | { kind: 'newBoard'; cols?: number; rows?: number; preset?: 'open' | 'scattered' | 'arena'; seed?: number; powerCenters?: number; rowsText?: string[] }
+  | { kind: 'step' }
   | { kind: 'planEnemyTurn' }
   | { kind: 'resolveTelegraphs' }
-  | { kind: 'endRound' }
+  | { kind: 'endPlayerTurn' }
   | { kind: 'undo' }
   | { kind: 'redo' }
   | { kind: 'stepTo'; index: number }

@@ -20,6 +20,7 @@ import type { ActionId, ActionPreview, Unit } from '@repo/dungeon-engine'
 /** Tool names registered here, for session-store.ts's allowlist. */
 export const BENCH_TOOL_NAMES = [
   'dungeon_board_state',
+  'dungeon_round_status',
   'dungeon_new_board',
   'dungeon_place_unit',
   'dungeon_remove_unit',
@@ -32,9 +33,10 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_move_unit',
   'dungeon_attack',
   'dungeon_preview_action',
+  'dungeon_step',
   'dungeon_plan_enemy_turn',
   'dungeon_resolve_telegraphs',
-  'dungeon_end_round',
+  'dungeon_end_turn',
   'dungeon_undo',
   'dungeon_redo',
   'dungeon_step_to',
@@ -87,12 +89,26 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_board_state',
       label: 'Read Bench',
       description:
-        'Read the whole bench: saved bookmarks, the board as terrain rows (. plains, f forest, w water, s stone, P power center, T tower), every unit with position and HP, the current selection with its engine-derived move and attack options, enemy attack telegraphs, the unit definitions in force, and the recent action log. Everything derived here is computed by the game engine at read time, so it is never stale.',
+        'Read the whole bench: saved bookmarks, the board as terrain rows (. plains, f forest, w water, s stone, P power center, T tower), every unit with position and HP, the current selection with its engine-derived move and attack options, the round\'s phase, pending enemy attack telegraphs, the unit definitions in force, and the recent action log. Everything derived here is computed by the game engine at read time, so it is never stale.',
       promptSnippet: 'Read the live bench: board, units, selection, options, definitions',
       parameters: Type.Object({}),
       execute: async () => {
         const state = bench.getState()
         const details = { ...state, board: { ...state.board, rows: bench.boardRows() } }
+        return { content: text(details), details }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_round_status',
+      label: 'Round Status',
+      description:
+        "Ask the engine what phase the round is in (npc-move, player, or npc-attack) and what its next step would be — which enemy would plan next and how, which telegraph would resolve or be skipped, or which phase transition would occur — before taking it. Outside npc-move/npc-attack there is no round step to report (the player phase is the designer's decision, not the engine's), and next_step comes back null. Check this before dungeon_step, dungeon_plan_enemy_turn, or dungeon_resolve_telegraphs to know what you're about to do, or after, to confirm it did that.",
+      promptSnippet: 'Ask the engine what phase the round is in and what happens next',
+      parameters: Type.Object({}),
+      execute: async () => {
+        const { phase, nextStep } = bench.getState()
+        const details = { phase, nextStep }
         return { content: text(details), details }
       },
     })
@@ -285,10 +301,20 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
     })
 
     pi.registerTool({
+      name: 'dungeon_step',
+      label: 'Step',
+      description:
+        "Perform exactly the round's next step, whatever dungeon_round_status says that is: plan one enemy, resolve or skip one telegraph, or take a phase transition. This is the granularity dungeon_plan_enemy_turn and dungeon_resolve_telegraphs are built from — use it to advance one enemy, or one telegraph, at a time rather than the whole phase. Refused outside npc-move/npc-attack — ending the player's turn is dungeon_end_turn, a decision the round doesn't make for you.",
+      promptSnippet: "Perform exactly the round's next step",
+      parameters: Type.Object({}),
+      execute: async () => outcome(bench, bench.step()),
+    })
+
+    pi.registerTool({
       name: 'dungeon_plan_enemy_turn',
       label: 'Plan Enemy Turn',
       description:
-        "Hand the enemy side to the game's own AI for the planning half of its turn, instead of driving it by hand — useful for comparing what the AI does with what you were about to do. Every enemy's move resolves immediately; its attack is chosen and locked as a telegraph, not resolved. Call dungeon_resolve_telegraphs to play those telegraphs out once the designer has had a chance to react. NPCs walk toward power centers and attack PCs or structures in their scan band. Refused while an earlier plan's telegraphs are still pending — resolve them first.",
+        "Hand the enemy side to the game's own AI for the planning half of its turn, instead of driving it by hand — useful for comparing what the AI does with what you were about to do. Every enemy's move resolves immediately; its attack is chosen and locked as a telegraph, not resolved. Call dungeon_resolve_telegraphs to play those telegraphs out once the designer has had a chance to react. NPCs walk toward power centers and attack PCs or structures in their scan band. Refused unless the round is currently awaiting enemy movement (phase npc-move) — an earlier plan's telegraphs pending means the round is past that, in player or npc-attack.",
       promptSnippet: "Let the game's AI plan the enemy turn: moves resolve, attacks lock as telegraphs",
       parameters: Type.Object({}),
       execute: async () => outcome(bench, bench.planEnemyTurn()),
@@ -298,19 +324,20 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_resolve_telegraphs',
       label: 'Resolve Telegraphs',
       description:
-        "Play out the attacks a planned enemy turn locked as telegraphs, in the order they were planned — the other half of dungeon_plan_enemy_turn. An enemy killed inside the window does not land its attack. Refused when nothing is pending.",
+        "Play out the attacks a planned enemy turn locked as telegraphs, in the order they were planned — the other half of dungeon_plan_enemy_turn. An enemy killed inside the window does not land its attack. Refused unless the round is currently awaiting telegraph resolution (phase npc-attack) — call dungeon_end_turn first if the round is still in player.",
       promptSnippet: 'Resolve the pending enemy telegraphs',
       parameters: Type.Object({}),
       execute: async () => outcome(bench, bench.resolveTelegraphs()),
     })
 
     pi.registerTool({
-      name: 'dungeon_end_round',
-      label: 'End Round',
-      description: 'End the round: movement budgets refill and attacks become available again for every unit.',
-      promptSnippet: 'End the round and refresh every unit',
+      name: 'dungeon_end_turn',
+      label: 'End Turn',
+      description:
+        "End the player's turn: the round moves to resolving enemy telegraphs (phase npc-attack). This is the one round transition the designer decides rather than the engine — matching the shipped game's own end-turn button. Refused outside the player phase.",
+      promptSnippet: "End the player's turn and move to enemy telegraph resolution",
       parameters: Type.Object({}),
-      execute: async () => outcome(bench, bench.endRound()),
+      execute: async () => outcome(bench, bench.endPlayerTurn()),
     })
 
     pi.registerTool({
