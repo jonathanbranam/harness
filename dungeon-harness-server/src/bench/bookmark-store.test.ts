@@ -2,18 +2,26 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { setEngineMode } from '@repo/dungeon-engine'
 import { BenchStore } from './bench-store'
 import { BookmarkStore, slugify } from './bookmark-store'
 import { generateBoard } from './board-gen'
 
+// The real server sets this once at startup (`engine-startup.ts`) and never
+// toggles it. `BenchStore`'s constructor now authors its starting position
+// through the engine's own bench-only `scenario.newScenario` (see
+// bench-store.ts's `freshScenario`), so every test in this file — not just
+// the ones that play a turn — needs bench mode to construct a store at all.
 let dir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'bench-bookmarks-'))
+  setEngineMode('bench')
 })
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+  setEngineMode('game')
 })
 
 function bench(): BenchStore {
@@ -55,8 +63,9 @@ describe('saving and reloading a position', () => {
 
   it('saves mid-play state, spent movement and all', () => {
     const store = bench()
-    store.planEnemyTurn() // no NPCs: one step returns straight to `player`
     store.placeUnit('melee', 0, 0)
+    store.startScenario()
+    store.planEnemyTurn() // no NPCs: one step returns straight to `player`
     store.select(store.getState().units[0].id)
     store.commitSelected('move', { col: 3, row: 0 })
     store.saveBookmark('Half moved')
@@ -81,6 +90,7 @@ describe('saving and reloading a position', () => {
     const store = bench()
     store.placeUnit('melee', 1, 1)
     store.placeUnit('short-range', 1, 0)
+    store.startScenario()
     store.planEnemyTurn()
     store.saveBookmark('Legacy shape')
 

@@ -11,9 +11,12 @@ export type NpcType = 'short-range' | 'long-range'
 export type UnitType = PcType | NpcType
 
 /** The engine's own round phases (mirrored from `@repo/dungeon-engine`'s
- *  `TurnPhase`). The bench never uses `placement` — units go straight on the
- *  board — but the type carries it. */
+ *  `TurnPhase`). Every scenario starts in `placement` — setup is refused
+ *  outside it — and moves to `npc-move` once the designer starts it. */
 export type TurnPhase = 'placement' | 'player' | 'npc-move' | 'npc-attack'
+
+/** A structure kind, mirrored from the engine's own `StructureKind`. */
+export type StructureKind = 'power-center' | 'tower'
 
 /** What one step of the engine's round is or did — mirrored from the
  *  engine's `SequencerStep`. Reported by `dungeon_round_status`/`BenchState.
@@ -43,6 +46,7 @@ export type PlanAuthor = 'designer' | 'ai'
 
 export const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
 export const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
+export const STRUCTURE_KINDS: StructureKind[] = ['power-center', 'tower']
 
 export interface Tile {
   col: number
@@ -180,6 +184,10 @@ export type BenchIntent =
   | { kind: 'relocate'; unitId: string; col: number; row: number }
   | { kind: 'setHp'; unitId: string; hp: number }
   | { kind: 'clearUnits' }
+  | { kind: 'placeStructure'; structureKind: StructureKind; col: number; row: number; hp?: number }
+  | { kind: 'removeStructure'; col: number; row: number }
+  | { kind: 'moveStructure'; fromCol: number; fromRow: number; toCol: number; toRow: number }
+  | { kind: 'startScenario' }
   | { kind: 'newBoard'; cols?: number; rows?: number; preset?: 'open' | 'scattered' | 'arena'; seed?: number; powerCenters?: number; rowsText?: string[] }
   | { kind: 'step' }
   | { kind: 'planEnemyTurn' }

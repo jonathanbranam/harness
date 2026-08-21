@@ -10,7 +10,7 @@
 // Generation is deterministic: the same seed produces the same board, so a
 // designer can say "board 7 again" and get it back without persistence.
 
-import type { ContentMap, ContentObject, TerrainType } from '@repo/dungeon-engine'
+import { STRUCTURE_HP, type ContentMap, type ContentObject, type TerrainType } from '@repo/dungeon-engine'
 
 export type BoardPreset = 'open' | 'scattered' | 'arena'
 
@@ -30,10 +30,12 @@ export interface GenerateBoardOptions {
   powerCenters?: number
 }
 
-/** Structure codes for hand-written boards, alongside the terrain codes. */
-export const STRUCTURE_CHARS: Record<string, { kind: 'power-center' | 'tower'; hp: number }> = {
-  P: { kind: 'power-center', hp: 3 },
-  T: { kind: 'tower', hp: 5 },
+/** Structure codes for hand-written boards, alongside the terrain codes. Only
+ *  the char↔kind mapping lives here — HP comes from the engine's
+ *  `STRUCTURE_HP`, so a fresh structure's starting HP has exactly one source. */
+export const STRUCTURE_CHARS: Record<string, { kind: 'power-center' | 'tower' }> = {
+  P: { kind: 'power-center' },
+  T: { kind: 'tower' },
 }
 
 /** Single-character terrain codes, for boards written out by hand or by the agent. */
@@ -124,7 +126,7 @@ export function generateBoard(opts: GenerateBoardOptions = {}): ContentMap {
     const col = Math.round(((i + 1) * cols) / (wanted + 1))
     const clamped = Math.max(0, Math.min(cols - 1, col))
     terrain[midRow][clamped] = 'plains'
-    objects.push({ col: clamped, row: midRow, kind: 'power-center', hp: 3 })
+    objects.push({ col: clamped, row: midRow, kind: 'power-center', hp: STRUCTURE_HP['power-center'] })
   }
 
   return {
@@ -161,7 +163,7 @@ export function boardFromRows(rows: string[], name = 'custom'): ContentMap {
     return Array.from(line, (char, colIndex) => {
       const structure = STRUCTURE_CHARS[char]
       if (structure) {
-        objects.push({ col: colIndex, row: rowIndex, kind: structure.kind, hp: structure.hp })
+        objects.push({ col: colIndex, row: rowIndex, kind: structure.kind, hp: STRUCTURE_HP[structure.kind] })
         return 'plains'
       }
       const t = TERRAIN_CHARS[char]

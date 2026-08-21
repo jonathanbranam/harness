@@ -13,9 +13,9 @@
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 import type { BenchStore, NpcMoveChoice, SelectionView, Tile, UnitType } from '../bench/bench-store'
-import { UNIT_TYPES } from '../bench/bench-store'
+import { STRUCTURE_KINDS, UNIT_TYPES } from '../bench/bench-store'
 import { boardFromRows, boardToRows, generateBoard } from '../bench/board-gen'
-import type { ActionId, ActionPreview, Unit } from '@repo/dungeon-engine'
+import type { ActionId, ActionPreview, StructureKind, Unit } from '@repo/dungeon-engine'
 
 /** Tool names registered here, for session-store.ts's allowlist. */
 export const BENCH_TOOL_NAMES = [
@@ -27,6 +27,10 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_relocate_unit',
   'dungeon_set_unit_hp',
   'dungeon_clear_units',
+  'dungeon_place_structure',
+  'dungeon_remove_structure',
+  'dungeon_move_structure',
+  'dungeon_start_scenario',
   'dungeon_select_unit',
   'dungeon_unit_options',
   'dungeon_fields',
@@ -100,8 +104,11 @@ const MOVE_KIND_DESCRIPTION = "'stay' to hold in place, or 'move' with move_to_c
 export function createBenchBridgeExtension(opts: { bench: BenchStore }): ExtensionFactory {
   const { bench } = opts
   const unitTypeParam = Type.String({ description: `One of: ${UNIT_TYPES.join(', ')}` })
+  const structureKindParam = Type.String({ description: `One of: ${STRUCTURE_KINDS.join(', ')}` })
 
   const asUnitType = (value: string): UnitType | undefined => (UNIT_TYPES as string[]).includes(value) ? (value as UnitType) : undefined
+  const asStructureKind = (value: string): StructureKind | undefined =>
+    (STRUCTURE_KINDS as string[]).includes(value) ? (value as StructureKind) : undefined
 
   return function benchBridge(pi: ExtensionAPI) {
     // ─── Reading ──────────────────────────────────────────────────────────────
@@ -178,7 +185,7 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_new_board',
       label: 'New Board',
       description:
-        'Replace the board and clear every unit. Either generate one (cols, rows, preset "open" | "scattered" | "arena", seed for reproducibility, power_centers) or supply exact rows of terrain characters (. plains, f forest, w water, s stone, P power center, T tower), top row first. Note: the enemy AI walks toward power centers and only shoots a PC that strays into its scan band — a board with no structures makes "run the enemy AI" do nothing.',
+        'Replace the board and clear every unit. Either generate one (cols, rows, preset "open" | "scattered" | "arena", seed for reproducibility, power_centers) or supply exact rows of terrain characters (. plains, f forest, w water, s stone, P power center, T tower), top row first. Note: the enemy AI walks toward power centers and only shoots a PC that strays into its scan band — a board with no structures makes "run the enemy AI" do nothing. Always available, even mid-round: swapping the board discards whatever round was in progress and starts a fresh one in the placement phase, ready for dungeon_start_scenario again.',
       promptSnippet: 'Generate or author a new board, clearing all units',
       parameters: Type.Object({
         rows_text: Type.Optional(Type.Array(Type.String(), { description: 'Exact board rows, top first. Overrides the generated options.' })),
@@ -212,7 +219,7 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_place_unit',
       label: 'Place Unit',
       description:
-        'Put a unit on any empty tile — this is a bench, so spawn zones do not apply. HP defaults to the type\'s maximum; pass hp to start it wounded. PC types are melee, ranger, magic-user, rogue; NPC types are short-range, long-range.',
+        'Put a unit on any empty tile — this is a bench, so spawn zones do not apply. HP defaults to the type\'s maximum; pass hp to start it wounded. PC types are melee, ranger, magic-user, rogue; NPC types are short-range, long-range. Works only while the round is in the placement phase, before dungeon_start_scenario — once it has started, this is refused with the engine\'s reason (step back on the timeline to reopen setup).',
       promptSnippet: 'Place a unit on any tile',
       parameters: Type.Object({
         unit_type: unitTypeParam,
@@ -230,7 +237,8 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
     pi.registerTool({
       name: 'dungeon_remove_unit',
       label: 'Remove Unit',
-      description: 'Take a unit off the board entirely.',
+      description:
+        'Take a unit off the board entirely. Works only during placement, before dungeon_start_scenario — once the round has started, this is refused with the engine\'s reason.',
       promptSnippet: 'Remove a unit from the board',
       parameters: Type.Object({ unit_id: Type.String() }),
       execute: async (_id, params) => outcome(bench, bench.removeUnit(params.unit_id)),
@@ -240,7 +248,7 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_relocate_unit',
       label: 'Relocate Unit',
       description:
-        'Move a unit during setup, ignoring movement range and pathing — this is placing a piece, not taking a turn. Use dungeon_move_unit to take a turn.',
+        'Move a unit during setup, ignoring movement range and pathing — this is placing a piece, not taking a turn. Use dungeon_move_unit to take a turn. Works only during placement, before dungeon_start_scenario — once the round has started, this is refused with the engine\'s reason.',
       promptSnippet: 'Reposition a unit during setup',
       parameters: Type.Object({ unit_id: Type.String(), col: Type.Number(), row: Type.Number() }),
       execute: async (_id, params) => outcome(bench, bench.relocateUnit(params.unit_id, params.col, params.row)),
@@ -249,7 +257,8 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
     pi.registerTool({
       name: 'dungeon_set_unit_hp',
       label: 'Set Unit HP',
-      description: "Set one unit's current HP, for starting a scenario mid-fight.",
+      description:
+        "Set one unit's current HP, for starting a scenario mid-fight. Works only during placement, before dungeon_start_scenario — current HP is game state once the round has started, and this is refused with the engine's reason from then on.",
       promptSnippet: "Set a unit's current HP",
       parameters: Type.Object({ unit_id: Type.String(), hp: Type.Number() }),
       execute: async (_id, params) => outcome(bench, bench.setUnitHp(params.unit_id, params.hp)),
@@ -258,10 +267,60 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
     pi.registerTool({
       name: 'dungeon_clear_units',
       label: 'Clear Units',
-      description: 'Remove every unit, keeping the board.',
+      description:
+        'Remove every unit, keeping the board. Works only during placement, before dungeon_start_scenario — once the round has started, this is refused with the engine\'s reason.',
       promptSnippet: 'Remove every unit from the board',
       parameters: Type.Object({}),
       execute: async () => outcome(bench, bench.clearUnits()),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_place_structure',
+      label: 'Place Structure',
+      description:
+        "Put a structure of kind ('power-center' or 'tower') on any empty, unoccupied tile. HP defaults to the kind's own value (a fresh power center is 3, a fresh tower is 5); pass hp to author it already damaged. Works only during placement, before dungeon_start_scenario — once the round has started, this is refused with the engine's reason.",
+      promptSnippet: 'Place a structure on any tile',
+      parameters: Type.Object({
+        structure_kind: structureKindParam,
+        col: Type.Number(),
+        row: Type.Number(),
+        hp: Type.Optional(Type.Number()),
+      }),
+      execute: async (_id, params) => {
+        const kind = asStructureKind(params.structure_kind)
+        if (!kind) return { content: text(`Unknown structure kind "${params.structure_kind}"`), details: { ok: false }, isError: true }
+        return outcome(bench, bench.placeStructure(kind, params.col, params.row, params.hp))
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_remove_structure',
+      label: 'Remove Structure',
+      description:
+        "Take the structure at a tile off the board entirely. Works only during placement, before dungeon_start_scenario — once the round has started, this is refused with the engine's reason.",
+      promptSnippet: 'Remove a structure from the board',
+      parameters: Type.Object({ col: Type.Number(), row: Type.Number() }),
+      execute: async (_id, params) => outcome(bench, bench.removeStructure(params.col, params.row)),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_move_structure',
+      label: 'Move Structure',
+      description:
+        "Move a structure to another empty, unoccupied tile, preserving its kind and current HP — a damaged structure arrives at its destination just as damaged. Works only during placement, before dungeon_start_scenario — once the round has started, this is refused with the engine's reason.",
+      promptSnippet: 'Move a structure to another tile',
+      parameters: Type.Object({ from_col: Type.Number(), from_row: Type.Number(), to_col: Type.Number(), to_row: Type.Number() }),
+      execute: async (_id, params) => outcome(bench, bench.moveStructure(params.from_col, params.from_row, params.to_col, params.to_row)),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_start_scenario',
+      label: 'Start Scenario',
+      description:
+        "The board is set: leave the placement phase and begin the round, through the same transition the shipped game uses to leave its own loaded starting position. After this, every setup tool (dungeon_place_unit and the rest) is refused until the timeline is stepped back to before this call — there is no separate 'back to setup' operation. Refused if the round is not currently in placement.",
+      promptSnippet: 'Start the scenario and begin the round',
+      parameters: Type.Object({}),
+      execute: async () => outcome(bench, bench.startScenario()),
     })
 
     // ─── Playing ──────────────────────────────────────────────────────────────

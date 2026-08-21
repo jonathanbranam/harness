@@ -5,12 +5,13 @@ import { applyIntent } from './intents'
 import { generateBoard } from './board-gen'
 
 // The real server sets this once at startup (`engine-startup.ts`) and never
-// toggles it. This suite drives a `BenchStore` — which starts a fresh board
-// in `npc-move`, not `player` (see bench-store.ts's `emptyState`) — through
-// moves and attacks on both sides out of sequence, the bench's own spec'd
-// capability that `dungeon-sequencer-guards`' phase guard fences behind this
-// mode. Set for every test, not just the block that already needed it for
-// `amendTelegraph`.
+// toggles it. A fresh `BenchStore` now starts in `placement` (`scenario.
+// newScenario`, bench-store.ts's `freshScenario`) and this suite starts the
+// scenario before driving moves and attacks on both sides out of sequence,
+// the bench's own spec'd capability that `dungeon-sequencer-guards`' phase
+// guard fences behind this mode. Set for every test, not just the block that
+// already needed it for `amendTelegraph` — and needed even to construct a
+// `BenchStore` at all now, since authoring a scenario is itself bench-only.
 beforeEach(() => setEngineMode('bench'))
 afterEach(() => setEngineMode('game'))
 
@@ -59,11 +60,25 @@ describe('bench intents', () => {
 
     expect(applyIntent(store, { kind: 'setHp', unitId: pc.id, hp: 2 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 2, row: 3 })).toMatchObject({ ok: true })
+    // Adjacent to npc2 (not the soon-to-be-spent npc), so planning is
+    // guaranteed to lock a telegraph for it once npc has attacked and can't
+    // be planned again. Relocated here, during placement — `relocate` is a
+    // setup operation now and is refused once the round has started, so this
+    // has to happen before dungeon_start_scenario, not after npc's attack.
+    expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 3, row: 1 })).toMatchObject({ ok: true })
+
+    // Structures, still during placement — the setup surface this change adds.
+    expect(applyIntent(store, { kind: 'placeStructure', structureKind: 'tower', col: 6, row: 4 })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'moveStructure', fromCol: 6, fromRow: 4, toCol: 7, toRow: 4 })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'removeStructure', col: 7, row: 4 })).toMatchObject({ ok: true })
+
+    // The board is set: leave placement and begin the round.
+    expect(applyIntent(store, { kind: 'startScenario' })).toMatchObject({ ok: true })
+    // Setup is refused now that the scenario has started.
+    expect(applyIntent(store, { kind: 'place', unitType: 'melee', col: 0, row: 4 })).toMatchObject({ ok: false })
+
     expect(applyIntent(store, { kind: 'select', unitId: npc.id })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'commit', action: 'attack', col: 3, row: 3 })).toMatchObject({ ok: true })
-    // Adjacent to npc2 (not the now-spent npc), so planning is guaranteed to
-    // lock a telegraph for it.
-    expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 3, row: 1 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: true })
     expect(store.getState().telegraphs.length).toBeGreaterThan(0)
     expect(store.getState().unplannedNpcs).not.toContain(npc2.id)
@@ -76,9 +91,13 @@ describe('bench intents', () => {
     expect(store.getState().defs.melee.movement.range).toBe(6)
     expect(applyIntent(store, { kind: 'resetDefs' })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'undo' })).toMatchObject({ ok: true })
-    expect(applyIntent(store, { kind: 'remove', unitId: npc.id })).toMatchObject({ ok: true })
-    expect(applyIntent(store, { kind: 'clearUnits' })).toMatchObject({ ok: true })
-    expect(store.getState().units).toHaveLength(0)
+    // remove/clearUnits are setup operations too, refused the same way once
+    // the round has started — there is no more "always available" setup tool
+    // short of dungeon_new_board, which discards the round outright instead.
+    const beforeRefusedRemoval = store.getState().units.length
+    expect(applyIntent(store, { kind: 'remove', unitId: npc.id })).toMatchObject({ ok: false })
+    expect(applyIntent(store, { kind: 'clearUnits' })).toMatchObject({ ok: false })
+    expect(store.getState().units).toHaveLength(beforeRefusedRemoval)
     expect(applyIntent(store, { kind: 'select', unitId: null })).toMatchObject({ ok: true })
   })
 

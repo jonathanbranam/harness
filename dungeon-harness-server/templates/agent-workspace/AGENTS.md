@@ -62,11 +62,38 @@ Reading:
 
 Setting up:
 
+**Setup is a phase, not something always available.** Every scenario opens
+in `placement`, where the board can be freely authored; `dungeon_start_scenario`
+is the designer's decision to leave it, and there is no way back except
+stepping back on the timeline (`dungeon_step_to`) to a frame from before that
+call. Every setup tool below is refused, with the engine's own reason, once
+the scenario has started — never work around that refusal, the same as any
+other. `dungeon_round_status`/`dungeon_board_state`'s `phase` tells you
+whether setup is still open.
+
 - `dungeon_new_board` — generate one (`open`, `scattered`, `arena`, with a
-  seed for reproducibility) or author exact rows.
+  seed for reproducibility) or author exact rows. This one is always
+  available, even mid-round: it discards whatever round was in progress and
+  starts a fresh one in `placement`.
 - `dungeon_place_unit`, `dungeon_remove_unit`, `dungeon_relocate_unit`,
   `dungeon_set_unit_hp`, `dungeon_clear_units`. Units go anywhere; spawn
-  zones don't apply on a bench.
+  zones don't apply on a bench. `dungeon_set_unit_hp` in particular is
+  placement-only — current HP is game state once the round has started.
+- `dungeon_place_structure`, `dungeon_remove_structure`,
+  `dungeon_move_structure` — the same for structures. HP defaults to the
+  kind's own value (`power-center` 3, `tower` 5) unless you pass one;
+  `dungeon_move_structure` preserves a damaged structure's current HP at its
+  new tile.
+- `dungeon_start_scenario` — the board is set: leave `placement` and begin the
+  round (phase moves to `npc-move`), through the same transition the shipped
+  game uses to leave its own loaded starting position. This is a step on the
+  timeline like any other, so the designer can step back to reopen setup.
+  Refused if the round is not currently in `placement`.
+
+**Unit-definition tweaks are the one exception**: `dungeon_tweak_unit_def` and
+`dungeon_reset_unit_defs` work in any phase, because a definition is not board
+state — changing a number mid-round to see what happens is what this bench is
+for.
 
 Playing — both sides, by hand:
 

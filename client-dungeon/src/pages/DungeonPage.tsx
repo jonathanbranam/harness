@@ -10,7 +10,21 @@ import { BookmarkRail } from '../components/BookmarkRail'
 import { TransportStrip } from '../components/TransportStrip'
 import { ApprovalDialog } from '../components/ApprovalDialog'
 import { EnemyPlanningPanel, type NpcPlanStep } from '../components/EnemyPlanningPanel'
-import { NO_FIELDS, type ActionId, type FieldToggles, type NpcMoveChoice, type Tile, type Unit, type UnitType } from '../bench/types'
+import {
+  NO_FIELDS,
+  STRUCTURE_KINDS,
+  type ActionId,
+  type FieldToggles,
+  type NpcMoveChoice,
+  type StructureKind,
+  type Tile,
+  type Unit,
+  type UnitType,
+} from '../bench/types'
+
+function isStructureKind(value: UnitType | StructureKind): value is StructureKind {
+  return (STRUCTURE_KINDS as string[]).includes(value)
+}
 
 const BOARD_PANE = 'board'
 const CHAT_PANE = 'chat'
@@ -31,8 +45,17 @@ export function DungeonPage() {
   const { theme, toggleTheme } = useTheme()
   const { paneModes, panelRefs, minimizePane, maximizePane, restorePane, handleLayoutChanged } = usePaneManager(PANE_IDS, DEFAULT_SIZES)
 
-  const [mode, setMode] = useState<'setup' | 'play'>('setup')
-  const [palette, setPalette] = useState<UnitType | null>(null)
+  // Setup vs. play is the round's phase, not a toggle the client keeps for
+  // itself (design.md, "Phase drives the client's mode") — a fresh board and
+  // a re-generated one both open in `placement`, and there is no way back to
+  // it except stepping back on the timeline, so there is nothing for a local
+  // mode state to do but drift from the truth.
+  const mode: 'setup' | 'play' = benchState == null || benchState.phase === 'placement' ? 'setup' : 'play'
+  const [palette, setPalette] = useState<UnitType | StructureKind | null>(null)
+  // The structure a setup click is about to move, from the "select, then
+  // click an empty tile" gesture design.md describes for relocating one —
+  // client-only, since `BenchStore`'s own selection is unit-only.
+  const [selectedStructure, setSelectedStructure] = useState<Tile | null>(null)
   // Which action the designer has armed. Selecting a unit arms Move, so the
   // board lights its reach by default — the same place the game starts.
   const [armedAction, setArmedAction] = useState<ActionId>('move')
@@ -60,6 +83,11 @@ export function DungeonPage() {
       // and by handleTileClick below — a click on a unit is not a selection or
       // an attack while one is in progress.
       if (npcPlan) return
+
+      // A unit and a structure can never occupy the same tile, so clicking a
+      // unit is never part of the structure-relocation gesture — clear it
+      // rather than leave a stale "selected" structure the click didn't mean.
+      setSelectedStructure(null)
 
       // Aiming takes precedence over selecting, as it does in the game: with an
       // action armed, a click on a unit standing on one of its target tiles is a
@@ -112,9 +140,39 @@ export function DungeonPage() {
 
       if (mode === 'setup') {
         if (palette) {
-          sendIntent({ kind: 'place', unitType: palette, col: tile.col, row: tile.row })
+          if (isStructureKind(palette)) {
+            sendIntent({ kind: 'placeStructure', structureKind: palette, col: tile.col, row: tile.row })
+          } else {
+            sendIntent({ kind: 'place', unitType: palette, col: tile.col, row: tile.row })
+          }
           return
         }
+
+        const cell = benchState?.board.cells[tile.row]?.[tile.col]
+
+        // The structure-relocation gesture: select one, then click an empty
+        // tile to move it there (design.md, "reuses the existing 'select,
+        // then click an empty tile' gesture").
+        if (selectedStructure) {
+          if (selectedStructure.col === tile.col && selectedStructure.row === tile.row) {
+            setSelectedStructure(null) // clicking it again deselects
+            return
+          }
+          if (cell?.hasStructure) {
+            setSelectedStructure(tile) // switch to the one just clicked
+            return
+          }
+          sendIntent({ kind: 'moveStructure', fromCol: selectedStructure.col, fromRow: selectedStructure.row, toCol: tile.col, toRow: tile.row })
+          setSelectedStructure(null)
+          return
+        }
+
+        if (cell?.hasStructure) {
+          if (selection) sendIntent({ kind: 'select', unitId: null }) // mutually exclusive with a unit selection
+          setSelectedStructure(tile)
+          return
+        }
+
         if (selection) sendIntent({ kind: 'relocate', unitId: selection.unitId, col: tile.col, row: tile.row })
         return
       }
@@ -135,8 +193,14 @@ export function DungeonPage() {
       sendIntent({ kind: 'commit', action: armedAction, col: tile.col, row: tile.row })
       if (armedAction === 'attack') setArmedAction('move')
     },
-    [armedAction, benchState, mode, npcPlan, palette, selection, sendIntent],
+    [armedAction, benchState, mode, npcPlan, palette, selectedStructure, selection, sendIntent],
   )
+
+  const handleRemoveSelectedStructure = useCallback(() => {
+    if (!selectedStructure) return
+    sendIntent({ kind: 'removeStructure', col: selectedStructure.col, row: selectedStructure.row })
+    setSelectedStructure(null)
+  }, [selectedStructure, sendIntent])
 
   return (
     <div className="h-screen flex flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
@@ -192,9 +256,10 @@ export function DungeonPage() {
                 <BenchControls
                   state={benchState}
                   mode={mode}
-                  onModeChange={setMode}
                   palette={palette}
                   onPaletteChange={setPalette}
+                  selectedStructure={selectedStructure}
+                  onRemoveSelectedStructure={handleRemoveSelectedStructure}
                   armedAction={armedAction}
                   onArmAction={setArmedAction}
                   onIntent={sendIntent}

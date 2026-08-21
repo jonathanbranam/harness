@@ -6,7 +6,7 @@
 // there is no path by which the browser can change board state except through a
 // method the engine backs.
 
-import type { ActionId } from '@repo/dungeon-engine'
+import type { ActionId, StructureKind } from '@repo/dungeon-engine'
 import type { BenchResult, BenchStore, NpcMoveChoice, Tile, UnitType } from './bench-store'
 import { boardFromRows, generateBoard, type BoardPreset } from './board-gen'
 
@@ -18,6 +18,10 @@ export type BenchIntent =
   | { kind: 'relocate'; unitId: string; col: number; row: number }
   | { kind: 'setHp'; unitId: string; hp: number }
   | { kind: 'clearUnits' }
+  | { kind: 'placeStructure'; structureKind: StructureKind; col: number; row: number; hp?: number }
+  | { kind: 'removeStructure'; col: number; row: number }
+  | { kind: 'moveStructure'; fromCol: number; fromRow: number; toCol: number; toRow: number }
+  | { kind: 'startScenario' }
   | { kind: 'newBoard'; cols?: number; rows?: number; preset?: BoardPreset; seed?: number; powerCenters?: number; rowsText?: string[] }
   | { kind: 'step' }
   | { kind: 'planEnemyTurn' }
@@ -52,6 +56,14 @@ export function applyIntent(bench: BenchStore, intent: BenchIntent): BenchResult
       return bench.setUnitHp(intent.unitId, intent.hp)
     case 'clearUnits':
       return bench.clearUnits()
+    case 'placeStructure':
+      return bench.placeStructure(intent.structureKind, intent.col, intent.row, intent.hp)
+    case 'removeStructure':
+      return bench.removeStructure(intent.col, intent.row)
+    case 'moveStructure':
+      return bench.moveStructure(intent.fromCol, intent.fromRow, intent.toCol, intent.toRow)
+    case 'startScenario':
+      return bench.startScenario()
     case 'newBoard':
       try {
         const map = intent.rowsText

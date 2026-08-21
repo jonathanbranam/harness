@@ -43,6 +43,8 @@ import {
   preview,
   reconcileHp,
   remainingMove,
+  scenario,
+  startScenario as engineStartScenario,
   threatTiles,
   unplannedNpcs as engineUnplannedNpcs,
   validMoveDests,
@@ -57,6 +59,7 @@ import {
   type NpcType,
   type PcType,
   type SequencerStep,
+  type StructureKind,
   type TurnPhase,
   type Unit,
   type UnitDef,
@@ -69,6 +72,10 @@ export type UnitType = PcType | NpcType
 const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
 const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
 export const UNIT_TYPES: UnitType[] = [...PC_TYPES, ...NPC_TYPES]
+/** The engine's own `StructureKind` values, as a runtime list — the engine
+ *  exports the type but not an enumerable array of it, and the setup surface
+ *  (tools, intents) needs one to validate a wire value against. */
+export const STRUCTURE_KINDS: StructureKind[] = ['power-center', 'tower']
 
 /** How many frames the timeline keeps. `GameState` is plain data and every engine
  *  function returns a new one, so a frame is a value, not a diff to replay. */
@@ -225,23 +232,6 @@ function fail(error: string): BenchResult {
 }
 
 /**
- * The next free id number for a set of units.
- *
- * Ids are handed out as `<type>-<n>`, and both scrubbing back and loading a
- * bookmark install units this bench did not place. Counting them is not enough —
- * ids need not be contiguous — so the next number comes from the highest one
- * actually in use.
- */
-function nextSeqFrom(units: Unit[]): number {
-  let highest = 0
-  for (const unit of units) {
-    const suffix = Number(unit.id.slice(unit.id.lastIndexOf('-') + 1))
-    if (Number.isFinite(suffix) && suffix > highest) highest = suffix
-  }
-  return highest
-}
-
-/**
  * Whether a saved bookmark predates the bench running on the engine's round.
  *
  * Such a bookmark has no `npcPlannedThisRound`/`npcPlansResolved` at all, and
@@ -263,37 +253,6 @@ function incompatibleBookmarkReason(state: GameState): string | null {
   return null
 }
 
-function kindOf(unitType: UnitType): 'pc' | 'npc' {
-  return (PC_TYPES as string[]).includes(unitType) ? 'pc' : 'npc'
-}
-
-/**
- * A new board's state — where the engine's own round starts. `endRound`
- * (called internally by `advance` at the `npc-attack → npc-move` transition)
- * moves every round, including the first, into `npc-move`: see its comment in
- * `npc.ts` ("The old `phase: 'player'` here was never observed"). Starting a
- * fresh bench board anywhere else would make its first round disagree with
- * every later one.
- */
-function emptyState(cells: Cell[][]): GameState {
-  return {
-    cells,
-    units: [],
-    spawners: [],
-    phase: 'npc-move',
-    planningPhase: 'none',
-    selectedUnitId: null,
-    plans: {},
-    planOrder: [],
-    npcPlans: [],
-    npcPlannedThisRound: [],
-    npcPlansResolved: [],
-    undoStack: [],
-    movedThisTurn: {},
-    attackedThisTurn: [],
-  }
-}
-
 export class BenchStore {
   private map: ContentMap
   private state: GameState
@@ -309,7 +268,6 @@ export class BenchStore {
    *  UI scaffolding, not something that happened. */
   private npcPlanCandidate: { unitId: string; move: NpcMoveChoice } | null = null
   private log: string[] = []
-  private unitSeq = 0
   private bookmarks: BookmarkStore | undefined
   private listeners = new Set<(state: BenchState) => void>()
 
@@ -317,7 +275,7 @@ export class BenchStore {
     this.bookmarks = opts.bookmarks
     this.map = generateBoard(opts)
     applyMap(this.map)
-    this.state = emptyState(this.freshCells())
+    this.state = this.freshScenario()
     this.frames = [{ state: this.state, map: this.map, defOverrides: {}, npcAuthorship: {}, label: `Board "${this.map.name}"` }]
     this.note(`Board "${this.map.name}" ready (${this.map.size.cols}×${this.map.size.rows}). No units placed.`)
   }
@@ -334,6 +292,26 @@ export class BenchStore {
     // The engine's own deserialized grid (terrain plus any structures), copied,
     // so the bench's board is byte-identical to what its queries will consult.
     return boardCells()
+  }
+
+  /**
+   * A fresh authored state from the current board — the engine's own
+   * `scenario.newScenario`: no units, and the round in `placement`
+   * (`scenario.ts`'s doc comment). This is the bench's only way to obtain a
+   * starting position; a fresh board and a re-generated one both begin here.
+   *
+   * Refused only when the engine is not running in bench mode
+   * (`engine-mode.ts`), which the server sets once at startup and never
+   * toggles — so a refusal here means the process itself is misconfigured,
+   * not something a caller did. Thrown rather than surfaced as a `BenchResult`
+   * because there is no caller-facing operation to attach the refusal to: this
+   * runs inside the constructor and `newBoard`, neither of which has a
+   * legitimate way to fail.
+   */
+  private freshScenario(): GameState {
+    const result = scenario.newScenario(this.freshCells())
+    if (!result.ok) throw new Error(result.reason)
+    return result.state
   }
 
   private unit(id: string): Unit | undefined {
@@ -373,7 +351,6 @@ export class BenchStore {
     // A staged-but-uncommitted planning candidate belongs to the moment it was
     // staged at, not to wherever the timeline lands after a jump.
     this.npcPlanCandidate = null
-    this.unitSeq = nextSeqFrom(frame.state.units)
     this.ensureActive()
     if (this.selectedId && !this.unit(this.selectedId)) this.selectedId = null
   }
@@ -530,51 +507,48 @@ export class BenchStore {
   }
 
   // ─── Setup ──────────────────────────────────────────────────────────────────
+  //
+  // Every method below is a wrapper: call the engine's `scenario` surface,
+  // forward its refusal verbatim, commit the state it hands back. Nothing here
+  // decides occupancy, bounds, structure-blocking, or a fresh unit's HP — those
+  // are engine facts (`scenario.ts`'s own doc comment), and the engine refuses
+  // every one of them once the round has left `placement`, which is what makes
+  // setup a phase rather than something always available.
 
   newBoard(map: ContentMap): BenchResult {
     this.map = map
     applyMap(this.map)
     this.selectedId = null
-    this.unitSeq = 0
     this.npcAuthorship = {}
     this.npcPlanCandidate = null
     // A frame like any other, so the designer can step back to the board they
     // were working on if they swapped it out by mistake.
-    this.commit(emptyState(this.freshCells()), `New board "${map.name}" (${map.size.cols}×${map.size.rows}). All units cleared.`)
+    this.commit(this.freshScenario(), `New board "${map.name}" (${map.size.cols}×${map.size.rows}). All units cleared.`)
     return ok(`Board is now "${map.name}", ${map.size.cols}×${map.size.rows}, empty.`)
   }
 
+  /** `UNIT_TYPES` is checked here, not forwarded to the engine, because it is
+   *  input validation rather than a game rule — a param straight off the wire
+   *  (a websocket intent or a tool call) that TypeScript's `UnitType` cannot
+   *  guard at runtime. Everything past that point — occupancy, bounds,
+   *  structure-blocking, starting HP — is the engine's call. */
   placeUnit(unitType: UnitType, col: number, row: number, hp?: number): BenchResult {
     this.ensureActive()
     if (!UNIT_TYPES.includes(unitType)) return fail(`Unknown unit type "${unitType}". Known: ${UNIT_TYPES.join(', ')}`)
-    if (col < 0 || col >= gridCols() || row < 0 || row >= gridRows()) {
-      return fail(`(${col}, ${row}) is off the ${gridCols()}×${gridRows()} board`)
-    }
-    if (this.state.units.some((u) => u.col === col && u.row === row)) return fail(`(${col}, ${row}) is already occupied`)
-    if (this.state.cells[row][col].hasStructure) return fail(`(${col}, ${row}) holds a structure`)
-
-    const def = getDef(unitType)
-    const unit: Unit = {
-      id: `${unitType}-${++this.unitSeq}`,
-      kind: kindOf(unitType),
-      col,
-      row,
-      unitType,
-      hp: hp ?? def.maxHp,
-    }
-    this.commit({ ...this.state, units: [...this.state.units, unit] }, `Placed ${unit.id} at (${col}, ${row}) with ${unit.hp} HP.`)
-    return ok(`Placed ${unit.id} at (${col}, ${row}).`)
+    const result = scenario.placeUnit(this.state, unitType, { col, row }, hp)
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, `Placed ${result.unit.id} at (${col}, ${row}) with ${result.unit.hp} HP.`)
+    return ok(`Placed ${result.unit.id} at (${col}, ${row}).`)
   }
 
   removeUnit(unitId: string): BenchResult {
-    if (!this.unit(unitId)) return fail(`No unit "${unitId}" on the board`)
+    this.ensureActive()
+    const result = scenario.removeUnit(this.state, unitId)
+    if (!result.ok) return fail(result.reason)
     if (this.selectedId === unitId) this.selectedId = null
     delete this.npcAuthorship[unitId]
     if (this.npcPlanCandidate?.unitId === unitId) this.npcPlanCandidate = null
-    this.commit(
-      this.withoutDepartedUnits({ ...this.state, units: this.state.units.filter((u) => u.id !== unitId) }),
-      `Removed ${unitId}.`,
-    )
+    this.commit(this.withoutDepartedUnits(result.state), `Removed ${unitId}.`)
     return ok(`Removed ${unitId}.`)
   }
 
@@ -582,35 +556,30 @@ export class BenchStore {
    *  placing a piece, not taking a turn. Use `commitSelected` to take a turn. */
   relocateUnit(unitId: string, col: number, row: number): BenchResult {
     this.ensureActive()
-    const unit = this.unit(unitId)
-    if (!unit) return fail(`No unit "${unitId}" on the board`)
-    if (col < 0 || col >= gridCols() || row < 0 || row >= gridRows()) return fail(`(${col}, ${row}) is off the board`)
-    if (this.state.units.some((u) => u.id !== unitId && u.col === col && u.row === row)) return fail(`(${col}, ${row}) is already occupied`)
-    if (this.state.cells[row][col].hasStructure) return fail(`(${col}, ${row}) holds a structure`)
-
-    const units = this.state.units.map((u) => (u.id === unitId ? { ...u, col, row } : u))
-    this.commit({ ...this.state, units }, `Moved ${unitId} to (${col}, ${row}) during setup.`)
+    const result = scenario.relocateUnit(this.state, unitId, { col, row })
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, `Moved ${unitId} to (${col}, ${row}) during setup.`)
     return ok(`${unitId} is now at (${col}, ${row}).`)
   }
 
   setUnitHp(unitId: string, hp: number): BenchResult {
-    const unit = this.unit(unitId)
-    if (!unit) return fail(`No unit "${unitId}" on the board`)
-    if (hp <= 0) return fail('HP must be at least 1 — remove the unit instead')
-    const units = this.state.units.map((u) => (u.id === unitId ? { ...u, hp } : u))
-    this.commit({ ...this.state, units }, `Set ${unitId} to ${hp} HP.`)
+    this.ensureActive()
+    const result = scenario.setUnitHp(this.state, unitId, hp)
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, `Set ${unitId} to ${hp} HP.`)
     return ok(`${unitId} now has ${hp} HP.`)
   }
 
   /**
    * Drop every round record naming units that are no longer on the board.
    *
-   * Removing or clearing units is a *setup* operation, but the round's records
-   * are keyed by unit id — so without this the bench keeps telegraphs for
-   * units that do not exist. The engine skips such a telegraph at resolution,
-   * so nothing lands wrongly; what breaks is the display, which lists a
-   * phantom as pending and offers an Amend that then refuses with "No unit
-   * ... on the board". Found exactly that way, driving the bench in a browser.
+   * Written for removing a unit mid-round, back when that was possible — now
+   * that setup is refused once the scenario has started, it no longer is. It
+   * stays anyway: a bookmark or a timeline jump can install a state whose
+   * units don't match its own round records (loading an older position that
+   * predates a unit's removal, say), and change 4's fleeing enemy will need
+   * exactly this to keep a telegraph from naming a unit that just left the
+   * board.
    */
   private withoutDepartedUnits(state: GameState): GameState {
     const alive = new Set(state.units.map((u) => u.id))
@@ -623,11 +592,60 @@ export class BenchStore {
   }
 
   clearUnits(): BenchResult {
+    this.ensureActive()
+    const result = scenario.clearUnits(this.state)
+    if (!result.ok) return fail(result.reason)
     this.selectedId = null
     this.npcAuthorship = {}
     this.npcPlanCandidate = null
-    this.commit(this.withoutDepartedUnits({ ...this.state, units: [] }), 'Cleared all units.')
+    this.commit(this.withoutDepartedUnits(result.state), 'Cleared all units.')
     return ok('Board cleared of units.')
+  }
+
+  /** Place a structure of `kind` on an empty, unoccupied tile. HP defaults to
+   *  the kind's `STRUCTURE_HP`; pass one to author it already damaged. */
+  placeStructure(kind: StructureKind, col: number, row: number, hp?: number): BenchResult {
+    this.ensureActive()
+    // Input validation, not a game rule — same reasoning as `placeUnit`'s
+    // `UNIT_TYPES` check above.
+    if (!STRUCTURE_KINDS.includes(kind)) return fail(`Unknown structure kind "${kind}". Known: ${STRUCTURE_KINDS.join(', ')}`)
+    const result = scenario.placeStructure(this.state, kind, { col, row }, hp)
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, `Placed a ${kind} at (${col}, ${row}).`)
+    return ok(`Placed a ${kind} at (${col}, ${row}).`)
+  }
+
+  removeStructure(col: number, row: number): BenchResult {
+    this.ensureActive()
+    const result = scenario.removeStructure(this.state, { col, row })
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, `Removed the structure at (${col}, ${row}).`)
+    return ok(`Removed the structure at (${col}, ${row}).`)
+  }
+
+  /** Move a structure, preserving its kind and current HP — a damaged
+   *  structure arrives at its destination just as damaged. */
+  moveStructure(fromCol: number, fromRow: number, toCol: number, toRow: number): BenchResult {
+    this.ensureActive()
+    const result = scenario.moveStructure(this.state, { col: fromCol, row: fromRow }, { col: toCol, row: toRow })
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, `Moved the structure from (${fromCol}, ${fromRow}) to (${toCol}, ${toRow}).`)
+    return ok(`Moved the structure to (${toCol}, ${toRow}).`)
+  }
+
+  /**
+   * The board is set: leave `placement` and begin the round, through the same
+   * `startScenario` the shipped game uses to leave its own loaded starting
+   * position — so an authored scenario and a loaded one enter play identically.
+   * A step on the timeline like any other, so stepping back before it returns
+   * the board to setup; there is no separate "back to setup" transition.
+   */
+  startScenario(): BenchResult {
+    this.ensureActive()
+    const result = engineStartScenario(this.state)
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, 'Scenario started — the round begins.')
+    return ok('Scenario started.')
   }
 
   // ─── Play ───────────────────────────────────────────────────────────────────
@@ -1113,8 +1131,6 @@ export class BenchStore {
     this.npcAuthorship = {}
     this.npcPlanCandidate = null
     this.ensureActive()
-    // Unit ids came from the saved state; keep new placements from colliding.
-    this.unitSeq = nextSeqFrom(bookmark.state.units)
     this.commit(bookmark.state, `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
     return ok(`Loaded "${bookmark.name}".`)
   }
