@@ -31,6 +31,7 @@ import {
   clampDef,
   commitAction,
   commitNpcTurn,
+  endPlayerTurn as engineEndPlayerTurn,
   getAllDefs,
   getDef,
   getMaxHp,
@@ -969,29 +970,22 @@ export class BenchStore {
   }
 
   /**
-   * The one phase transition the bench performs itself rather than the
-   * engine: ending the player's turn is a decision, not a rule (design.md).
-   * Matches the shipped game's `handleConfirmEndTurn`
-   * (`DungeonTacticsGame.tsx:430`), which sets `phase: 'npc-attack'` directly.
+   * Ending the player's turn: a decision the designer makes, and a transition
+   * the engine performs. `advance` deliberately refuses to resolve telegraphs
+   * while the round is still `player` — ending your turn is a decision, not a
+   * rule — so the engine exposes this operation to make that decision with.
    *
-   * Refused outside the `player` phase — not an engine refusal (nothing here
-   * calls the engine), but the bench's own: this is the one transition it
-   * owns, so it is the one place it has to guard itself. While the round is
-   * still `npc-move`, this is also the requirement that the round cannot
-   * proceed with an enemy unplanned (spec.md) — not a separate guard, since
-   * the engine's own phase machine already makes `player` unreachable until
-   * `unplannedNpcs` is empty; naming which enemies are still unplanned here
-   * just makes that refusal legible instead of generic.
+   * This used to be the one transition the bench performed itself, writing
+   * `phase: 'npc-attack'` directly and guarding the phase with its own check.
+   * The shipped game did the same, separately, and the two had already drifted:
+   * the game cleared the selection, this did not, and only this could explain
+   * *why* it refused. The engine now owns both halves, so the refusal that
+   * names the enemies still needing a plan is the one the game gets too.
    */
   endPlayerTurn(): BenchResult {
-    if (this.state.phase !== 'player') {
-      const remaining = this.state.phase === 'npc-move' ? engineUnplannedNpcs(this.state) : []
-      if (remaining.length > 0) {
-        return fail(`Can't end the player's turn yet — ${remaining.length} enemy turn(s) still need a plan: ${remaining.join(', ')}.`)
-      }
-      return fail(`Can't end the player's turn from the "${this.state.phase}" phase.`)
-    }
-    this.commit({ ...this.state, phase: 'npc-attack' }, 'Player turn ended — enemy attacks are about to resolve.')
+    const result = engineEndPlayerTurn(this.state)
+    if (!result.ok) return fail(result.reason)
+    this.commit(result.state, 'Player turn ended — enemy attacks are about to resolve.')
     return ok('Player turn ended.')
   }
 
