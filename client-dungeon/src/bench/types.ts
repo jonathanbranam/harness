@@ -32,6 +32,15 @@ export type NpcAction =
 
 export type NpcAttackPlan = { kind: 'attack'; unitId: string; targetCol: number; targetRow: number }
 
+/** What a host supplies when planning an enemy's turn by hand — mirrored from
+ *  the engine's own `NpcMoveChoice` (`@repo/dungeon-engine`). */
+export type NpcMoveChoice = { kind: 'stay' } | { kind: 'move'; toCol: number; toRow: number }
+
+/** Who planned an enemy's turn this round — bench-only bookkeeping, not part
+ *  of the engine's `GameState` (see dungeon-bench-enemy-planning's design.md,
+ *  "Authorship is tracked by the bench, not the engine"). */
+export type PlanAuthor = 'designer' | 'ai'
+
 export const PC_TYPES: PcType[] = ['melee', 'ranger', 'magic-user', 'rogue']
 export const NPC_TYPES: NpcType[] = ['short-range', 'long-range']
 
@@ -145,6 +154,16 @@ export interface BenchState {
    *  round step to report. */
   nextStep: SequencerStep | null
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
+  /** Living enemies not yet planned this round, in the AI's own preference
+   *  order — not a commitment; there is no separate ordering step. */
+  unplannedNpcs: string[]
+  /** Who planned each currently-planned enemy this round, keyed by unit id.
+   *  Absent for a unit still in `unplannedNpcs`. */
+  npcAuthorship: Record<string, PlanAuthor>
+  /** The attack tiles a staged prospective enemy plan would put in reach —
+   *  the second half of the two-step planning selection. `null` until a
+   *  candidate move is staged via the `setNpcPlanCandidate` intent. */
+  npcPlanPreview: { unitId: string; move: NpcMoveChoice; attackTiles: Tile[] } | null
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
   canRedo: boolean
@@ -166,6 +185,10 @@ export type BenchIntent =
   | { kind: 'planEnemyTurn' }
   | { kind: 'resolveTelegraphs' }
   | { kind: 'endPlayerTurn' }
+  | { kind: 'setNpcPlanCandidate'; unitId: string; move: NpcMoveChoice | null }
+  | { kind: 'planEnemyByHand'; unitId: string; move: NpcMoveChoice; attackTile?: Tile }
+  | { kind: 'planEnemyByAi'; unitId: string }
+  | { kind: 'amendTelegraph'; unitId: string; tile: Tile }
   | { kind: 'undo' }
   | { kind: 'redo' }
   | { kind: 'stepTo'; index: number }

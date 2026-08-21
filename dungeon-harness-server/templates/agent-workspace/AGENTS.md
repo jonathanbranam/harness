@@ -97,7 +97,51 @@ Playing — both sides, by hand:
   resolved, then the phase ends and play moves to `player`. Nothing has been
   hit yet — that is your and the designer's window to react: move a PC out of
   a telegraphed tile, or kill the enemy that telegraphed it, before ending the
-  turn. Only available during `npc-move`.
+  turn. Only available during `npc-move`. Planning some enemies by hand first
+  (below) and then calling this hands only the *rest* to the AI — it plans
+  whatever `dungeon_board_state`'s `unplannedNpcs` still lists, nothing more.
+- **The designer's seat: you can plan an enemy's turn yourself, instead of
+  only running the AI.** Three ways to fill any enemy's plan this round, and
+  the designer can ask for any mix of them:
+  - `dungeon_plan_enemy_by_hand` — a move (`stay`, or a destination from
+    `dungeon_npc_move_dests`) and, optionally, an attack tile (from
+    `dungeon_npc_plannable_attacks` for that *same* move — call the move-dests
+    query first, then the plannable-attacks query for the destination you're
+    considering, since an attack is validated from where the move leaves the
+    enemy, not from where it stands now). This can plan anything legal,
+    including a turn the AI itself would never choose — every enemy holding
+    position and not attacking is a real, acceptable plan.
+  - `dungeon_plan_enemy_by_ai` — hand one *named* enemy to the AI, leaving
+    every other enemy's plan (or lack of one) untouched.
+  - `dungeon_plan_enemy_turn` — the AI takes every enemy still unplanned (see
+    above).
+  - **Turn order is the order enemies are planned in.** The engine resolves
+    telegraphs in that same order later — there is no separate way to reorder,
+    and no tool here pretends otherwise. Whichever order you plan enemies in
+    (by hand, by name to the AI, or by the whole-phase AI call) is the order
+    their telegraphs will resolve in.
+  - An enemy already planned this round refuses a second plan from any of
+    these three, with the engine's own reason.
+- `dungeon_amend_telegraph(unit_id, col, row)` retargets a *locked* telegraph
+  after it was planned and before it resolves. **This is the one deliberate
+  departure from the game's own rules that this bench allows** — in the
+  shipped game a telegraph cannot change once locked, and that is the round's
+  core tension, but a designer who spots a bad enemy plan mid-turn should not
+  have to rewind the whole turn to fix it. The amendment is retroactive: it
+  reads as though the enemy had been planned that way from the start,
+  including if the designer scrubs back to the frame where its turn was
+  planned — there is no separate "changed their mind" record to find or
+  explain. The new target is validated from the enemy's *current* position
+  (never re-derived — offer only a tile `dungeon_npc_plannable_attacks` with a
+  `stay` move would report), and amending never moves the enemy. Refused if
+  the enemy has no locked telegraph, if it already resolved, or if the enemy
+  died before it could be amended. Only available during `player`, on a
+  telegraph `dungeon_board_state`'s `telegraphs` still lists as pending.
+- `dungeon_board_state` also reports `unplannedNpcs` (which enemies still need
+  a plan this round, in the AI's own preference order) and `npcAuthorship`
+  (who planned each already-planned enemy, `"designer"` or `"ai"`) — read
+  these rather than tracking either yourself, since the bench is what keeps
+  them in sync with the actual plan.
 - `dungeon_end_turn` ends the player's turn and moves to `npc-attack` — the
   one transition the designer decides rather than the engine, matching the
   shipped game's own end-turn button. Only available during `player`.

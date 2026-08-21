@@ -9,7 +9,8 @@ import { BenchControls } from '../components/BenchControls'
 import { BookmarkRail } from '../components/BookmarkRail'
 import { TransportStrip } from '../components/TransportStrip'
 import { ApprovalDialog } from '../components/ApprovalDialog'
-import { NO_FIELDS, type ActionId, type FieldToggles, type Tile, type Unit, type UnitType } from '../bench/types'
+import { EnemyPlanningPanel, type NpcPlanStep } from '../components/EnemyPlanningPanel'
+import { NO_FIELDS, type ActionId, type FieldToggles, type NpcMoveChoice, type Tile, type Unit, type UnitType } from '../bench/types'
 
 const BOARD_PANE = 'board'
 const CHAT_PANE = 'chat'
@@ -36,14 +37,30 @@ export function DungeonPage() {
   // board lights its reach by default — the same place the game starts.
   const [armedAction, setArmedAction] = useState<ActionId>('move')
   const [fields, setFields] = useState<FieldToggles>(NO_FIELDS)
+  // Where the designer is in hand-planning an enemy's turn or amending a
+  // locked telegraph — see EnemyPlanningPanel. Lives here, not in that
+  // component, because it also governs how a board tile click is routed.
+  const [npcPlan, setNpcPlan] = useState<NpcPlanStep | null>(null)
 
   const selection = benchState?.selection ?? null
+  // The staged preview for whichever enemy `npcPlan` is currently planning —
+  // `null` unless the server's candidate agrees on which unit, since a stale
+  // preview from a moment ago must never paint the wrong enemy's targets.
+  const npcPlanPreview =
+    npcPlan && npcPlan.stage !== 'choose-destination' && benchState?.npcPlanPreview?.unitId === npcPlan.unitId
+      ? benchState.npcPlanPreview
+      : null
 
   // Clicking a unit always selects it — in either mode, on either side. Driving
   // the enemy by hand is the point of the bench, so nothing here distinguishes
   // PCs from NPCs.
   const handleUnitClick = useCallback(
     (unit: Unit) => {
+      // Hand-planning or amending is its own click flow, driven by the panel
+      // and by handleTileClick below — a click on a unit is not a selection or
+      // an attack while one is in progress.
+      if (npcPlan) return
+
       // Aiming takes precedence over selecting, as it does in the game: with an
       // action armed, a click on a unit standing on one of its target tiles is a
       // click on that tile. Without this, the enemy you were aiming at simply
@@ -62,11 +79,37 @@ export function DungeonPage() {
       setArmedAction('move')
       sendIntent({ kind: 'select', unitId: unit.id })
     },
-    [armedAction, mode, selection, sendIntent],
+    [armedAction, mode, npcPlan, selection, sendIntent],
   )
 
   const handleTileClick = useCallback(
     (tile: Tile) => {
+      // Enemy-planning click routing takes precedence over everything else:
+      // the two-step selection (destination, then attack) design.md describes,
+      // plus the amend flow's single attack-tile step.
+      if (npcPlan) {
+        if (npcPlan.stage === 'choose-destination') {
+          const dest = benchState?.selection?.moveDests.find((t) => t.col === tile.col && t.row === tile.row)
+          if (!dest) return
+          const move: NpcMoveChoice = { kind: 'move', toCol: tile.col, toRow: tile.row }
+          sendIntent({ kind: 'setNpcPlanCandidate', unitId: npcPlan.unitId, move })
+          setNpcPlan({ stage: 'choose-attack', unitId: npcPlan.unitId, move })
+          return
+        }
+
+        const preview = benchState?.npcPlanPreview
+        if (!preview || preview.unitId !== npcPlan.unitId) return
+        if (!preview.attackTiles.some((t) => t.col === tile.col && t.row === tile.row)) return
+
+        if (npcPlan.stage === 'choose-attack') {
+          sendIntent({ kind: 'planEnemyByHand', unitId: npcPlan.unitId, move: npcPlan.move, attackTile: tile })
+        } else {
+          sendIntent({ kind: 'amendTelegraph', unitId: npcPlan.unitId, tile })
+        }
+        setNpcPlan(null)
+        return
+      }
+
       if (mode === 'setup') {
         if (palette) {
           sendIntent({ kind: 'place', unitType: palette, col: tile.col, row: tile.row })
@@ -92,7 +135,7 @@ export function DungeonPage() {
       sendIntent({ kind: 'commit', action: armedAction, col: tile.col, row: tile.row })
       if (armedAction === 'attack') setArmedAction('move')
     },
-    [armedAction, mode, palette, selection, sendIntent],
+    [armedAction, benchState, mode, npcPlan, palette, selection, sendIntent],
   )
 
   return (
@@ -159,6 +202,7 @@ export function DungeonPage() {
                   onFieldsChange={setFields}
                   lastError={benchError}
                 />
+                <EnemyPlanningPanel state={benchState} npcPlan={npcPlan} onNpcPlanChange={setNpcPlan} onIntent={sendIntent} />
                 <div className="flex-1 min-h-0 flex">
                   <BookmarkRail bookmarks={benchState?.bookmarks ?? []} onIntent={sendIntent} />
                   <div className="flex-1 min-h-0">
@@ -169,6 +213,7 @@ export function DungeonPage() {
                       fields={fields}
                       onTileClick={handleTileClick}
                       onUnitClick={handleUnitClick}
+                      planningAttackTiles={npcPlanPreview?.attackTiles}
                     />
                   </div>
                 </div>

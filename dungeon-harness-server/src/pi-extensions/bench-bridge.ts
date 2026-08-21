@@ -12,7 +12,7 @@
 
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
-import type { BenchStore, SelectionView, UnitType } from '../bench/bench-store'
+import type { BenchStore, NpcMoveChoice, SelectionView, Tile, UnitType } from '../bench/bench-store'
 import { UNIT_TYPES } from '../bench/bench-store'
 import { boardFromRows, boardToRows, generateBoard } from '../bench/board-gen'
 import type { ActionId, ActionPreview, Unit } from '@repo/dungeon-engine'
@@ -37,6 +37,11 @@ export const BENCH_TOOL_NAMES = [
   'dungeon_plan_enemy_turn',
   'dungeon_resolve_telegraphs',
   'dungeon_end_turn',
+  'dungeon_npc_move_dests',
+  'dungeon_npc_plannable_attacks',
+  'dungeon_plan_enemy_by_hand',
+  'dungeon_plan_enemy_by_ai',
+  'dungeon_amend_telegraph',
   'dungeon_undo',
   'dungeon_redo',
   'dungeon_step_to',
@@ -59,6 +64,7 @@ interface BenchToolDetails {
   units?: Unit[]
   selection?: SelectionView | null
   preview?: ActionPreview
+  tiles?: Tile[]
 }
 
 interface BenchToolResult {
@@ -75,6 +81,21 @@ function outcome(bench: BenchStore, result: { ok: true; message: string } | { ok
   const details = { ok: true, message: result.message, board: bench.boardRows(), units: state.units, selection: state.selection }
   return { content: text(details), details }
 }
+
+/** The move-choice params every planning tool below shares: `stay`, or `move`
+ *  with a destination. Kept flat (not a nested object) to match every other
+ *  tool's parameter shape in this file. Returns `undefined` for a malformed
+ *  combination — `move` without both coordinates — so the caller can report
+ *  that itself rather than guessing what was meant. */
+function parseMoveChoice(moveKind: string, toCol?: number, toRow?: number): NpcMoveChoice | undefined {
+  if (moveKind === 'stay') return { kind: 'stay' }
+  if (moveKind === 'move' && typeof toCol === 'number' && typeof toRow === 'number') {
+    return { kind: 'move', toCol, toRow }
+  }
+  return undefined
+}
+
+const MOVE_KIND_DESCRIPTION = "'stay' to hold in place, or 'move' with move_to_col/move_to_row for a destination"
 
 export function createBenchBridgeExtension(opts: { bench: BenchStore }): ExtensionFactory {
   const { bench } = opts
@@ -338,6 +359,99 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       promptSnippet: "End the player's turn and move to enemy telegraph resolution",
       parameters: Type.Object({}),
       execute: async () => outcome(bench, bench.endPlayerTurn()),
+    })
+
+    // ─── Planning an enemy's turn by hand (the designer's seat) ──────────────
+    //
+    // Three ways to fill any enemy's plan, mixable within one round:
+    // dungeon_plan_enemy_by_hand (a designer's own choice), dungeon_plan_enemy_by_ai
+    // (the AI, for one named enemy), or dungeon_plan_enemy_turn above (the AI, for
+    // every enemy still unplanned). Turn order is the order enemies are planned in
+    // — there is no separate tool that reorders, because choosing who to plan next
+    // already is choosing the order.
+
+    pi.registerTool({
+      name: 'dungeon_npc_move_dests',
+      label: 'Enemy Move Destinations',
+      description:
+        "Ask the engine where an enemy could move this turn, if you were planning it by hand — the first half of the two-step choice planning an enemy's turn is: pick a destination, then see what it puts in reach. The same query a PC's own selection already exposes for its own moves.",
+      promptSnippet: 'Ask where an enemy could move if planned by hand',
+      parameters: Type.Object({ unit_id: Type.String() }),
+      execute: async (_id, params): Promise<BenchToolResult> => {
+        const tiles = bench.npcMoveDests(params.unit_id)
+        return { content: text(tiles), details: { ok: true, tiles } }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_npc_plannable_attacks',
+      label: 'Enemy Plannable Attacks',
+      description:
+        "Ask the engine what an enemy could attack **if** it made a given move — the second half of the two-step choice. This exists because dungeon_plan_enemy_by_hand validates an attack from the enemy's post-move position, and without this query you would be guessing a destination and then reading a refusal. Call dungeon_npc_move_dests first for the destination set, then this for each candidate you're considering.",
+      promptSnippet: 'Ask what an enemy could attack after a prospective move',
+      parameters: Type.Object({
+        unit_id: Type.String(),
+        move_kind: Type.String({ description: MOVE_KIND_DESCRIPTION }),
+        move_to_col: Type.Optional(Type.Number()),
+        move_to_row: Type.Optional(Type.Number()),
+      }),
+      execute: async (_id, params): Promise<BenchToolResult> => {
+        const move = parseMoveChoice(params.move_kind, params.move_to_col, params.move_to_row)
+        if (!move) {
+          const error = `move_kind must be "stay", or "move" with move_to_col/move_to_row`
+          return { content: text(error), details: { ok: false, error }, isError: true }
+        }
+        const tiles = bench.npcPlannableAttacks(params.unit_id, move)
+        return { content: text(tiles), details: { ok: true, tiles } }
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_plan_enemy_by_hand',
+      label: 'Plan Enemy By Hand',
+      description:
+        "Plan one enemy's turn yourself: a move (hold in place, or a destination from dungeon_npc_move_dests) and, optionally, an attack tile (from dungeon_npc_plannable_attacks for that same move — a tile that query didn't offer is refused). The move executes immediately; an attack locks as a telegraph, not resolved. This is the designer's seat: it can plan anything legal, including a turn the game's own AI would never choose. Refused if the enemy is already planned this round, or if the move or attack the engine is asked to validate is illegal — the same refusal a hand-driven click would get.",
+      promptSnippet: "Plan one enemy's turn by hand: a move and an optional attack",
+      parameters: Type.Object({
+        unit_id: Type.String(),
+        move_kind: Type.String({ description: MOVE_KIND_DESCRIPTION }),
+        move_to_col: Type.Optional(Type.Number()),
+        move_to_row: Type.Optional(Type.Number()),
+        attack_col: Type.Optional(Type.Number()),
+        attack_row: Type.Optional(Type.Number()),
+      }),
+      execute: async (_id, params) => {
+        const move = parseMoveChoice(params.move_kind, params.move_to_col, params.move_to_row)
+        if (!move) {
+          const error = `move_kind must be "stay", or "move" with move_to_col/move_to_row`
+          return { content: text(error), details: { ok: false, error }, isError: true }
+        }
+        const attackTile =
+          typeof params.attack_col === 'number' && typeof params.attack_row === 'number'
+            ? { col: params.attack_col, row: params.attack_row }
+            : undefined
+        return outcome(bench, bench.planEnemyByHand(params.unit_id, move, attackTile))
+      },
+    })
+
+    pi.registerTool({
+      name: 'dungeon_plan_enemy_by_ai',
+      label: 'Plan Enemy By AI',
+      description:
+        "Hand one named enemy to the game's own AI, leaving every other enemy's plan — or lack of one — untouched. The middle ground between planning by hand and dungeon_plan_enemy_turn's \"AI takes everyone still unplanned\": use this to compare what the AI would do for one enemy while you plan the rest, or hand-plan the ones you care about and let this fill in one specific other. Refused if the enemy is already planned this round, or is not an enemy.",
+      promptSnippet: "Hand one named enemy's turn to the game's own AI",
+      parameters: Type.Object({ unit_id: Type.String() }),
+      execute: async (_id, params) => outcome(bench, bench.planEnemyByAi(params.unit_id)),
+    })
+
+    pi.registerTool({
+      name: 'dungeon_amend_telegraph',
+      label: 'Amend Telegraph',
+      description:
+        "Retarget a locked telegraph after it was planned and before it resolves — **the one deliberate departure from the game's own rules this bench allows**: in the shipped game a telegraph cannot change once locked, but a designer who spots a bad enemy plan mid-turn should not have to rewind the whole turn to fix it. The amendment is retroactive: it reads as though the enemy had been planned that way from the start, including if you step back to the frame where its turn was planned — there is no separate \"changed their mind\" record. The new target is validated from the enemy's current position (never re-derived — a tile dungeon_npc_plannable_attacks with a 'stay' move wouldn't offer is refused), and amending never moves the enemy itself. Refused if the enemy has no locked telegraph, if it already resolved, or if the enemy died before you could amend it.",
+      promptSnippet: "Retarget a locked telegraph before it resolves — retroactively",
+      parameters: Type.Object({ unit_id: Type.String(), col: Type.Number(), row: Type.Number() }),
+      execute: async (_id, params) => outcome(bench, bench.amendTelegraph(params.unit_id, { col: params.col, row: params.row })),
     })
 
     pi.registerTool({

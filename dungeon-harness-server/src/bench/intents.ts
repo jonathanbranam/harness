@@ -7,7 +7,7 @@
 // method the engine backs.
 
 import type { ActionId } from '@repo/dungeon-engine'
-import type { BenchResult, BenchStore, UnitType } from './bench-store'
+import type { BenchResult, BenchStore, NpcMoveChoice, Tile, UnitType } from './bench-store'
 import { boardFromRows, generateBoard, type BoardPreset } from './board-gen'
 
 export type BenchIntent =
@@ -23,6 +23,10 @@ export type BenchIntent =
   | { kind: 'planEnemyTurn' }
   | { kind: 'resolveTelegraphs' }
   | { kind: 'endPlayerTurn' }
+  | { kind: 'setNpcPlanCandidate'; unitId: string; move: NpcMoveChoice | null }
+  | { kind: 'planEnemyByHand'; unitId: string; move: NpcMoveChoice; attackTile?: Tile }
+  | { kind: 'planEnemyByAi'; unitId: string }
+  | { kind: 'amendTelegraph'; unitId: string; tile: Tile }
   | { kind: 'undo' }
   | { kind: 'redo' }
   | { kind: 'stepTo'; index: number }
@@ -65,6 +69,14 @@ export function applyIntent(bench: BenchStore, intent: BenchIntent): BenchResult
       return bench.resolveTelegraphs()
     case 'endPlayerTurn':
       return bench.endPlayerTurn()
+    case 'setNpcPlanCandidate':
+      return bench.setNpcPlanCandidate(intent.unitId, intent.move)
+    case 'planEnemyByHand':
+      return bench.planEnemyByHand(intent.unitId, intent.move, intent.attackTile)
+    case 'planEnemyByAi':
+      return bench.planEnemyByAi(intent.unitId)
+    case 'amendTelegraph':
+      return bench.amendTelegraph(intent.unitId, intent.tile)
     case 'undo':
       return bench.undo()
     case 'redo':

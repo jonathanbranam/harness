@@ -22,12 +22,15 @@
 
 import {
   advance,
+  advanceNpc,
+  amendTelegraph as engineAmendTelegraph,
   applyLoaded,
   applyMap,
   availableActions,
   boardCells,
   clampDef,
   commitAction,
+  commitNpcTurn,
   getAllDefs,
   getDef,
   getMaxHp,
@@ -35,10 +38,12 @@ import {
   gridRows,
   hasAttacked,
   nextAction,
+  plannableAttacks,
   preview,
   reconcileHp,
   remainingMove,
   threatTiles,
+  unplannedNpcs as engineUnplannedNpcs,
   validMoveDests,
   type ActionId,
   type ActionOption,
@@ -47,6 +52,7 @@ import {
   type ContentMap,
   type GameState,
   type NpcAction,
+  type NpcMoveChoice,
   type NpcType,
   type PcType,
   type SequencerStep,
@@ -77,6 +83,13 @@ interface Frame {
   state: GameState
   map: ContentMap
   defOverrides: Partial<Record<UnitType, UnitDef>>
+  /**
+   * Who planned each enemy currently marked planned this round, alongside the
+   * state it describes — carried per frame so scrubbing back shows the right
+   * attribution next to the right board rather than today's map applied to
+   * yesterday's frame (design.md, "It must be part of the timeline frame").
+   */
+  npcAuthorship: Record<string, PlanAuthor>
   /** What produced this frame, for the scrub bar's tooltip. */
   label: string
 }
@@ -85,6 +98,13 @@ export interface Tile {
   col: number
   row: number
 }
+
+export type { NpcMoveChoice }
+
+/** Who authored an enemy's plan this round — bench-only bookkeeping. `GameState`
+ *  records only *that* an enemy is planned (`npcPlannedThisRound`), never *who*
+ *  chose it (design.md, "Authorship is tracked by the bench, not the engine"). */
+export type PlanAuthor = 'designer' | 'ai'
 
 /** What the browser draws and the agent reads. Every derived field is computed
  *  by the engine at read time, never stored — the failure mode that killed the
@@ -122,6 +142,22 @@ export interface BenchState {
    *  filtered against `npcPlansResolved`, since the engine keeps a resolved
    *  entry in `npcPlans` until the round ends rather than removing it. */
   telegraphs: { unitId: string; targetCol: number; targetRow: number }[]
+  /** Living enemies not yet planned this round, straight from the engine's
+   *  `unplannedNpcs`, in the order it gives — the AI's own preference order,
+   *  not a commitment (design.md, "there is no reorder control"). */
+  unplannedNpcs: string[]
+  /** Who planned each currently-planned enemy this round — bench-only
+   *  bookkeeping, keyed by unit id. Absent for a unit still in `unplannedNpcs`. */
+  npcAuthorship: Record<string, PlanAuthor>
+  /**
+   * The attack tiles a prospective enemy plan would put in reach, from
+   * `plannableAttacks` — the second half of the two-step selection design.md
+   * describes: pick a destination (or holding), then see what it reaches,
+   * before committing. Set by `setNpcPlanCandidate`; `null` until a candidate
+   * is staged. Also drives the amend flow, staged with `{ kind: 'stay' }`
+   * since amending never moves the enemy.
+   */
+  npcPlanPreview: { unitId: string; move: NpcMoveChoice; attackTiles: Tile[] } | null
   defs: Record<UnitType, UnitDef>
   canUndo: boolean
   canRedo: boolean
@@ -264,6 +300,13 @@ export class BenchStore {
   private cursor = 0
   private selectedId: string | null = null
   private defOverrides: Partial<Record<UnitType, UnitDef>> = {}
+  /** This round's plan authorship, unit id → who chose it. Bench-only; see
+   *  `Frame.npcAuthorship`. */
+  private npcAuthorship: Record<string, PlanAuthor> = {}
+  /** A staged prospective enemy plan, previewed via `plannableAttacks` but not
+   *  yet committed — see `setNpcPlanCandidate`. Never part of a `Frame`: it is
+   *  UI scaffolding, not something that happened. */
+  private npcPlanCandidate: { unitId: string; move: NpcMoveChoice } | null = null
   private log: string[] = []
   private unitSeq = 0
   private bookmarks: BookmarkStore | undefined
@@ -274,7 +317,7 @@ export class BenchStore {
     this.map = generateBoard(opts)
     applyMap(this.map)
     this.state = emptyState(this.freshCells())
-    this.frames = [{ state: this.state, map: this.map, defOverrides: {}, label: `Board "${this.map.name}"` }]
+    this.frames = [{ state: this.state, map: this.map, defOverrides: {}, npcAuthorship: {}, label: `Board "${this.map.name}"` }]
     this.note(`Board "${this.map.name}" ready (${this.map.size.cols}×${this.map.size.rows}). No units placed.`)
   }
 
@@ -310,7 +353,7 @@ export class BenchStore {
    */
   private commit(next: GameState, message: string): void {
     this.frames = this.frames.slice(0, this.cursor + 1)
-    this.frames.push({ state: next, map: this.map, defOverrides: { ...this.defOverrides }, label: message })
+    this.frames.push({ state: next, map: this.map, defOverrides: { ...this.defOverrides }, npcAuthorship: { ...this.npcAuthorship }, label: message })
     if (this.frames.length > MAX_FRAMES) this.frames.shift()
     this.cursor = this.frames.length - 1
     this.state = next
@@ -325,6 +368,10 @@ export class BenchStore {
     this.state = frame.state
     this.map = frame.map
     this.defOverrides = { ...frame.defOverrides }
+    this.npcAuthorship = { ...frame.npcAuthorship }
+    // A staged-but-uncommitted planning candidate belongs to the moment it was
+    // staged at, not to wherever the timeline lands after a jump.
+    this.npcPlanCandidate = null
     this.unitSeq = nextSeqFrom(frame.state.units)
     this.ensureActive()
     if (this.selectedId && !this.unit(this.selectedId)) this.selectedId = null
@@ -344,6 +391,15 @@ export class BenchStore {
       telegraphs: this.state.npcPlans
         .filter((p) => !this.state.npcPlansResolved.includes(p.unitId))
         .map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
+      unplannedNpcs: engineUnplannedNpcs(this.state),
+      npcAuthorship: { ...this.npcAuthorship },
+      npcPlanPreview: this.npcPlanCandidate
+        ? {
+            unitId: this.npcPlanCandidate.unitId,
+            move: this.npcPlanCandidate.move,
+            attackTiles: plannableAttacks(this.state, this.npcPlanCandidate.unitId, this.npcPlanCandidate.move),
+          }
+        : null,
       defs: getAllDefs() as Record<UnitType, UnitDef>,
       canUndo: this.cursor > 0,
       canRedo: this.cursor < this.frames.length - 1,
@@ -475,6 +531,8 @@ export class BenchStore {
     applyMap(this.map)
     this.selectedId = null
     this.unitSeq = 0
+    this.npcAuthorship = {}
+    this.npcPlanCandidate = null
     // A frame like any other, so the designer can step back to the board they
     // were working on if they swapped it out by mistake.
     this.commit(emptyState(this.freshCells()), `New board "${map.name}" (${map.size.cols}×${map.size.rows}). All units cleared.`)
@@ -536,6 +594,8 @@ export class BenchStore {
 
   clearUnits(): BenchResult {
     this.selectedId = null
+    this.npcAuthorship = {}
+    this.npcPlanCandidate = null
     this.commit({ ...this.state, units: [] }, 'Cleared all units.')
     return ok('Board cleared of units.')
   }
@@ -596,6 +656,188 @@ export class BenchStore {
     return preview(this.state, this.selectedId, action, tile)
   }
 
+  // ─── Enemy turn planning (the designer's seat) ─────────────────────────────
+  //
+  // Three ways to fill an enemy's plan, mixable within one round (proposal.md):
+  // by hand (`planEnemyByHand`, over `commitNpcTurn`), handed to the AI one at
+  // a time (`planEnemyByAi`, over `advanceNpc`), or handed to the AI for every
+  // enemy still unplanned (the existing `planEnemyTurn`, whose loop below also
+  // tags each enemy it plans as AI-authored). Turn order is planning order —
+  // there is no fourth way that reorders (design.md).
+
+  /**
+   * Legal destinations for an unplanned enemy — the first half of the two-step
+   * selection design.md describes ("Planning is a two-step selection"),
+   * straight from the engine's `validMoveDests`, the same query a PC's own
+   * selection already exposes.
+   */
+  npcMoveDests(unitId: string): Tile[] {
+    this.ensureActive()
+    return validMoveDests(this.state, unitId)
+  }
+
+  /**
+   * The attack tiles this enemy would reach **if** it made `move` — the second
+   * half of the two-step selection, and the reason `plannableAttacks` exists at
+   * all (design.md): a destination is chosen before attack targets are
+   * offered, which is the only order this query can answer for.
+   */
+  npcPlannableAttacks(unitId: string, move: NpcMoveChoice): Tile[] {
+    this.ensureActive()
+    return plannableAttacks(this.state, unitId, move)
+  }
+
+  /**
+   * Stage a prospective move for one enemy so `getState().npcPlanPreview` can
+   * report what it would put in reach, without committing anything. The
+   * client's two-step planning UI drives this between picking a destination
+   * and picking an attack tile; the amend flow drives it too, always with
+   * `{ kind: 'stay' }`, since amending never moves the enemy.
+   *
+   * Deliberately not validated here beyond "this is an enemy on the board" —
+   * `npcPlanPreview`'s `attackTiles` comes from `plannableAttacks`, which
+   * already reports nothing for an illegal destination (design.md, "the bench
+   * never pre-filters"), so there is no separate legality check to duplicate.
+   */
+  setNpcPlanCandidate(unitId: string, move: NpcMoveChoice | null): BenchResult {
+    if (move === null) {
+      this.npcPlanCandidate = null
+      this.emit()
+      return ok('Planning candidate cleared.')
+    }
+    const unit = this.unit(unitId)
+    if (!unit) return fail(`No unit "${unitId}" on the board`)
+    if (unit.kind !== 'npc') return fail(`"${unitId}" is a player character, not an enemy, and cannot be planned as one.`)
+    this.npcPlanCandidate = { unitId, move }
+    this.emit()
+    return ok('Planning candidate set.')
+  }
+
+  /**
+   * The designer plans one enemy's turn by hand: a destination (or holding in
+   * place) and, optionally, an attack tile — validated by the engine exactly as
+   * the AI's own choice would be (`commitNpcTurn`). The bench does not
+   * pre-check either half; a refusal here is the engine's own, forwarded
+   * verbatim.
+   *
+   * Provenance is recorded in the same call that plans the move, so the two
+   * can never drift apart (design.md, "Provenance can drift from the plan").
+   */
+  planEnemyByHand(unitId: string, move: NpcMoveChoice, attackTile?: Tile): BenchResult {
+    this.ensureActive()
+    const result = commitNpcTurn(this.state, unitId, move, attackTile)
+    if (!result.ok) return fail(result.reason)
+    this.npcAuthorship = { ...this.npcAuthorship, [unitId]: 'designer' }
+    this.npcPlanCandidate = null
+    const destination = move.kind === 'stay' ? 'stayed in place' : `moved to (${move.toCol}, ${move.toRow})`
+    const attack = attackTile ? `, attack telegraphed at (${attackTile.col}, ${attackTile.row})` : ', no attack'
+    const message = `${unitId} planned by hand: ${destination}${attack}.`
+    this.commit(result.state, message)
+    return ok(message)
+  }
+
+  /**
+   * Hand one named enemy to the game's own AI (`advanceNpc`), leaving every
+   * other enemy's plan — or lack of one — untouched. The middle ground between
+   * planning by hand and `planEnemyTurn`'s "AI takes everyone still unplanned".
+   */
+  planEnemyByAi(unitId: string): BenchResult {
+    this.ensureActive()
+    const result = advanceNpc(this.state, unitId)
+    if (!result.ok) return fail(result.reason)
+    this.npcAuthorship = { ...this.npcAuthorship, [unitId]: 'ai' }
+    if (this.npcPlanCandidate?.unitId === unitId) this.npcPlanCandidate = null
+    const message = `${unitId} planned by the AI.`
+    this.commit(result.state, message)
+    return ok(message)
+  }
+
+  /**
+   * Retarget a locked telegraph after it was planned and before it resolves —
+   * the one deliberate departure from the game's own rules (proposal.md): in
+   * the game a telegraph cannot change once locked, but a designer who spots a
+   * bad enemy plan mid-turn should not have to rewind the whole turn to fix it.
+   *
+   * The engine (`amendTelegraph`) validates the new target exactly once, from
+   * the enemy's current, immutable-since-move position — never re-derived
+   * per historical frame. The amendment is then retroactive: it reads as
+   * though the enemy had been planned that way from the start, so it is
+   * written into every frame from the one that locked the telegraph through
+   * the current cursor. See `rewriteTelegraphWindow` for the mechanics and
+   * why this is safe.
+   */
+  amendTelegraph(unitId: string, tile: Tile): BenchResult {
+    this.ensureActive()
+    const result = engineAmendTelegraph(this.state, unitId, tile)
+    if (!result.ok) return fail(result.reason)
+
+    const amended = result.state.npcPlans.find((p) => p.unitId === unitId)
+    if (!amended) {
+      // Unreachable: the engine's own success above already means an entry
+      // for this unit existed to amend. Guarded rather than asserted with a
+      // non-null assertion, so a change to the engine's contract fails loudly
+      // here instead of producing a silent `undefined` write below.
+      return fail(`No locked telegraph for ${unitId} to amend.`)
+    }
+
+    this.rewriteTelegraphWindow(unitId, amended)
+    if (this.npcPlanCandidate?.unitId === unitId) this.npcPlanCandidate = null
+    const message = `${unitId}'s telegraph retargeted to (${tile.col}, ${tile.row}).`
+    this.note(message)
+    this.emit()
+    return ok(message)
+  }
+
+  /**
+   * The retroactive rewrite (design.md, "Amendment rewrites history in
+   * place") — **the only code in this file that mutates a stored frame's
+   * state rather than appending a new one.** Kept to this one place and
+   * touching nothing but `unitId`'s own `npcPlans` entry, on purpose: this is
+   * the least self-evident failure mode in the bench, since a bug here
+   * corrupts history rather than producing a visibly wrong board.
+   *
+   * The window is exactly "after locked, before resolved": walking back from
+   * the cursor, a frame belongs to it while the frame's own state still has
+   * `unitId` in `npcPlannedThisRound` and not yet in `npcPlansResolved`. The
+   * engine's own refusals above already guarantee the cursor's frame is in
+   * this window — `amendTelegraph` refuses unless both hold there — so the
+   * loop only has to find how much *further back* the window extends.
+   *
+   * Nothing else needs to change in an amended frame: nothing reads `npcPlans`
+   * between lock and resolution (design.md cites the engine's `actions.ts`,
+   * `pc.ts`, and `pathfinding.ts` as having no such read — a telegraph is
+   * display-only until resolution walks it), so replacing one entry in that
+   * array is the entire edit. Every other field of every frame in the window —
+   * board, units, every *other* unit's plan — is copied forward untouched.
+   *
+   * Frames beyond the cursor (a redo stack, if the designer had scrubbed back
+   * before amending) are discarded rather than left stale: they were computed
+   * against the pre-amendment telegraph, and the bench already discards a redo
+   * stack whenever the designer acts after stepping back — amending is no
+   * different.
+   */
+  private rewriteTelegraphWindow(unitId: string, amended: GameState['npcPlans'][number]): void {
+    let lockIndex = this.cursor
+    while (
+      lockIndex > 0 &&
+      this.frames[lockIndex - 1].state.npcPlannedThisRound.includes(unitId) &&
+      !this.frames[lockIndex - 1].state.npcPlansResolved.includes(unitId)
+    ) {
+      lockIndex--
+    }
+
+    for (let i = lockIndex; i <= this.cursor; i++) {
+      const frame = this.frames[i]
+      this.frames[i] = {
+        ...frame,
+        state: { ...frame.state, npcPlans: frame.state.npcPlans.map((p) => (p.unitId === unitId ? amended : p)) },
+      }
+    }
+
+    this.frames = this.frames.slice(0, this.cursor + 1)
+    this.state = this.frames[this.cursor].state
+  }
+
   /**
    * Perform exactly one step of the engine's round — whatever `nextAction`
    * says comes next — as its own timeline frame. The granularity the
@@ -611,9 +853,29 @@ export class BenchStore {
     this.ensureActive()
     const result = advance(this.state)
     if (!result.ok) return fail(result.reason)
+    this.noteStepAuthorship(result.step)
     const message = describeStep(result.step)
     this.commit(result.state, message)
     return ok(message)
+  }
+
+  /**
+   * Bookkeeping that belongs exactly where a generic `advance()` step changes
+   * `npcPlans`/`npcPlannedThisRound`: the engine's own AI is the only thing a
+   * bare `plan-enemy` step here can be (`planEnemyByHand`/`planEnemyByAi` are
+   * separate calls that record authorship themselves and never go through
+   * `advance`), so tag it AI-authored. And once the round truly ends — the
+   * `npc-attack → npc-move` transition `advance` performs by chaining into
+   * `endRound` — clear provenance, since `GameState` itself has moved on to a
+   * round nothing has been planned in yet (design.md, "cleared when the round
+   * ends").
+   */
+  private noteStepAuthorship(step: SequencerStep): void {
+    if (step.kind === 'plan-enemy') {
+      this.npcAuthorship = { ...this.npcAuthorship, [step.unitId]: 'ai' }
+    } else if (step.kind === 'phase-transition' && step.from === 'npc-attack') {
+      this.npcAuthorship = {}
+    }
   }
 
   /**
@@ -670,6 +932,7 @@ export class BenchStore {
       const result = advance(this.state)
       if (!result.ok) return fail(result.reason)
       steps++
+      this.noteStepAuthorship(result.step)
       message = describeStep(result.step)
       this.commit(result.state, message)
     }
@@ -684,10 +947,19 @@ export class BenchStore {
    *
    * Refused outside the `player` phase — not an engine refusal (nothing here
    * calls the engine), but the bench's own: this is the one transition it
-   * owns, so it is the one place it has to guard itself.
+   * owns, so it is the one place it has to guard itself. While the round is
+   * still `npc-move`, this is also the requirement that the round cannot
+   * proceed with an enemy unplanned (spec.md) — not a separate guard, since
+   * the engine's own phase machine already makes `player` unreachable until
+   * `unplannedNpcs` is empty; naming which enemies are still unplanned here
+   * just makes that refusal legible instead of generic.
    */
   endPlayerTurn(): BenchResult {
     if (this.state.phase !== 'player') {
+      const remaining = this.state.phase === 'npc-move' ? engineUnplannedNpcs(this.state) : []
+      if (remaining.length > 0) {
+        return fail(`Can't end the player's turn yet — ${remaining.length} enemy turn(s) still need a plan: ${remaining.join(', ')}.`)
+      }
       return fail(`Can't end the player's turn from the "${this.state.phase}" phase.`)
     }
     this.commit({ ...this.state, phase: 'npc-attack' }, 'Player turn ended — enemy attacks are about to resolve.')
@@ -813,6 +1085,10 @@ export class BenchStore {
     }
 
     this.selectedId = null
+    // A bookmark predates this bench's own provenance bookkeeping — it saved
+    // no record of who planned what, so there is nothing truthful to restore.
+    this.npcAuthorship = {}
+    this.npcPlanCandidate = null
     this.ensureActive()
     // Unit ids came from the saved state; keep new placements from colliding.
     this.unitSeq = nextSeqFrom(bookmark.state.units)

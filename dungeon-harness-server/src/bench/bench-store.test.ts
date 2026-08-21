@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { setEngineMode } from '@repo/dungeon-engine'
 import { BenchStore } from './bench-store'
 import { boardFromRows, boardToRows, generateBoard } from './board-gen'
 
@@ -950,5 +951,449 @@ describe('changing a maximum moves units already on the board', () => {
     bench.tweakDef('melee', { maxHp: 1 })
     expect(bench.getState().units).toHaveLength(1)
     expect(bench.getState().units[0].hp).toBe(1)
+  })
+})
+
+// dungeon-bench-enemy-planning: the designer taking the seat the AI occupies
+// in the game — planning an enemy's turn by hand, mixing that with the AI,
+// and retargeting a locked telegraph retroactively.
+describe('the designer plans an enemy turn by hand', () => {
+  it('exposes legal destinations and, for a prospective one, legal attack tiles', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0) // movement 3, attack band 1-2
+    const npc = bench.getState().units.find((u) => u.kind === 'npc')!
+
+    expect(bench.npcMoveDests(npc.id)).not.toContainEqual({ col: 4, row: 0 }) // never its own tile
+    expect(bench.npcMoveDests(npc.id)).toContainEqual({ col: 1, row: 0 })
+
+    // Staying put, the melee at (4,1) is one tile away — within the 1-2 band.
+    expect(bench.npcPlannableAttacks(npc.id, { kind: 'stay' })).toContainEqual({ col: 4, row: 1 })
+    // Moved to (1, 0), the melee is three tiles away — out of range from there.
+    expect(bench.npcPlannableAttacks(npc.id, { kind: 'move', toCol: 1, toRow: 0 })).not.toContainEqual({ col: 4, row: 1 })
+  })
+
+  it('plans a move-and-attack turn, locking a telegraph rather than resolving it', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    const pc = bench.getState().units.find((u) => u.kind === 'pc')!
+    const npc = bench.getState().units.find((u) => u.kind === 'npc')!
+
+    const result = bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    expect(result.ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 1 }])
+    expect(bench.getState().units.find((u) => u.id === pc.id)!.hp).toBe(3) // not yet landed
+    expect(bench.getState().unplannedNpcs).toEqual([])
+  })
+
+  it('plans a move with no attack at all', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    const npc = bench.getState().units[0]
+
+    expect(bench.planEnemyByHand(npc.id, { kind: 'move', toCol: 2, toRow: 0 }).ok).toBe(true)
+    expect(bench.getState().units[0]).toMatchObject({ col: 2, row: 0 })
+    expect(bench.getState().telegraphs).toEqual([])
+  })
+
+  it('accounts for a hand-planned enemy already standing in its new tile when planning the next', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0) // movement 3
+    bench.placeUnit('short-range', 4, 0) // movement 3
+    const [a, b] = bench.getState().units
+
+    expect(bench.npcMoveDests(b.id)).toContainEqual({ col: 3, row: 0 })
+
+    expect(bench.planEnemyByHand(a.id, { kind: 'move', toCol: 3, toRow: 0 }).ok).toBe(true)
+    expect(bench.getState().units.find((u) => u.id === a.id)).toMatchObject({ col: 3, row: 0 })
+
+    // (3, 0) is now occupied by the enemy just planned — no longer offered to the next.
+    expect(bench.npcMoveDests(b.id)).not.toContainEqual({ col: 3, row: 0 })
+  })
+
+  it('accepts every enemy holding position — a plan the AI would never choose', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    bench.placeUnit('long-range', 7, 4)
+    const npcs = bench.getState().units.filter((u) => u.kind === 'npc')
+    const before = npcs.map((u) => ({ col: u.col, row: u.row }))
+
+    for (const npc of npcs) {
+      expect(bench.planEnemyByHand(npc.id, { kind: 'stay' }).ok).toBe(true)
+    }
+
+    expect(bench.getState().unplannedNpcs).toEqual([])
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().units.filter((u) => u.kind === 'npc').map((u) => ({ col: u.col, row: u.row }))).toEqual(before)
+
+    // Every enemy is planned, but the round only transitions once advanced.
+    expect(bench.getState().phase).toBe('npc-move')
+    expect(bench.step().ok).toBe(true)
+    expect(bench.getState().phase).toBe('player')
+  })
+
+  it('refuses an illegal move and an illegal attack with the engine\'s own reason, changing nothing', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0) // movement 3
+    const npc = bench.getState().units[0]
+
+    const badMove = bench.planEnemyByHand(npc.id, { kind: 'move', toCol: 7, toRow: 4 })
+    expect(badMove).toMatchObject({ ok: false })
+    expect(bench.getState().units[0]).toMatchObject({ col: 0, row: 0 })
+    expect(bench.getState().unplannedNpcs).toContain(npc.id)
+
+    const badAttack = bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 6, row: 4 })
+    expect(badAttack).toMatchObject({ ok: false })
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().unplannedNpcs).toContain(npc.id)
+  })
+
+  it('refuses to plan an enemy already planned this round, from either source', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    const npc = bench.getState().units[0]
+
+    expect(bench.planEnemyByHand(npc.id, { kind: 'stay' }).ok).toBe(true)
+    const again = bench.planEnemyByHand(npc.id, { kind: 'stay' })
+    expect(again).toMatchObject({ ok: false })
+    if (!again.ok) expect(again.error).toMatch(/already been planned/)
+
+    const viaAi = bench.planEnemyByAi(npc.id)
+    expect(viaAi).toMatchObject({ ok: false })
+  })
+
+  it('refuses to plan a PC as an enemy', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 0, 0)
+    const pc = bench.getState().units[0]
+    expect(bench.planEnemyByHand(pc.id, { kind: 'stay' })).toMatchObject({ ok: false })
+    expect(bench.planEnemyByAi(pc.id)).toMatchObject({ ok: false })
+  })
+
+  it('reports which enemies still need a plan rather than letting the round proceed', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    bench.placeUnit('long-range', 7, 4)
+    const [a, b] = bench.getState().units
+
+    bench.planEnemyByHand(a.id, { kind: 'stay' })
+    const result = bench.endPlayerTurn()
+    expect(result).toMatchObject({ ok: false })
+    if (!result.ok) expect(result.error).toContain(b.id)
+    expect(bench.getState().phase).toBe('npc-move')
+  })
+
+  it('offers only tiles that go on to commit successfully', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 3, 0)
+    bench.placeUnit('melee', 5, 0)
+    bench.placeUnit('short-range', 4, 0) // both melees sit within the 1-2 band either side
+    const npc = bench.getState().units.find((u) => u.kind === 'npc')!
+
+    const offered = bench.npcPlannableAttacks(npc.id, { kind: 'stay' })
+    expect(offered.length).toBeGreaterThan(1)
+    for (const tile of offered) {
+      const trial = new BenchStore()
+      trial.newBoard(generateBoard({ cols: 8, rows: 5, preset: 'open', powerCenters: 0 }))
+      trial.placeUnit('melee', 3, 0)
+      trial.placeUnit('melee', 5, 0)
+      trial.placeUnit('short-range', 4, 0)
+      const trialNpc = trial.getState().units.find((u) => u.kind === 'npc')!
+      expect(trial.planEnemyByHand(trialNpc.id, { kind: 'stay' }, tile).ok).toBe(true)
+    }
+  })
+})
+
+describe('mixing hand-authored and AI plans within one round', () => {
+  it('hands one named enemy to the AI, leaving the rest untouched', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    bench.placeUnit('short-range', 7, 4)
+    const [a, b] = bench.getState().units
+
+    expect(bench.planEnemyByAi(a.id).ok).toBe(true)
+    expect(bench.getState().unplannedNpcs).toEqual([b.id])
+    expect(bench.getState().npcAuthorship).toEqual({ [a.id]: 'ai' })
+  })
+
+  it('leaves hand-authored plans alone when the AI takes the rest', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    bench.placeUnit('short-range', 0, 4)
+    const [, a, b] = bench.getState().units
+
+    expect(bench.planEnemyByHand(a.id, { kind: 'stay' }, { col: 4, row: 1 }).ok).toBe(true)
+    expect(bench.getState().unplannedNpcs).toEqual([b.id])
+
+    expect(bench.planEnemyTurn().ok).toBe(true) // the AI takes everyone still unplanned
+    expect(bench.getState().unplannedNpcs).toEqual([])
+    expect(bench.getState().npcAuthorship).toMatchObject({ [a.id]: 'designer', [b.id]: 'ai' })
+    // The hand-authored plan's telegraph is untouched by the AI's turn.
+    expect(bench.getState().telegraphs).toContainEqual({ unitId: a.id, targetCol: 4, targetRow: 1 })
+  })
+
+  it('resolves hand-authored and AI-authored telegraphs identically', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('melee', 0, 4)
+    bench.placeUnit('short-range', 4, 0)
+    bench.placeUnit('short-range', 0, 3)
+    const npcs = bench.getState().units.filter((u) => u.kind === 'npc')
+
+    expect(bench.planEnemyByHand(npcs[0].id, { kind: 'stay' }, { col: 4, row: 1 }).ok).toBe(true)
+    expect(bench.planEnemyByAi(npcs[1].id).ok).toBe(true)
+    expect(bench.getState().unplannedNpcs).toEqual([])
+
+    expect(bench.step().ok).toBe(true) // phase-transition into player
+    expect(bench.getState().phase).toBe('player')
+    expect(bench.endPlayerTurn().ok).toBe(true)
+    expect(bench.resolveTelegraphs().ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([])
+    // Both attacks landed — a hand-authored plan resolves exactly like an AI one.
+    expect(bench.getState().units.find((u) => u.id === 'melee-1')!.hp).toBe(2)
+  })
+
+  it('turn order is the order the designer planned in, not the AI\'s own order', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0) // "first" by board order
+    bench.placeUnit('short-range', 4, 2) // adjacent to the same PC
+    const [, npcA, npcB] = bench.getState().units
+
+    // Plan B before A — the reverse of placement order.
+    expect(bench.planEnemyByHand(npcB.id, { kind: 'stay' }, { col: 4, row: 1 }).ok).toBe(true)
+    expect(bench.planEnemyByHand(npcA.id, { kind: 'stay' }, { col: 4, row: 1 }).ok).toBe(true)
+
+    expect(bench.getState().telegraphs.map((t) => t.unitId)).toEqual([npcB.id, npcA.id])
+
+    bench.step() // phase transition to player
+    bench.endPlayerTurn()
+    bench.step() // resolve npcB's telegraph first
+    expect(bench.getState().log.at(-1)).toContain(npcB.id)
+    bench.step() // then npcA's
+    expect(bench.getState().log.at(-1)).toContain(npcA.id)
+  })
+})
+
+describe('provenance', () => {
+  it('is absent for an unplanned enemy and present once planned, by source', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    const npc = bench.getState().units[0]
+    expect(bench.getState().npcAuthorship[npc.id]).toBeUndefined()
+
+    bench.planEnemyByAi(npc.id)
+    expect(bench.getState().npcAuthorship[npc.id]).toBe('ai')
+  })
+
+  it('tags every enemy the AI plans through the whole-phase composite', () => {
+    const bench = new BenchStore()
+    bench.newBoard(generateBoard({ cols: 8, rows: 5, preset: 'open', powerCenters: 1 }))
+    bench.placeUnit('short-range', 0, 0)
+    bench.placeUnit('short-range', 7, 3)
+    const npcs = bench.getState().units.filter((u) => u.kind === 'npc')
+
+    bench.planEnemyTurn()
+    for (const npc of npcs) expect(bench.getState().npcAuthorship[npc.id]).toBe('ai')
+  })
+
+  it('survives a step back and reads correctly at every frame', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    const npc = bench.getState().units[0]
+    const beforeCursor = bench.getState().timeline.cursor
+
+    bench.planEnemyByHand(npc.id, { kind: 'stay' })
+    expect(bench.getState().npcAuthorship[npc.id]).toBe('designer')
+
+    bench.undo()
+    expect(bench.getState().npcAuthorship[npc.id]).toBeUndefined()
+
+    bench.redo()
+    expect(bench.getState().npcAuthorship[npc.id]).toBe('designer')
+
+    bench.stepTo(beforeCursor)
+    expect(bench.getState().npcAuthorship).toEqual({})
+  })
+
+  it('is cleared when the round ends, not merely when it moves to player', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    const npc = bench.getState().units[0]
+
+    bench.planEnemyByHand(npc.id, { kind: 'stay' })
+    bench.step() // into player
+    expect(bench.getState().npcAuthorship[npc.id]).toBe('designer') // still attributed mid-round
+
+    bench.endPlayerTurn()
+    bench.resolveTelegraphs() // chains straight into the next npc-move: the round has ended
+    expect(bench.getState().phase).toBe('npc-move')
+    expect(bench.getState().npcAuthorship).toEqual({})
+  })
+})
+
+describe('amending a locked telegraph', () => {
+  // `amendTelegraph` is bench-only and fails closed unless the engine mode is
+  // opted in (see engine-mode.ts) — the harness's real server does this once
+  // at startup (engine-startup.ts), but each test file gets a fresh module
+  // instance of the engine's mode singleton, so this suite has to opt in and
+  // back out itself, matching the engine's own documented test discipline.
+  beforeEach(() => setEngineMode('bench'))
+  afterEach(() => setEngineMode('game'))
+
+  function twoTargetBench() {
+    // A short-range enemy with two PCs in range from where it stands, on
+    // different cardinal arms so neither blocks the other — targeting is
+    // direction-based, and two PCs on the *same* line would leave only the
+    // nearer one reachable. So it can be amended from one legal target to a
+    // different legal one without either the original or the new target
+    // being an artifact of blocking.
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1) // one tile up
+    bench.placeUnit('melee', 4, 4) // two tiles down (the tile between is empty)
+    bench.placeUnit('short-range', 4, 2)
+    const npc = bench.getState().units.find((u) => u.kind === 'npc')!
+    return { bench, npc }
+  }
+
+  it('retargets a pending telegraph mid-window, without moving the enemy', () => {
+    const { bench, npc } = twoTargetBench()
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    bench.step() // into player
+    // "after acting with a PC" — any player-phase action opens another frame.
+    bench.select(bench.getState().units[0].id)
+
+    const before = bench.getState().units.find((u) => u.id === npc.id)!
+    const result = bench.amendTelegraph(npc.id, { col: 4, row: 4 })
+    expect(result.ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 4 }])
+
+    const after = bench.getState().units.find((u) => u.id === npc.id)!
+    expect(after).toMatchObject({ col: before.col, row: before.row })
+  })
+
+  it('lands the amended attack, not the original, on resolution', () => {
+    const { bench, npc } = twoTargetBench()
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    bench.step()
+    bench.amendTelegraph(npc.id, { col: 4, row: 4 })
+    bench.endPlayerTurn()
+    bench.resolveTelegraphs()
+
+    expect(bench.getState().units.find((u) => u.col === 4 && u.row === 1)!.hp).toBe(3) // untouched
+    expect(bench.getState().units.find((u) => u.col === 4 && u.row === 4)!.hp).toBe(2) // hit instead
+  })
+
+  it('reads as though amended from the start: every frame at or after the lock shows the new target', () => {
+    const { bench, npc } = twoTargetBench()
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    const lockCursor = bench.getState().timeline.cursor
+    bench.step() // into player
+    const inPlayerCursor = bench.getState().timeline.cursor
+
+    bench.amendTelegraph(npc.id, { col: 4, row: 4 })
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 4 }])
+
+    bench.stepTo(inPlayerCursor)
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 4 }])
+
+    bench.stepTo(lockCursor)
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 4 }])
+  })
+
+  it('discards the amendment when rewound to before the plan and re-planned', () => {
+    const { bench, npc } = twoTargetBench()
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    const beforePlanCursor = bench.getState().timeline.cursor - 1
+    bench.step()
+    bench.amendTelegraph(npc.id, { col: 4, row: 4 })
+
+    bench.stepTo(beforePlanCursor)
+    expect(bench.getState().unplannedNpcs).toContain(npc.id)
+
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 }) // re-plan, discarding the abandoned line
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 1 }]) // the amendment is gone
+  })
+
+  it('touches nothing outside the window: an earlier frame and another unit\'s telegraph are untouched', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 1, 0) // npcA's original target (right, distance 1)
+    bench.placeUnit('melee', 0, 2) // npcA's amended target (down, distance 2)
+    bench.placeUnit('melee', 7, 3) // npcB's target (up, distance 1)
+    bench.placeUnit('short-range', 0, 0) // npcA, planned first
+    bench.placeUnit('short-range', 7, 4) // npcB, planned second
+    const [, , , npcA, npcB] = bench.getState().units
+
+    const beforeAnyPlanning = bench.getState()
+    const beforeAnyPlanningCursor = beforeAnyPlanning.timeline.cursor
+    expect(bench.planEnemyByHand(npcA.id, { kind: 'stay' }, { col: 1, row: 0 }).ok).toBe(true)
+    expect(bench.planEnemyByHand(npcB.id, { kind: 'stay' }, { col: 7, row: 3 }).ok).toBe(true)
+
+    bench.amendTelegraph(npcA.id, { col: 0, row: 2 })
+
+    // B's telegraph, planned after A's lock but resolved from the same still-live
+    // window, is untouched — only A's entry changed.
+    expect(bench.getState().telegraphs).toContainEqual({ unitId: npcB.id, targetCol: 7, targetRow: 3 })
+    expect(bench.getState().telegraphs).toContainEqual({ unitId: npcA.id, targetCol: 0, targetRow: 2 })
+
+    // The frame before any enemy was planned is bit-for-bit as it was.
+    bench.stepTo(beforeAnyPlanningCursor)
+    expect(bench.getState().units).toEqual(beforeAnyPlanning.units)
+    expect(bench.getState().telegraphs).toEqual([])
+  })
+
+  it('is refused, changing nothing, for an enemy whose telegraph already resolved', () => {
+    const { bench, npc } = twoTargetBench()
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    bench.step()
+    bench.endPlayerTurn()
+    bench.resolveTelegraphs()
+
+    const result = bench.amendTelegraph(npc.id, { col: 4, row: 4 })
+    expect(result).toMatchObject({ ok: false })
+  })
+
+  it('is refused, changing nothing, for an enemy with no locked telegraph', () => {
+    const bench = openBench()
+    bench.placeUnit('short-range', 0, 0)
+    const npc = bench.getState().units[0]
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }) // no attack planned
+    const result = bench.amendTelegraph(npc.id, { col: 1, row: 0 })
+    expect(result).toMatchObject({ ok: false })
+  })
+
+  it('is refused for an enemy killed inside the window, leaving the board as it was', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('melee', 4, 4)
+    bench.placeUnit('short-range', 4, 2, 1) // 1 HP: one melee hit kills it
+    const npc = bench.getState().units.find((u) => u.kind === 'npc')!
+
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    bench.step() // into player
+
+    // The designer kills the enemy inside the window instead of moving away.
+    const pc = bench.getState().units.find((u) => u.col === 4 && u.row === 1)!
+    bench.select(pc.id)
+    expect(bench.commitSelected('attack', { col: 4, row: 2 }).ok).toBe(true) // the npc's own tile
+    expect(bench.getState().units.some((u) => u.id === npc.id)).toBe(false)
+
+    const result = bench.amendTelegraph(npc.id, { col: 4, row: 4 })
+    expect(result).toMatchObject({ ok: false })
+
+    bench.endPlayerTurn()
+    bench.resolveTelegraphs()
+    expect(bench.getState().units.find((u) => u.col === 4 && u.row === 4)!.hp).toBe(3) // the dead enemy's attack never lands
+  })
+
+  it('refuses an amendment to a tile the enemy cannot reach from where it stands', () => {
+    const { bench, npc } = twoTargetBench()
+    bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
+    bench.step()
+    const result = bench.amendTelegraph(npc.id, { col: 7, row: 4 })
+    expect(result).toMatchObject({ ok: false })
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 1 }])
   })
 })

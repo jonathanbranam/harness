@@ -20,6 +20,14 @@ interface BoardViewProps {
   fields: FieldToggles
   onTileClick: (tile: Tile) => void
   onUnitClick: (unit: Unit) => void
+  /**
+   * Attack tiles offered by a staged enemy-planning candidate
+   * (`BenchState.npcPlanPreview`) — distinct from the armed-action footprint
+   * above, which reflects a unit's *current* position, because these are
+   * "what it would hit if planned this way," a hypothetical the direct-commit
+   * overlay has no notion of. Also drives the amend flow's target highlight.
+   */
+  planningAttackTiles?: Tile[]
 }
 
 /**
@@ -54,7 +62,7 @@ function key(tile: { col: number; row: number }): string {
  * no rule of its own — it decides colors, not legality.
  */
 export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function BoardView(
-  { state, armedAction, fields, onTileClick, onUnitClick },
+  { state, armedAction, fields, onTileClick, onUnitClick, planningAttackTiles },
   ref,
 ) {
   if (!state) {
@@ -76,6 +84,7 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
   const reachable = new Set(armedAction === 'move' ? offered.map(key) : (selection?.moveDests ?? []).map(key))
   const footprint = new Set(armedAction === 'attack' ? offered.map(key) : [])
   const telegraphed = new Set(telegraphs.map((t) => `${t.targetCol},${t.targetRow}`))
+  const planningTargets = new Set((planningAttackTiles ?? []).map(key))
 
   // Painted bottom to top so threat sits over reach and the enemy over the player
   // — the layer a designer is usually asking about ends up on top.
@@ -151,6 +160,13 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
 
                   {footprint.has(tileKey) && (
                     <rect x={x + 2} y={y + 2} width={CELL_SIZE - 4} height={CELL_SIZE - 4} fill="#ef444455" stroke="#dc2626" strokeWidth={2} />
+                  )}
+
+                  {/* A distinct amber, never the direct-commit red/cyan above:
+                      this is "what a *staged, uncommitted* enemy plan would
+                      hit," not a currently-armed action's real target set. */}
+                  {planningTargets.has(tileKey) && (
+                    <rect x={x + 4} y={y + 4} width={CELL_SIZE - 8} height={CELL_SIZE - 8} fill="#f59e0b3d" stroke="#d97706" strokeWidth={2} strokeDasharray="4 3" />
                   )}
 
                   {telegraphed.has(tileKey) && (

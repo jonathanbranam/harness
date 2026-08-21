@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { setEngineMode } from '@repo/dungeon-engine'
 import { BenchStore } from './bench-store'
 import { applyIntent } from './intents'
 import { generateBoard } from './board-gen'
@@ -60,5 +61,40 @@ describe('bench intents', () => {
     expect(applyIntent(store, { kind: 'clearUnits' })).toMatchObject({ ok: true })
     expect(store.getState().units).toHaveLength(0)
     expect(applyIntent(store, { kind: 'select', unitId: null })).toMatchObject({ ok: true })
+  })
+
+  describe('enemy turn planning', () => {
+    beforeEach(() => setEngineMode('bench'))
+    afterEach(() => setEngineMode('game'))
+
+    it('routes hand-planning, AI-planning, and amendment through the same rules the agent gets', () => {
+      const store = bench()
+      applyIntent(store, { kind: 'place', unitType: 'melee', col: 4, row: 1 })
+      applyIntent(store, { kind: 'place', unitType: 'melee', col: 4, row: 4 })
+      applyIntent(store, { kind: 'place', unitType: 'short-range', col: 4, row: 2 })
+      const npc = store.getState().units.find((u) => u.kind === 'npc')!
+
+      expect(applyIntent(store, { kind: 'setNpcPlanCandidate', unitId: npc.id, move: { kind: 'stay' } })).toMatchObject({ ok: true })
+      expect(store.getState().npcPlanPreview?.attackTiles).toContainEqual({ col: 4, row: 1 })
+
+      expect(
+        applyIntent(store, { kind: 'planEnemyByHand', unitId: npc.id, move: { kind: 'stay' }, attackTile: { col: 4, row: 1 } }),
+      ).toMatchObject({ ok: true })
+      expect(store.getState().npcAuthorship[npc.id]).toBe('designer')
+      expect(store.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 1 }])
+
+      expect(applyIntent(store, { kind: 'amendTelegraph', unitId: npc.id, tile: { col: 4, row: 4 } })).toMatchObject({ ok: true })
+      expect(store.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 4, targetRow: 4 }])
+    })
+
+    it('hands one named enemy to the AI via the intent surface', () => {
+      const store = bench()
+      applyIntent(store, { kind: 'place', unitType: 'short-range', col: 0, row: 0 })
+      const npc = store.getState().units[0]
+
+      expect(applyIntent(store, { kind: 'planEnemyByAi', unitId: npc.id })).toMatchObject({ ok: true })
+      expect(store.getState().npcAuthorship[npc.id]).toBe('ai')
+      expect(store.getState().unplannedNpcs).toEqual([])
+    })
   })
 })
