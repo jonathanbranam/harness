@@ -3,6 +3,20 @@ import { setEngineMode } from '@repo/dungeon-engine'
 import { BenchStore } from './bench-store'
 import { boardFromRows, boardToRows, generateBoard } from './board-gen'
 
+// The real server sets this once at process startup (`engine-startup.ts`) and
+// never toggles it — one process is either the game or the bench. This suite
+// is the bench, and every scenario in it hand-drives units through phases and
+// on sides `dungeon-sequencer-guards`' phase guard would otherwise refuse in
+// the engine's default `'game'` mode: `BenchStore` starts a fresh board in
+// `npc-move` (see `emptyState`'s comment), and these tests act on units well
+// before — and outside — a `player` phase. Setting the mode here for every
+// test, not just the one describe block that already did, is what keeps this
+// file exercising the bench's actual, spec'd capability ("Both sides are
+// played by hand", out of sequence) rather than tripping a guard the bench is
+// fenced out of.
+beforeEach(() => setEngineMode('bench'))
+afterEach(() => setEngineMode('game'))
+
 /** An open 8×5 board with no terrain and no structures to complicate pathing. */
 function openBench(): BenchStore {
   const bench = new BenchStore()
@@ -1284,12 +1298,9 @@ describe('provenance', () => {
 
 describe('amending a locked telegraph', () => {
   // `amendTelegraph` is bench-only and fails closed unless the engine mode is
-  // opted in (see engine-mode.ts) — the harness's real server does this once
-  // at startup (engine-startup.ts), but each test file gets a fresh module
-  // instance of the engine's mode singleton, so this suite has to opt in and
-  // back out itself, matching the engine's own documented test discipline.
-  beforeEach(() => setEngineMode('bench'))
-  afterEach(() => setEngineMode('game'))
+  // opted in (see engine-mode.ts) — covered by the file-level `beforeEach`
+  // above now that every test in this file needs bench mode, not just this
+  // block.
 
   function twoTargetBench() {
     // A short-range enemy with two PCs in range from where it stands, on

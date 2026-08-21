@@ -4,6 +4,16 @@ import { BenchStore } from './bench-store'
 import { applyIntent } from './intents'
 import { generateBoard } from './board-gen'
 
+// The real server sets this once at startup (`engine-startup.ts`) and never
+// toggles it. This suite drives a `BenchStore` — which starts a fresh board
+// in `npc-move`, not `player` (see bench-store.ts's `emptyState`) — through
+// moves and attacks on both sides out of sequence, the bench's own spec'd
+// capability that `dungeon-sequencer-guards`' phase guard fences behind this
+// mode. Set for every test, not just the block that already needed it for
+// `amendTelegraph`.
+beforeEach(() => setEngineMode('bench'))
+afterEach(() => setEngineMode('game'))
+
 function bench(): BenchStore {
   const store = new BenchStore()
   store.newBoard(generateBoard({ cols: 8, rows: 5, preset: 'open', powerCenters: 0 }))
@@ -38,16 +48,25 @@ describe('bench intents', () => {
     const store = bench()
     applyIntent(store, { kind: 'place', unitType: 'melee', col: 2, row: 2 })
     applyIntent(store, { kind: 'place', unitType: 'short-range', col: 3, row: 2 })
-    const [pc, npc] = store.getState().units
+    // A second enemy, never hand-driven, for `planEnemyTurn` to plan below.
+    // The first is spent by the hand-driven `commit` a few lines down, and
+    // since `dungeon-sequencer-guards` an enemy spent through the action
+    // surface is not planned again — the very double-act this test used to
+    // rely on to produce a telegraph from the same unit it had just attacked
+    // with by hand.
+    applyIntent(store, { kind: 'place', unitType: 'short-range', col: 3, row: 0 })
+    const [pc, npc, npc2] = store.getState().units
 
     expect(applyIntent(store, { kind: 'setHp', unitId: pc.id, hp: 2 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 2, row: 3 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'select', unitId: npc.id })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'commit', action: 'attack', col: 3, row: 3 })).toMatchObject({ ok: true })
-    // Adjacent to the NPC, so planning is guaranteed to lock a telegraph.
+    // Adjacent to npc2 (not the now-spent npc), so planning is guaranteed to
+    // lock a telegraph for it.
     expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 3, row: 1 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: true })
     expect(store.getState().telegraphs.length).toBeGreaterThan(0)
+    expect(store.getState().unplannedNpcs).not.toContain(npc2.id)
     expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: false }) // phase has moved past npc-move
     expect(applyIntent(store, { kind: 'step' })).toMatchObject({ ok: false }) // player phase: ending the turn is `endPlayerTurn`, not a round step
     expect(applyIntent(store, { kind: 'endPlayerTurn' })).toMatchObject({ ok: true })
@@ -64,9 +83,6 @@ describe('bench intents', () => {
   })
 
   describe('enemy turn planning', () => {
-    beforeEach(() => setEngineMode('bench'))
-    afterEach(() => setEngineMode('game'))
-
     it('routes hand-planning, AI-planning, and amendment through the same rules the agent gets', () => {
       const store = bench()
       applyIntent(store, { kind: 'place', unitType: 'melee', col: 4, row: 1 })
