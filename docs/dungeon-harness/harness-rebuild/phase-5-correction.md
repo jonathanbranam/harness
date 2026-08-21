@@ -44,9 +44,10 @@ Both trees are clean and committed.
 | Change | Repo | State |
 |---|---|---|
 | `dungeon-round-transitions` | track-web | ✅ **Step 1 — archived 2026-08-21** after the developer verified gameplay by hand |
-| `dungeon-bench-setup-surface` | track-web | **Step 2, planned 2026-08-21.** The engine's bench-only scenario-setup surface. Not started |
-| `dungeon-bench-setup-adoption` | harness | **Step 2, planned 2026-08-21.** The bench adopts it. Depends on the above; neither is done without the other |
-| `dungeon-sequencer-guards` | track-web | **Built on the wrong premise. NOT archived.** Amended by step 3 — do not archive it as-is |
+| `dungeon-bench-setup-surface` | track-web | ✅ **Step 2 — built and verified 2026-08-21** (`0537c30`). Awaiting the developer's word to archive |
+| `dungeon-bench-setup-adoption` | harness | ✅ **Step 2 — built and verified 2026-08-21** (`7d4aeae`). Awaiting the developer's word to archive |
+| `dungeon-sequencer-guards` | track-web | **Amended 2026-08-21** onto the right premise: the guard is unconditional and an enemy has no action surface. Planned, not yet re-implemented |
+| `dungeon-bench-guard-adoption` | harness | **Step 3, planned 2026-08-21.** The bench's half. Depends on the above; neither is done without the other |
 | `add-ui-layout-recording`, `restore-live-state-on-replay-exit` | harness | Paused introspect proposals, unrelated |
 | `dungeon-tactics-sprite-rendering`, `food`, `add-from-tmdb-search`, `watch-ratings-filter-search-prototype` | track-web | Unrelated, unstarted |
 
@@ -59,10 +60,17 @@ work is done — present it and wait. See either repo's `CLAUDE.md`.
 ### Progress against §9
 
 1. ✅ **Phase ownership** — done 2026-08-21.
-2. ⬅️ **The bench setup surface** — planned 2026-08-21 as two OpenSpec changes,
-   `dungeon-bench-setup-surface` (track-web) and `dungeon-bench-setup-adoption`
-   (harness). Implementation not started.
-3. ⬜ Guards + spec correction (amends `dungeon-sequencer-guards`).
+2. ✅ **The bench setup surface** — built and browser-verified 2026-08-21 as two
+   OpenSpec changes, `dungeon-bench-setup-surface` (track-web `0537c30`) and
+   `dungeon-bench-setup-adoption` (harness `7d4aeae`). Not archived: awaiting the
+   developer.
+
+   It turned up one thing worth carrying forward: authoring a scenario is now
+   itself bench-only, so a `BenchStore` cannot be *constructed* without bench
+   mode. That reverses part of step 3 below — see the note there.
+3. ⬅️ **Guards + spec correction** — planned 2026-08-21. track-web's
+   `dungeon-sequencer-guards` amended in place; harness's
+   `dungeon-bench-guard-adoption` is new. Implementation not started.
 4. ⬜ Waves and flight.
 
 ### Verifying in a browser
@@ -232,7 +240,8 @@ No pile-up risk: the only other open changes here (`add-ui-layout-recording`,
 ### Step 3 — harness code and tests
 
 **Measured, not estimated.** With the escape hatch removed, the bench suites go
-**21 failed / 96 passed of 117**. The failures split cleanly:
+**21 failed / 96 passed of 117** — re-measured after change 2 landed, with both
+guards applied: **23 failed / 105 passed of 128**. The failures split cleanly:
 
 - **~18 are fixtures, not behaviour.** They build a board, place units, and act
   immediately — a fresh `BenchStore` starts in `npc-move` (see `emptyState`), so
@@ -246,10 +255,13 @@ No pile-up risk: the only other open changes here (`add-ui-layout-recording`,
 
 Also:
 
-- **Delete the file-level `beforeEach(() => setEngineMode('bench'))`** that phase 5
-  added to `bench-store.test.ts` and `intents.test.ts`. Keep it scoped to the
-  amendment block, where it belongs. Blanket-setting it is what let 21 ordering
-  violations pass unnoticed.
+- ~~**Delete the file-level `beforeEach(() => setEngineMode('bench'))`**~~
+  **Superseded by change 2 (2026-08-21).** Authoring a scenario is now bench-only,
+  so `new BenchStore()` requires the mode and every test needs it. The concern
+  behind this instruction is answered another way: with the phase guard
+  unconditional, bench mode buys no latitude over the round, so setting it can no
+  longer hide an ordering violation. **The comments must still change** — they
+  justify the setting by citing the requirement being removed.
 - **Revert the `intents.test.ts` second-enemy edit.** It exists only to route
   around the double-act; with the enemy no longer hand-drivable, the original
   single-enemy shape is correct again.
