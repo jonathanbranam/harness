@@ -30,6 +30,14 @@
 > legal" into the engine across both hosts. It is a prerequisite the
 > turn-machine work inherits.
 
+## The other rule: archive as you go
+
+**When a phase's work is verified, sync and archive its OpenSpec change before
+starting the next one.** `openspec/specs/` is what "the system does this today"
+means; an unarchived pile makes that answer stale and makes the next delta
+harder to write, because deltas are authored against the main spec as it stands.
+See the OpenSpec section of `CLAUDE.md` for the mechanics and the failure mode.
+
 ## The rule these phases obey
 
 **Every phase ends with something the designer can open and use.** No

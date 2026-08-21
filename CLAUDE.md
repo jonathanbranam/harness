@@ -99,6 +99,37 @@ npm run hash-password -w dungeon-harness-server -- 'your-password'
 
 No lint is configured.
 
+## OpenSpec: archive a change as soon as its work is verified
+
+This repo plans work as OpenSpec changes under `openspec/changes/`. **When a
+change's tasks are done and the work is verified, sync its specs and archive it
+in the same sitting:**
+
+```bash
+openspec validate <change-name> --strict
+openspec archive <change-name> -y      # syncs the delta into openspec/specs/
+```
+
+Do not leave verified changes sitting open. This gets more important the more
+changes stack up, and the reason is concrete rather than tidiness:
+
+- **A delta is written against the main spec as it stands.** Archiving is what
+  folds a delta in. Two unarchived changes touching the same capability are both
+  written against the *pre-both* spec, so whichever archives second is missing
+  whatever the first added — and `openspec archive` refuses it: *"current spec
+  contains scenario(s) not present in the modified block."* You then have to go
+  back and reconcile deltas by hand, which is exactly the drift the format
+  exists to prevent.
+- **A `MODIFIED` requirement replaces the whole block**, scenarios included. The
+  longer a change waits, the more likely the requirement it modifies has moved
+  underneath it.
+- **`openspec/specs/` is the answer to "what does this system do today."** An
+  unarchived pile means that answer is stale, and the next change gets planned
+  against the wrong picture.
+
+If a change turns out to be *partly* verified, archive nothing and say what is
+outstanding — an archived change asserts the work is done and checked.
+
 ## Never kill or restart the dev servers
 
 The user keeps a server + client instance running at all times, each in its
