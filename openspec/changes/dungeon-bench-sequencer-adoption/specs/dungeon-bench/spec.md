@@ -56,23 +56,26 @@ single indivisible step.
 
 ### Requirement: A pending telegraph cannot be discarded without resolving
 
-The bench SHALL refuse any operation that would clear a pending telegraph
-without resolving it, and SHALL name the pending telegraphs in the refusal.
-Ending the round is such an operation. This refusal SHALL come from the engine
-rather than being enforced by the bench itself. Stepping back on the timeline is
-how a planned enemy turn is abandoned deliberately.
+A round SHALL end only after every telegraph it locked has resolved or been
+skipped. The bench SHALL NOT offer any operation that ends a round while
+telegraphs are pending. Stepping back on the timeline is how a planned enemy
+turn is abandoned deliberately.
 
-#### Scenario: Ending the round mid-window
+Where the previous behaviour was a bench-side refusal, the round's end is now a
+step of the engine's round that cannot be reached early — the same guarantee,
+made structural rather than checked.
 
-- **WHEN** the designer ends the round while telegraphs from a planned enemy turn
-  are still pending
-- **THEN** the bench refuses with a reason naming the pending telegraphs, the
-  round does not end, and the telegraphs remain pending
+#### Scenario: The round ends as part of resolution
 
-#### Scenario: Ending the round after resolving
+- **WHEN** the last pending telegraph resolves
+- **THEN** the round ends and the next round's enemy phase begins, without the
+  designer invoking a separate end-of-round operation
 
-- **WHEN** the telegraphs have resolved and the designer ends the round
-- **THEN** the round ends normally
+#### Scenario: No way to end a round mid-window
+
+- **WHEN** telegraphs from a planned enemy turn are still pending
+- **THEN** the bench offers no operation that would end the round and discard
+  them
 
 ## ADDED Requirements
 
