@@ -249,6 +249,31 @@ In rough order of likely value:
   editor, only once turn machines have replaced the model being thrown
   away.
 
+### Worth evaluating: recording and playback as a shared, player-facing feature
+
+The bench's transport strip records a session as a walkable trajectory of full
+states, and phase 3a made every step of a round its own labelled frame. That
+machinery was built as a **design tool** — but *"watch the match back, step
+through it, see the moment it turned"* is something **players** would enjoy too,
+and it is close to something the game could ship.
+
+Worth evaluating, later, as a move into `track-web/packages/` alongside
+`dungeon-engine` rather than something the harness keeps to itself:
+
+- The engine is already shared, `GameState` is already plain serializable data,
+  and the sequencer already emits a typed `SequencerStep` per action — so a
+  recording is close to "the states, plus what produced each one."
+- The interesting questions are whether a recording should store **states** (what
+  the bench does — simple, large, robust) or **steps to replay** (small, but only
+  as reproducible as the engine is deterministic), and whether a player-facing
+  version needs anything the bench does not, like sharing or annotation.
+- `introspect-harness` has independently built recording and replay for agent
+  sessions. Its lessons about checkpoints and replay determinism are probably
+  worth reading before designing this, even though the domain differs.
+
+**Not scheduled, and not a blocker for anything in this plan.** Recorded here so
+the option is not lost once the bench's timeline has proven itself in use.
+
 ### Recorded, not scheduled
 
 Small items from the action-surface review that belong somewhere but were not

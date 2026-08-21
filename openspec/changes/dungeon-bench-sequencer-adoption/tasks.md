@@ -28,12 +28,12 @@
 
 ## 3. Bookmarks
 
-- [x] 3.1 Normalise state on `loadBookmark`: default missing
-      `npcPlannedThisRound`/`npcPlansResolved` to empty and a missing `phase` to
-      `'player'`. Every bookmark on disk predates this change, so an un-normalised
-      load throws inside `advance` — this is the normal path, not an edge case.
-- [x] 3.2 Test loading a bookmark shaped like a pre-3a one (no round-progress
-      fields) and then stepping the round, which is the case that would throw.
+- [x] 3.1 Detect a bookmark saved before this change (no round-progress fields)
+      on load and refuse it with a reason naming the cause and saying to re-save.
+      **Do not migrate or backfill** — a wrong-but-plausible round state is worse
+      than a refusal, and stale bookmarks are cheap to replace in development.
+- [x] 3.2 Test that such a bookmark is refused and that the refusal leaves the
+      bench untouched.
 
 ## 4. Telegraph legibility
 

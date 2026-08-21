@@ -71,25 +71,20 @@ describe('saving and reloading a position', () => {
     expect(store.getState().selection!.remainingMove).toBe(1)
   })
 
-  // Task 3.2: every bookmark on disk predates this change and carries
-  // `phase: 'player'` (the pre-3a bench pinned it there for the whole
-  // session) but no `npcPlannedThisRound`/`npcPlansResolved` at all — those
-  // fields did not exist yet. `advance` reads them unconditionally once the
-  // round leaves `player`, so loading one and continuing to play is the case
-  // that would throw without `loadBookmark`'s normalisation.
-  it('loads a bookmark shaped like one saved before this change, and stepping the round past it does not throw', () => {
+  // A bookmark saved before the bench ran on the engine's round has no
+  // `npcPlannedThisRound`/`npcPlansResolved` at all, and `advance` reads both.
+  // Rather than migrate — a stale bookmark is cheap to re-save during
+  // development, and guessing what round a saved position was in would be
+  // worse than refusing — loading one is refused with a reason that says what
+  // to do about it.
+  it('refuses a bookmark saved before the bench ran on the engine round', () => {
     const store = bench()
     store.placeUnit('melee', 1, 1)
     store.placeUnit('short-range', 1, 0)
-    store.planEnemyTurn() // locks a real telegraph, landing in `player`
-    expect(store.getState().telegraphs.length).toBeGreaterThan(0)
+    store.planEnemyTurn()
     store.saveBookmark('Legacy shape')
 
-    // Rewrite the file on disk to match what every bookmark saved before this
-    // change actually looks like: strip the two round-progress fields that
-    // did not exist yet, keeping everything else — including the pending
-    // telegraph in `npcPlans`, which is exactly what makes `advance` reach
-    // the missing field instead of short-circuiting past it.
+    // Rewrite the file to match what those bookmarks actually look like.
     const path = join(dir, 'legacy-shape.json')
     const raw = JSON.parse(readFileSync(path, 'utf8'))
     delete raw.state.npcPlannedThisRound
@@ -97,16 +92,13 @@ describe('saving and reloading a position', () => {
     writeFileSync(path, JSON.stringify(raw), 'utf8')
 
     const fresh = bench()
-    expect(fresh.loadBookmark('Legacy shape').ok).toBe(true)
-    expect(fresh.getState().phase).toBe('player')
-    expect(fresh.getState().telegraphs.length).toBeGreaterThan(0)
-
-    // Continuing to play from here is what reaches the un-normalised field:
-    // `endPlayerTurn` moves to `npc-attack`, and resolving reads
-    // `npcPlansResolved` inside `advance`.
-    expect(fresh.endPlayerTurn().ok).toBe(true)
-    expect(() => fresh.resolveTelegraphs()).not.toThrow()
-    expect(fresh.getState().telegraphs).toEqual([])
+    const result = fresh.loadBookmark('Legacy shape')
+    expect(result).toMatchObject({ ok: false })
+    const error = (result as { ok: false; error: string }).error
+    expect(error).toMatch(/saved before the bench ran on the engine/i)
+    expect(error).toMatch(/save the position again/i)
+    // Refused means untouched: no board was swapped in behind the failure.
+    expect(fresh.getState().units).toHaveLength(0)
   })
 
   it('lists what is saved, newest first, and deletes on request', () => {

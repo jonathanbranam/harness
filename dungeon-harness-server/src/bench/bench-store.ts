@@ -205,26 +205,25 @@ function nextSeqFrom(units: Unit[]): number {
 }
 
 /**
- * A bookmark saved before this change carries a whole `GameState` written
- * verbatim by `saveBookmark`, from before `npcPlannedThisRound`/
- * `npcPlansResolved` existed and before the bench moved through `phase` at
- * all — every bookmark on disk today is one of these, so this is the normal
- * load path, not an edge case (design.md, "Bookmarks saved before this change
- * must be normalised on load"). `advance` reads both round-progress fields
- * unconditionally; loading one of these verbatim and pressing Step would
- * throw on `undefined.includes`.
+ * Whether a saved bookmark predates the bench running on the engine's round.
  *
- * A bookmark saved *by* this change already carries real values for all
- * three, which round-trip through unchanged — this only fills gaps, never
- * overrides what is actually there.
+ * Such a bookmark has no `npcPlannedThisRound`/`npcPlansResolved` at all, and
+ * `advance` reads both — loading one and stepping the round would throw on
+ * `undefined` somewhere inside the engine, far from the cause.
+ *
+ * **Deliberately not migrated.** During development a stale bookmark is cheap
+ * to throw away and re-save, and a migration would be guesswork about what
+ * round a position was really in. Refuse it with a sentence that says what to
+ * do instead, and revisit if bookmarks ever need to survive across versions.
  */
-function normalizeLoadedState(state: GameState): GameState {
-  return {
-    ...state,
-    phase: state.phase ?? 'player',
-    npcPlannedThisRound: state.npcPlannedThisRound ?? [],
-    npcPlansResolved: state.npcPlansResolved ?? [],
+function incompatibleBookmarkReason(state: GameState): string | null {
+  if (!Array.isArray(state.npcPlannedThisRound) || !Array.isArray(state.npcPlansResolved)) {
+    return 'it was saved before the bench ran on the engine\'s round, so it has no record of which enemies had been planned. Delete it and save the position again.'
   }
+  if (!state.phase) {
+    return 'it was saved without a round phase. Delete it and save the position again.'
+  }
+  return null
 }
 
 function kindOf(unitType: UnitType): 'pc' | 'npc' {
@@ -808,11 +807,16 @@ export class BenchStore {
 
     this.map = bookmark.map
     this.defOverrides = bookmark.defOverrides ?? {}
+    const incompatible = incompatibleBookmarkReason(bookmark.state)
+    if (incompatible) {
+      return fail(`Can't load "${bookmark.name}" — ${incompatible}`)
+    }
+
     this.selectedId = null
     this.ensureActive()
     // Unit ids came from the saved state; keep new placements from colliding.
     this.unitSeq = nextSeqFrom(bookmark.state.units)
-    this.commit(normalizeLoadedState(bookmark.state), `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
+    this.commit(bookmark.state, `Loaded bookmark "${bookmark.name}" (saved ${bookmark.savedAt}).`)
     return ok(`Loaded "${bookmark.name}".`)
   }
 

@@ -93,22 +93,22 @@ here depends on it — but the call belongs with the process that is the bench,
 and putting it in now means 3b's `amendTelegraph` does not arrive alongside a
 mode bug. Set it where the server starts, and assert it in one test.
 
-### Bookmarks saved before this change must be normalised on load
+### Bookmarks saved before this change are refused, not migrated
 
 `saveBookmark` stores the whole `GameState` verbatim and `loadBookmark` commits
-it back verbatim (`bench-store.ts:702-734`). A bookmark saved before this change
-therefore carries `phase: 'player'` and **no** `npcPlannedThisRound` or
-`npcPlansResolved` at all.
+it back verbatim (`bench-store.ts`). A bookmark saved before this change
+therefore carries no `npcPlannedThisRound` or `npcPlansResolved` at all, and
+`advance` reads both — loading one and stepping the round would throw on
+`undefined` deep inside the engine, far from the cause.
 
-That is not cosmetic: `advance` reads `state.npcPlannedThisRound.includes(...)`,
-so loading an old bookmark and pressing Step would throw on `undefined`. Every
-bookmark on disk today predates this change, so this is the normal case, not an
-edge one.
+**Decision: detect and refuse with a clear reason. Do not migrate.** During
+development a stale bookmark is cheap to throw away and re-save, and a migration
+would be guesswork about which round a saved position was really in — a bookmark
+that loads into a plausible-looking but wrong round state is worse than one that
+declines. The refusal names the cause and says to re-save.
 
-**Resolution:** normalise on load — default each missing round-progress field to
-empty, and default a missing `phase` to `'player'`. Keep whatever phase a
-bookmark does carry, so phase 2's promise that mid-play positions save and
-restore keeps holding for bookmarks saved from here on.
+Revisit if bookmarks ever need to survive across versions; nothing here is
+designed for that yet.
 
 ### Telegraph rendering is replaced, not tinted
 

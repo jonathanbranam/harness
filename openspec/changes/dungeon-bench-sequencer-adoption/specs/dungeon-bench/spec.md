@@ -136,6 +136,20 @@ while other telegraphs from the same round are still outstanding.
 - **WHEN** some of a round's telegraphs have resolved and others have not
 - **THEN** only the unresolved ones are reported as pending
 
+### Requirement: A bookmark that predates the engine's round is refused
+
+The bench SHALL detect a saved position that carries no record of the round's
+progress and SHALL refuse to load it, reporting why and that it should be saved
+again. The bench SHALL NOT infer or backfill the missing round state, and a
+refused load SHALL leave the bench unchanged.
+
+#### Scenario: An older saved position is declined
+
+- **WHEN** the designer loads a position saved before the bench ran on the
+  engine's round
+- **THEN** the bench refuses, explains that the position predates the engine's
+  round and should be saved again, and the board is left as it was
+
 ### Requirement: A telegraph is legible on the board
 
 A pending telegraph SHALL be rendered so a designer can identify the threatened
