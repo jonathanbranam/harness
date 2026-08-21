@@ -123,6 +123,12 @@ No lint is configured.
 
 ## OpenSpec: archive a change when the user says the work is done
 
+> **How this work is actually run** — planning with the human, committing the
+> plan, delegating implementation to fresh apply agents, verifying in a browser,
+> and archiving only on the human's word — is written up in
+> [`docs/workflow/driver-workflow.md`](docs/workflow/driver-workflow.md). Read it
+> when you are driving a change, especially one spanning this repo and track-web.
+
 This repo plans work as OpenSpec changes under `openspec/changes/`. The sequence
 at the end of a change is:
 
