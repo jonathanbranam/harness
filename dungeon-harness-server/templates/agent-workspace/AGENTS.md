@@ -95,11 +95,14 @@ whether setup is still open.
 state — changing a number mid-round to see what happens is what this bench is
 for.
 
-Playing — both sides, by hand:
+Playing a player unit, by hand:
 
-- `dungeon_select_unit`, then `dungeon_move_unit` and `dungeon_attack`.
-  Selection is shared with the browser: what you select is what the designer
-  sees highlighted.
+- `dungeon_select_unit`, then `dungeon_move_unit` and `dungeon_attack`. These
+  drive a **player** unit, during the `player` phase — an enemy has no action
+  surface of its own, in any phase, so both tools refuse a unit whose kind is
+  npc, carrying the engine's reason that it takes its turn by being planned.
+  Plan an enemy instead, with the tools below. Selection is shared with the
+  browser: what you select is what the designer sees highlighted.
 - **Aim at a tile, never a direction.** `dungeon_attack` takes `col`/`row`,
   and the tile must be one `dungeon_unit_options` offered — anything else is
   refused. This matters most for the magic-user, whose attack is a cross

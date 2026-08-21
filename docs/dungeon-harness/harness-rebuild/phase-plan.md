@@ -123,6 +123,17 @@ Tasks:
    `resolveNpcAction` — the engine already applies one NPC action in
    isolation, so manual enemy control needs no new rules code. A "run the
    AI" control falls back to `computeNpcTurns` for comparison.
+
+   > **Superseded, on both counts** (`dungeon-bench-guard-adoption`). "Both
+   > sides by hand" was written before the turn sequencer existed and
+   > hardened into a design position it was never meant to hold; the
+   > designer's seat for an enemy is **planning** it
+   > (`dungeon_plan_enemy_by_hand` / `dungeon_plan_enemy_by_ai`), the same
+   > seat the game's AI occupies, never driving it through the action
+   > surface. And driving an enemy through `resolveNpcAction` directly is
+   > gone with it — an enemy's attack is always a telegraph, locked while
+   > planning and resolved a phase later, never resolved on the spot the way
+   > `resolveNpcAction` alone would.
 7. **Snapshot stack** for step-back (`GameState` is plain serializable
    data, so this is a list of states, not an undo-command system).
 8. **Agent tools, one-to-one with engine calls:** read state, list a unit's

@@ -2,8 +2,10 @@
 
 ## Purpose
 A single-board design bench for Dungeon Tactics: the designer sets up a situation, plays
-it through by hand from both sides, and changes unit numbers to see what happens — with
-the real game engine deciding every rule, so what the bench shows is what the game does.
+it out, and changes unit numbers to see what happens — with the real game engine deciding
+every rule, so what the bench shows is what the game does. The bench and the game play by
+the same rules; a departure is added back only one at a time, specified, argued on its own,
+and named.
 
 ## Requirements
 

@@ -88,8 +88,12 @@ the selection is being reserved for, and it is why "select" must stop meaning
 ## 2. Out-of-phase play
 
 *Reported 2026-08-21, same session.*
-**Disposition: closed by `phase-5-correction.md` §9 change 3. Not a regression
-from change 2 — this is the hole change 3 exists to close.**
+**Disposition: closed.** All three symptoms below are gone: track-web's
+amended `dungeon-sequencer-guards` made the phase guard unconditional and
+added the `unit.kind === 'npc'` refusal, and the harness's
+`dungeon-bench-guard-adoption` adopted both — the bench plays the game's
+round, in the game's order, with no engine-mode exemption. Not a regression
+from change 2 — this is the hole those two changes exist to close.
 
 | Symptom | Cause |
 |---|---|

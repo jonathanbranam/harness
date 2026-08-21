@@ -339,7 +339,7 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_move_unit',
       label: 'Move Unit',
       description:
-        'Move the selected unit to a tile as a turn action. The engine decides whether the tile is reachable, finds the path, and charges the movement budget — a tile it rejects is a tile the unit genuinely cannot reach. Works for both sides: driving the enemy by hand is the point of this bench.',
+        'Move the selected unit to a tile as a turn action. The engine decides whether the tile is reachable, finds the path, and charges the movement budget — a tile it rejects is a tile the unit genuinely cannot reach. This drives a player unit during the player phase. An enemy has no action surface — its route into a round is being planned, not driven — so this always refuses a unit whose kind is npc; use dungeon_plan_enemy_by_hand or dungeon_plan_enemy_by_ai for an enemy instead.',
       promptSnippet: 'Move the selected unit as a turn action',
       parameters: Type.Object({ col: Type.Number(), row: Type.Number() }),
       execute: async (_id, params) => outcome(bench, bench.commitSelected('move', { col: params.col, row: params.row })),
@@ -349,7 +349,7 @@ export function createBenchBridgeExtension(opts: { bench: BenchStore }): Extensi
       name: 'dungeon_attack',
       label: 'Attack',
       description:
-        "Attack with the selected unit, aimed at a target tile. Call dungeon_unit_options first and pick one of the attack action's target tiles — a tile the engine does not offer is refused. Aim by tile, never by direction: an area attack covers tiles either side of its centre, and no direction names those. A PC attack damages every NPC and structure the attack covers; an NPC attack damages the one tile. Attacking is committal: the unit cannot move or attack again until the round ends.",
+        "Attack with the selected unit, aimed at a target tile — a player unit, during the player phase. Call dungeon_unit_options first and pick one of the attack action's target tiles — a tile the engine does not offer is refused. Aim by tile, never by direction: an area attack covers tiles either side of its centre, and no direction names those. A PC attack damages every NPC and structure the attack covers, and is committal: the unit cannot move or attack again until the round ends. An enemy has no action surface — this always refuses a unit whose kind is npc, since the game's enemy attack is a telegraph locked while planning and resolved a phase later, never an immediate hit; use dungeon_plan_enemy_by_hand or dungeon_plan_enemy_by_ai for an enemy instead.",
       promptSnippet: 'Attack with the selected unit, aimed at a tile',
       parameters: Type.Object({ col: Type.Number(), row: Type.Number() }),
       execute: async (_id, params) => outcome(bench, bench.commitSelected('attack', { col: params.col, row: params.row })),

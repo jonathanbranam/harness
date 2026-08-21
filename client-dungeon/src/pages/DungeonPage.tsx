@@ -279,6 +279,9 @@ export function DungeonPage() {
                       onTileClick={handleTileClick}
                       onUnitClick={handleUnitClick}
                       planningAttackTiles={npcPlanPreview?.attackTiles}
+                      planningMoveTiles={
+                        npcPlan?.stage === 'choose-destination' ? benchState?.selection?.moveDests : undefined
+                      }
                     />
                   </div>
                 </div>

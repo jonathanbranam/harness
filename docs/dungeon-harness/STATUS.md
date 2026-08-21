@@ -156,6 +156,18 @@ chat. The action-surface adoption followed as
 `dungeon-engine-action-surface` and `dungeon-game-action-adoption` in
 track-web.
 
+That change's design.md carried a Non-Goal, *"Phase enforcement. The bench
+drives both sides out of sequence on purpose."* It was a **deferral**, not a
+design position: written before the turn sequencer existed, when the engine
+had no round to be in sequence with, it was simply a description of the state
+of the world. It was never retired once the sequencer landed, and it went on
+to override the sequencer's own plan of record in
+`dungeon-sequencer-guards` before being corrected back by
+`dungeon-bench-guard-adoption`, which restored phase enforcement — an enemy's
+turn is now taken by planning it, never by driving it through the action
+surface. The archived change itself is left as it was written; this note is
+the record for a future reader not to re-derive a design position from it.
+
 What survives from the old harness is the scaffold (phase 01) and the
 lesson: **the engine referees, never the agent.**
 

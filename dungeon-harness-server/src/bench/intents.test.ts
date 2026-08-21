@@ -5,13 +5,16 @@ import { applyIntent } from './intents'
 import { generateBoard } from './board-gen'
 
 // The real server sets this once at startup (`engine-startup.ts`) and never
-// toggles it. A fresh `BenchStore` now starts in `placement` (`scenario.
-// newScenario`, bench-store.ts's `freshScenario`) and this suite starts the
-// scenario before driving moves and attacks on both sides out of sequence,
-// the bench's own spec'd capability that `dungeon-sequencer-guards`' phase
-// guard fences behind this mode. Set for every test, not just the block that
-// already needed it for `amendTelegraph` — and needed even to construct a
-// `BenchStore` at all now, since authoring a scenario is itself bench-only.
+// toggles it.
+//
+// Bench mode buys **no** latitude over the round: `dungeon-sequencer-guards`'
+// phase guard is unconditional, and this suite plays by it like the game
+// does. What bench mode fences is narrower — authoring a scenario at all
+// (`scenario.newScenario`, which a fresh `BenchStore` calls in its
+// constructor, so this is needed even to build one here) and retargeting a
+// locked telegraph (`amendTelegraph`). Set for every test, not just the block
+// that already needed it for `amendTelegraph`, because constructing a
+// `BenchStore` now needs it too.
 beforeEach(() => setEngineMode('bench'))
 afterEach(() => setEngineMode('game'))
 
@@ -26,6 +29,12 @@ describe('bench intents', () => {
     const store = bench()
     applyIntent(store, { kind: 'place', unitType: 'melee', col: 1, row: 1 })
     const unitId = store.getState().units[0].id
+
+    // No enemies on this board, so planning the (empty) enemy turn steps
+    // straight through to the player phase, where a PC may act
+    // (dungeon-sequencer-guards' unconditional phase guard).
+    expect(applyIntent(store, { kind: 'startScenario' })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: true })
 
     applyIntent(store, { kind: 'select', unitId })
     expect(store.getState().selection?.unitId).toBe(unitId)
@@ -49,22 +58,19 @@ describe('bench intents', () => {
     const store = bench()
     applyIntent(store, { kind: 'place', unitType: 'melee', col: 2, row: 2 })
     applyIntent(store, { kind: 'place', unitType: 'short-range', col: 3, row: 2 })
-    // A second enemy, never hand-driven, for `planEnemyTurn` to plan below.
-    // The first is spent by the hand-driven `commit` a few lines down, and
-    // since `dungeon-sequencer-guards` an enemy spent through the action
-    // surface is not planned again — the very double-act this test used to
-    // rely on to produce a telegraph from the same unit it had just attacked
-    // with by hand.
+    // A second enemy, planned by the AI once the first has been planned by
+    // hand — `planEnemyTurn` only ever takes over what is still unplanned
+    // ("mixing hand-authored and AI plans", design.md), so planning npc by
+    // hand below is what "spends" it for the round.
     applyIntent(store, { kind: 'place', unitType: 'short-range', col: 3, row: 0 })
     const [pc, npc, npc2] = store.getState().units
 
     expect(applyIntent(store, { kind: 'setHp', unitId: pc.id, hp: 2 })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 2, row: 3 })).toMatchObject({ ok: true })
-    // Adjacent to npc2 (not the soon-to-be-spent npc), so planning is
-    // guaranteed to lock a telegraph for it once npc has attacked and can't
-    // be planned again. Relocated here, during placement — `relocate` is a
-    // setup operation now and is refused once the round has started, so this
-    // has to happen before dungeon_start_scenario, not after npc's attack.
+    // Adjacent to both enemies, so both are in range once the round starts.
+    // Relocated here, during placement — `relocate` is a setup operation now
+    // and is refused once the round has started, so this has to happen before
+    // dungeon_start_scenario, not after.
     expect(applyIntent(store, { kind: 'relocate', unitId: pc.id, col: 3, row: 1 })).toMatchObject({ ok: true })
 
     // Structures, still during placement — the setup surface this change adds.
@@ -77,13 +83,23 @@ describe('bench intents', () => {
     // Setup is refused now that the scenario has started.
     expect(applyIntent(store, { kind: 'place', unitType: 'melee', col: 0, row: 4 })).toMatchObject({ ok: false })
 
-    expect(applyIntent(store, { kind: 'select', unitId: npc.id })).toMatchObject({ ok: true })
-    expect(applyIntent(store, { kind: 'commit', action: 'attack', col: 3, row: 3 })).toMatchObject({ ok: true })
-    expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: true })
+    // An enemy is planned, never driven — an enemy has no action surface of
+    // its own, in any phase (dungeon-sequencer-guards). Planning npc by hand
+    // is the designer's own choice; `planEnemyTurn` below hands the AI only
+    // what is still unplanned.
+    expect(
+      applyIntent(store, { kind: 'planEnemyByHand', unitId: npc.id, move: { kind: 'stay' }, attackTile: { col: 3, row: 1 } }),
+    ).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: true }) // the AI takes npc2
     expect(store.getState().telegraphs.length).toBeGreaterThan(0)
     expect(store.getState().unplannedNpcs).not.toContain(npc2.id)
     expect(applyIntent(store, { kind: 'planEnemyTurn' })).toMatchObject({ ok: false }) // phase has moved past npc-move
     expect(applyIntent(store, { kind: 'step' })).toMatchObject({ ok: false }) // player phase: ending the turn is `endPlayerTurn`, not a round step
+
+    // The player answers: a PC's attack still goes through `commit`, same as ever.
+    expect(applyIntent(store, { kind: 'select', unitId: pc.id })).toMatchObject({ ok: true })
+    expect(applyIntent(store, { kind: 'commit', action: 'attack', col: 3, row: 2 })).toMatchObject({ ok: true })
+
     expect(applyIntent(store, { kind: 'endPlayerTurn' })).toMatchObject({ ok: true })
     expect(applyIntent(store, { kind: 'resolveTelegraphs' })).toMatchObject({ ok: true })
     expect(store.getState().telegraphs).toHaveLength(0)

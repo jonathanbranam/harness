@@ -28,6 +28,16 @@ interface BoardViewProps {
    * overlay has no notion of. Also drives the amend flow's target highlight.
    */
   planningAttackTiles?: Tile[]
+
+  /**
+   * Destinations offered while an enemy's turn is being planned by hand, from
+   * the engine's `validMoveDests`. Needed as its own prop because an enemy has
+   * no action surface at all — `availableActions` refuses one outright — so the
+   * armed-action targets below are empty for it, and painting them would leave
+   * the planning panel telling the designer to "click a highlighted tile" with
+   * nothing highlighted.
+   */
+  planningMoveTiles?: Tile[]
 }
 
 /**
@@ -62,7 +72,7 @@ function key(tile: { col: number; row: number }): string {
  * no rule of its own — it decides colors, not legality.
  */
 export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function BoardView(
-  { state, armedAction, fields, onTileClick, onUnitClick, planningAttackTiles },
+  { state, armedAction, fields, onTileClick, onUnitClick, planningAttackTiles, planningMoveTiles },
   ref,
 ) {
   if (!state) {
@@ -81,7 +91,16 @@ export const BoardView = forwardRef<HTMLDivElement, BoardViewProps>(function Boa
   // it is told is legal; it does not work out reach or range for itself.
   const armed = selection?.actions.find((a) => a.id === armedAction)
   const offered = armed?.available ? armed.targets : []
-  const reachable = new Set(armedAction === 'move' ? offered.map(key) : (selection?.moveDests ?? []).map(key))
+  // A hand-planned enemy's destinations win outright: they are the only reach
+  // the engine will offer for that unit, and the panel is actively asking for
+  // one of them.
+  const reachable = new Set(
+    planningMoveTiles
+      ? planningMoveTiles.map(key)
+      : armedAction === 'move'
+        ? offered.map(key)
+        : (selection?.moveDests ?? []).map(key),
+  )
   const footprint = new Set(armedAction === 'attack' ? offered.map(key) : [])
   const telegraphed = new Set(telegraphs.map((t) => `${t.targetCol},${t.targetRow}`))
   const planningTargets = new Set((planningAttackTiles ?? []).map(key))

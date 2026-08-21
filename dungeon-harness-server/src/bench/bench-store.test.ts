@@ -4,18 +4,19 @@ import { BenchStore, type UnitType } from './bench-store'
 import { boardFromRows, boardToRows, generateBoard } from './board-gen'
 
 // The real server sets this once at process startup (`engine-startup.ts`) and
-// never toggles it — one process is either the game or the bench. This suite
-// is the bench, and every scenario in it hand-drives units through phases and
-// on sides `dungeon-sequencer-guards`' phase guard would otherwise refuse in
-// the engine's default `'game'` mode: a fresh `BenchStore` starts in
-// `placement` (`scenario.newScenario`, `freshScenario`'s comment) and these
-// tests act on units well before — and outside — a `player` phase once the
-// scenario has started. Setting the mode here for every test, not just the
-// one describe block that already did, is what keeps this file exercising the
-// bench's actual, spec'd capability ("Both sides are played by hand", out of
-// sequence) rather than tripping a guard the bench is fenced out of — and is
-// needed even to construct a `BenchStore` at all now, since authoring a
-// scenario is itself bench-only.
+// never toggles it — one process is either the game or the bench.
+//
+// Bench mode buys **no** latitude over the round: `dungeon-sequencer-guards`'
+// phase guard is unconditional, refuses every host including this one, and
+// this suite plays by it exactly like the game does (`playerPhase` below is
+// what most tests use to reach the phase where acting is legal). What bench
+// mode actually fences is narrower — authoring a scenario at all
+// (`scenario.newScenario`, which a fresh `BenchStore` calls in its
+// constructor, so this is needed even to build one) and retargeting a locked
+// telegraph (`amendTelegraph`, the one deliberate departure from the game's
+// own rules). Set here for every test, not just the one block that used to
+// need it for `amendTelegraph`, because constructing a `BenchStore` now needs
+// it too.
 beforeEach(() => setEngineMode('bench'))
 afterEach(() => setEngineMode('game'))
 
@@ -39,6 +40,33 @@ function openBench(): BenchStore {
 function startedWith(bench: BenchStore, units: { unitType: UnitType; col: number; row: number; hp?: number }[]): void {
   for (const u of units) bench.placeUnit(u.unitType, u.col, u.row, u.hp)
   bench.startScenario()
+}
+
+/**
+ * Like `startedWith`, but plays the round the rest of the way to `player` —
+ * what most tests below actually want, since acting through the action
+ * surface (`select` + `commitSelected`) is refused everywhere else now
+ * (`dungeon-sequencer-guards`'s unconditional phase guard).
+ *
+ * `startScenario` lands the round in `npc-move`, so every enemy takes its
+ * turn before the player's first — that is the game's round, not an
+ * artifact of this fixture. Handing enemy turns to the AI here would move
+ * them to positions a test never chose, and assertions about tiles would
+ * start failing for reasons unrelated to what the test is testing. So every
+ * enemy is planned **by hand**, to `{ kind: 'stay' }` with no attack: it
+ * holds its position and locks no telegraph, and the round is then stepped
+ * the rest of the way to `player`. The enemy phase really runs — it is
+ * simply told to do nothing.
+ *
+ * A test that wants an enemy to have actually moved or telegraphed says so
+ * explicitly, planning it differently once this fixture returns.
+ */
+function playerPhase(bench: BenchStore, units: { unitType: UnitType; col: number; row: number; hp?: number }[]): void {
+  startedWith(bench, units)
+  for (const npc of bench.getState().units.filter((u) => u.kind === 'npc')) {
+    bench.planEnemyByHand(npc.id, { kind: 'stay' })
+  }
+  while (bench.getState().phase !== 'player') bench.step()
 }
 
 describe('board generation', () => {
@@ -190,15 +218,15 @@ describe('setup is a phase', () => {
 describe('structures', () => {
   it('places a structure, moves it with its HP preserved, and removes it', () => {
     const bench = openBench()
-    expect(bench.placeStructure('tower', 4, 2)).toMatchObject({ ok: true })
-    expect(bench.getState().board.cells[2][4]).toMatchObject({ hasStructure: true, structureKind: 'tower', structureHp: 5 })
-
-    // Damage it (structures take one point per hit, whatever the attacker's
-    // damage — same fact 'the action log' already covers for placement).
-    bench.placeUnit('melee', 4, 3)
-    bench.select(bench.getState().units[0].id)
-    expect(bench.commitSelected('attack', { col: 4, row: 2 }).ok).toBe(true)
-    expect(bench.getState().board.cells[2][4].structureHp).toBe(4)
+    // A damaged structure, authored directly rather than via combat: moving and
+    // removing a structure are setup operations, refused once the round has
+    // started ('setup is a phase' below), and dealing the damage by attack would
+    // require starting it first. (Combat actually damaging a structure by one
+    // point per hit, whatever the attacker's damage, is covered independently
+    // by 'the action log' below.) What this test is about — a structure's move
+    // and removal, HP travelling with a move — needs none of that.
+    expect(bench.placeStructure('tower', 4, 2, 4)).toMatchObject({ ok: true })
+    expect(bench.getState().board.cells[2][4]).toMatchObject({ hasStructure: true, structureKind: 'tower', structureHp: 4 })
 
     const moved = bench.moveStructure(4, 2, 6, 2)
     expect(moved).toMatchObject({ ok: true })
@@ -250,7 +278,7 @@ describe('structures', () => {
 describe('playing by hand', () => {
   it('derives move options from the engine and charges the budget', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 0, 0) // move range 4
+    playerPhase(bench, [{ unitType: 'melee', col: 0, row: 0 }]) // move range 4
     const id = bench.getState().units[0].id
     bench.select(id)
 
@@ -267,15 +295,22 @@ describe('playing by hand', () => {
 
   it('refuses a move the engine says is out of reach', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 0, 0)
+    playerPhase(bench, [{ unitType: 'melee', col: 0, row: 0 }])
     bench.select(bench.getState().units[0].id)
-    expect(bench.commitSelected('move', { col: 7, row: 4 })).toMatchObject({ ok: false })
+
+    // In the player phase deliberately, and asserting the reason: this test
+    // used to run during `placement`, where the phase guard refused the move
+    // before reach was ever consulted. It passed, but it would have passed
+    // with the reach check deleted.
+    expect(bench.commitSelected('move', { col: 7, row: 4 })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/legal move target/i),
+    })
   })
 
   it('resolves a PC attack against an adjacent NPC for the def damage', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
-    bench.placeUnit('short-range', 3, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }, { unitType: 'short-range', col: 3, row: 2 }])
     const [pc, npc] = bench.getState().units
     bench.select(pc.id)
 
@@ -290,8 +325,7 @@ describe('playing by hand', () => {
 
   it('makes an attack committal, as the game does', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
-    bench.placeUnit('short-range', 3, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }, { unitType: 'short-range', col: 3, row: 2 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('attack', { col: 3, row: 2 })
 
@@ -308,23 +342,47 @@ describe('playing by hand', () => {
     }
   })
 
-  it('drives an NPC attack by hand against a PC', () => {
+  // dungeon-bench-guard-adoption: an enemy has no action surface — its route
+  // into a round is being planned, the same seat the game's AI occupies. This
+  // used to select the NPC and drive `commitSelected('attack', ...)` directly,
+  // resolving damage on the spot; that is not the game's rule (the game's
+  // enemy attack is always a telegraph, locked here and resolved a phase
+  // later). Re-aimed onto `planEnemyByHand`, the same designer intent through
+  // the game's own path: the attack locks as a telegraph and lands only after
+  // the player's turn, never immediately.
+  it('takes an enemy attack by planning it: telegraphed now, landing after the player\'s turn', () => {
     const bench = openBench()
     bench.placeUnit('melee', 2, 2)
     bench.placeUnit('short-range', 3, 2)
     const [pc, npc] = bench.getState().units
-    bench.select(npc.id)
+    bench.startScenario()
 
-    expect(bench.commitSelected('attack', { col: 2, row: 2 }).ok).toBe(true)
-    expect(bench.getState().units.find((u) => u.id === pc.id)!.hp).toBe(2) // 3 - 1
+    expect(bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 2, row: 2 }).ok).toBe(true)
+    expect(bench.getState().telegraphs).toEqual([{ unitId: npc.id, targetCol: 2, targetRow: 2 }])
+    expect(bench.getState().units.find((u) => u.id === pc.id)!.hp).toBe(3) // not yet landed
+
+    bench.step() // the only enemy is now planned: phase transition into player
+    bench.endPlayerTurn()
+    bench.resolveTelegraphs()
+    expect(bench.getState().telegraphs).toEqual([])
+    expect(bench.getState().units.find((u) => u.id === pc.id)!.hp).toBe(2) // 3 - 1, landed after the player's turn
   })
 
-  it('refuses an NPC target outside the engine footprint', () => {
+  it('refuses a target outside the engine footprint', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 6, 4)
-    bench.placeUnit('short-range', 0, 0)
-    bench.select(bench.getState().units[1].id)
-    expect(bench.commitSelected('attack', { col: 6, row: 4 })).toMatchObject({ ok: false })
+    playerPhase(bench, [
+      { unitType: 'melee', col: 6, row: 4 },
+      { unitType: 'short-range', col: 0, row: 0 },
+    ])
+    bench.select(bench.getState().units[0].id)
+
+    // The actor is the PC. This test used to select the enemy and attack the
+    // PC — a route that no longer exists at all, so it would now pass on the
+    // enemy refusal rather than on the footprint it is named for.
+    expect(bench.commitSelected('attack', { col: 0, row: 0 })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/legal attack target/i),
+    })
   })
 
   it('plans the enemy turn: moves resolve immediately toward the objective', () => {
@@ -622,7 +680,7 @@ describe('the engine sequences the round end to end', () => {
 describe('stepping back', () => {
   it('reverses a move', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 0, 0)
+    playerPhase(bench, [{ unitType: 'melee', col: 0, row: 0 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('move', { col: 2, row: 0 })
     bench.undo()
@@ -633,8 +691,7 @@ describe('stepping back', () => {
 
   it('reverses an attack, which the engine undo alone cannot', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
-    bench.placeUnit('short-range', 3, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }, { unitType: 'short-range', col: 3, row: 2 }])
     const npcId = bench.getState().units[1].id
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('attack', { col: 3, row: 2 })
@@ -665,8 +722,7 @@ describe('session-scoped definition tweaks', () => {
 
   it('changes damage the next attack deals', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
-    bench.placeUnit('short-range', 3, 2, 9)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }, { unitType: 'short-range', col: 3, row: 2, hp: 9 }])
     bench.tweakDef('melee', { damage: 5 })
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('attack', { col: 3, row: 2 })
@@ -753,10 +809,11 @@ describe('reach and threat', () => {
     expect(threat.npc['1,0']).toBe(2)
   })
 
+  // A player unit demonstrates this now: an enemy has no action surface to
+  // drive it through (dungeon-sequencer-guards).
   it('drops a unit out of both fields once it has attacked', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
-    bench.placeUnit('short-range', 3, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }, { unitType: 'short-range', col: 3, row: 2 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('attack', { col: 3, row: 2 })
 
@@ -892,7 +949,7 @@ describe('round records follow the units they name', () => {
 describe('the timeline', () => {
   it('records every action as a frame, labelled with what produced it', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 0, 0)
+    playerPhase(bench, [{ unitType: 'melee', col: 0, row: 0 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('move', { col: 2, row: 0 })
 
@@ -904,7 +961,7 @@ describe('the timeline', () => {
 
   it('steps back and forward again', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 0, 0)
+    playerPhase(bench, [{ unitType: 'melee', col: 0, row: 0 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('move', { col: 2, row: 0 })
 
@@ -937,7 +994,7 @@ describe('the timeline', () => {
 
   it('discards the abandoned line when the designer acts after stepping back', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 0, 0)
+    playerPhase(bench, [{ unitType: 'melee', col: 0, row: 0 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('move', { col: 2, row: 0 })
     bench.undo()
@@ -1020,6 +1077,8 @@ describe('the action log', () => {
     const bench = new BenchStore()
     bench.newBoard(boardFromRows(['.....', '..P..', '.....']))
     bench.placeUnit('melee', 1, 1)
+    bench.startScenario()
+    bench.planEnemyTurn() // no NPCs: one step returns straight to `player`
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('attack', { col: 2, row: 1 })
 
@@ -1045,8 +1104,7 @@ describe('the action log', () => {
 
   it('still reports unit damage and deaths', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
-    bench.placeUnit('short-range', 3, 2, 1)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }, { unitType: 'short-range', col: 3, row: 2, hp: 1 }])
     bench.select(bench.getState().units[0].id)
     bench.commitSelected('attack', { col: 3, row: 2 })
     expect(bench.getState().log.at(-1)).toMatch(/destroyed/)
@@ -1080,7 +1138,7 @@ describe('the engine decides what a unit may do', () => {
 
   it('offers both actions to a unit that has not acted', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }])
     bench.select(bench.getState().units[0].id)
 
     expect(action(bench, 'move').available).toBe(true)
@@ -1090,7 +1148,7 @@ describe('the engine decides what a unit may do', () => {
 
   it('keeps the attack when movement runs out, and says why the move is gone', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }])
     const id = bench.getState().units[0].id
     bench.select(id)
     // Melee moves 4; spend it all in one step across the open board.
@@ -1106,10 +1164,12 @@ describe('the engine decides what a unit may do', () => {
 describe('aiming is by tile, never by direction', () => {
   it('offers an area attack its off-axis tiles and resolves the cross containing one', () => {
     const bench = openBench()
-    bench.placeUnit('magic-user', 2, 2)
     // The up-cross from (2,2) centres on (2,0) and covers (1,0) and (3,0).
-    bench.placeUnit('short-range', 1, 0)
-    bench.placeUnit('short-range', 2, 0)
+    playerPhase(bench, [
+      { unitType: 'magic-user', col: 2, row: 2 },
+      { unitType: 'short-range', col: 1, row: 0 },
+      { unitType: 'short-range', col: 2, row: 0 },
+    ])
     const [, offAxis, centre] = bench.getState().units
     bench.select(bench.getState().units[0].id)
 
@@ -1137,13 +1197,20 @@ describe('aiming is by tile, never by direction', () => {
     expect(bench.getState().units.find((u) => u.id === npc.id)!.hp).toBe(3)
   })
 
-  it('will not let a hand-driven enemy attack twice in a round', () => {
+  // dungeon-bench-guard-adoption: the route this guarded — driving an enemy's
+  // second attack through the action surface in the same round — is gone. What
+  // is left to assert is the refusal itself: an enemy has no action surface at
+  // all, in any phase (dungeon-sequencer-guards).
+  it('refuses to drive an enemy through the action surface, carrying the engine\'s reason', () => {
     const bench = openBench()
     bench.placeUnit('melee', 2, 2)
     bench.placeUnit('short-range', 3, 2)
-    bench.select(bench.getState().units[1].id)
+    const npc = bench.getState().units[1]
+    bench.select(npc.id)
 
-    expect(bench.commitSelected('attack', { col: 2, row: 2 }).ok).toBe(true)
+    const attack = bench.getState().selection!.actions.find((a) => a.id === 'attack')!
+    expect(attack.available).toBe(false)
+    expect(attack.reason).toMatch(/takes its turn by being planned/)
     expect(bench.commitSelected('attack', { col: 2, row: 2 })).toMatchObject({ ok: false })
   })
 })
@@ -1164,7 +1231,7 @@ describe('previewing an action', () => {
 
   it('says plainly when an attack would accomplish nothing', () => {
     const bench = openBench()
-    bench.placeUnit('melee', 2, 2)
+    playerPhase(bench, [{ unitType: 'melee', col: 2, row: 2 }])
     bench.select(bench.getState().units[0].id)
 
     const preview = bench.previewSelected('attack', { col: 3, row: 2 })!
@@ -1177,14 +1244,21 @@ describe('previewing an action', () => {
 describe('what a unit can hit accounts for blocking', () => {
   // The approximation this replaces ignored blocking and said so, because the
   // engine's targeting walk was private. It no longer is.
+  //
+  // Read off `npcPlannableAttacks` rather than the action surface: an enemy has
+  // no action surface of its own (dungeon-sequencer-guards), so its targets are
+  // no longer available through `selection.actions`. `plannableAttacks` is the
+  // engine query the designer's own enemy-planning flow uses, and it shares the
+  // same blocking-aware scan (`reachableAttackTiles`) `availableActions` used
+  // to expose here directly.
   it('stops the offered targets at the first blocker', () => {
     const bench = openBench()
     // long-range scans from range 2 to the board edge; the melee stands in the way.
     bench.placeUnit('long-range', 0, 2)
     bench.placeUnit('melee', 2, 2)
-    bench.select(bench.getState().units[0].id)
+    const npc = bench.getState().units[0]
 
-    const targets = bench.getState().selection!.actions.find((a) => a.id === 'attack')!.targets
+    const targets = bench.npcPlannableAttacks(npc.id, { kind: 'stay' })
     expect(targets).toContainEqual({ col: 2, row: 2 }) // the blocker itself
     expect(targets).not.toContainEqual({ col: 3, row: 2 }) // nothing behind it
     expect(targets).not.toContainEqual({ col: 4, row: 2 })
@@ -1641,6 +1715,7 @@ describe('amending a locked telegraph', () => {
     bench.placeUnit('melee', 4, 4)
     bench.placeUnit('short-range', 4, 2, 1) // 1 HP: one melee hit kills it
     const npc = bench.getState().units.find((u) => u.kind === 'npc')!
+    bench.startScenario()
 
     bench.planEnemyByHand(npc.id, { kind: 'stay' }, { col: 4, row: 1 })
     bench.step() // into player
