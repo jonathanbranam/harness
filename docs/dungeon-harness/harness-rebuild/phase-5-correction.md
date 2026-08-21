@@ -44,6 +44,8 @@ Both trees are clean and committed.
 | Change | Repo | State |
 |---|---|---|
 | `dungeon-round-transitions` | track-web | ✅ **Step 1 — archived 2026-08-21** after the developer verified gameplay by hand |
+| `dungeon-bench-setup-surface` | track-web | **Step 2, planned 2026-08-21.** The engine's bench-only scenario-setup surface. Not started |
+| `dungeon-bench-setup-adoption` | harness | **Step 2, planned 2026-08-21.** The bench adopts it. Depends on the above; neither is done without the other |
 | `dungeon-sequencer-guards` | track-web | **Built on the wrong premise. NOT archived.** Amended by step 3 — do not archive it as-is |
 | `add-ui-layout-recording`, `restore-live-state-on-replay-exit` | harness | Paused introspect proposals, unrelated |
 | `dungeon-tactics-sprite-rendering`, `food`, `add-from-tmdb-search`, `watch-ratings-filter-search-prototype` | track-web | Unrelated, unstarted |
@@ -57,7 +59,9 @@ work is done — present it and wait. See either repo's `CLAUDE.md`.
 ### Progress against §9
 
 1. ✅ **Phase ownership** — done 2026-08-21.
-2. ⬅️ **The bench setup surface** — next, not started.
+2. ⬅️ **The bench setup surface** — planned 2026-08-21 as two OpenSpec changes,
+   `dungeon-bench-setup-surface` (track-web) and `dungeon-bench-setup-adoption`
+   (harness). Implementation not started.
 3. ⬜ Guards + spec correction (amends `dungeon-sequencer-guards`).
 4. ⬜ Waves and flight.
 
@@ -397,10 +401,17 @@ should be specced as such.
 
 | Phase | The designer may |
 |---|---|
-| `placement` | Everything: board, terrain, structures, any unit of either side on any tile, starting HP, session def tweaks |
+| `placement` | Everything: board, terrain, structures, any unit of either side on any tile, starting HP |
 | `npc-move` | Plan each enemy — by hand, by name to the AI, or hand the rest to the AI. **Add or remove enemies** (§8.5) |
 | `player` | Drive PCs through the action surface. **Amend a locked telegraph** (§8.4) |
 | `npc-attack` | Step through resolution |
+
+**Session def tweaks are not on this table**, by a designer decision of
+2026-08-21: an archetype's numbers are not board state, and changing one
+mid-round to see what happens is the bench's whole point, so they stay available
+in every phase. To be revisited with the turn-machine replacement for unit
+definitions. Setting a unit's *current* HP is board state and stays
+placement-only for now — a candidate for a later, argued bench exception.
 
 ### 8.4 The one exception: amending a locked telegraph
 
@@ -595,7 +606,9 @@ Two things it turned up that the plan had only predicted:
   (`unitDisplayName`) cannot express *which* enemies are holding a round up when
   several share an archetype. That one refusal now carries the id too.
 
-**2. The bench setup surface (engine + harness).** ⬅️ **next.** §8.2.2 and §8.2.3. The bench
+**2. The bench setup surface (engine + harness).** ⬅️ **next; planned, not
+built.** `dungeon-bench-setup-surface` (track-web) + `dungeon-bench-setup-adoption`
+(harness). §8.2.2 and §8.2.3. The bench
 starts in `placement`, setup operations move into the engine behind the
 bench-mode + `placement` guard, `BenchStore` drops its local rule checks and its
 `emptyState`.
