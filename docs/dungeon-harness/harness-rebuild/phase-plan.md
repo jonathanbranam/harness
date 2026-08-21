@@ -14,6 +14,12 @@
 > | 4 — Transport strip | ✅ built 2026-08-19 |
 > | 5 — Scoped turn machine v1 | ⬜ not started — **rules layer still unapproved** |
 >
+> **The turn sequencer is largely built**, ahead of phase 5 as planned — see
+> [`turn-sequencer-plan.md`](turn-sequencer-plan.md). Its phases 1, 2, 3a and 3b
+> are archived: the engine owns the round, the bench runs on it, and the designer
+> can author enemy turns and retarget a locked telegraph. The game host's
+> adoption and the guards remain.
+>
 > **Note on the count:** this plan originally had six phases. The live-def-reload
 > phase was dropped (see "Dropped" under phase 5), so the turn machine moved
 > from 6 to **5**. Anything still saying "phase 6" is stale.

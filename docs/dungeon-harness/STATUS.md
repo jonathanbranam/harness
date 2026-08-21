@@ -16,8 +16,13 @@
 >   reach/threat overlays, transport strip).
 > - **Action surface: landed** — the engine now owns what a unit may do and
 >   whether a pick is legal, in both hosts.
-> - **Next up: phase 5**, the scoped turn machine — *not started, and its
->   rules layer is still unapproved.*
+> - **The turn sequencer is largely built** (2026-08-20). The engine owns the
+>   round; the bench runs on it; the designer can author enemy turns and
+>   retarget a locked telegraph. Four changes archived across both repos, plus
+>   one unplanned engine query. Phases 4 (game adoption) and 5 (guards) remain —
+>   see [`harness-rebuild/turn-sequencer-plan.md`](harness-rebuild/turn-sequencer-plan.md).
+> - **Next after that: rebuild phase 5**, the scoped turn machine — *not started,
+>   and its rules layer is still unapproved.*
 
 **The dungeon-harness implementation documented in
 [`proposal.md`](proposal.md) and [`phases/`](phases/README.md) is stopped
@@ -122,6 +127,15 @@ arriving in phase 5 rather than gating the work.
 | 3 | Reach and threat overlays | ✅ built 2026-08-19 |
 | 4 | Transport strip — step and scrub through a played sequence | ✅ built 2026-08-19 |
 | 5 | Scoped turn machine v1 (today's six archetypes only) | ⬜ not started |
+
+Landing between phases 4 and 5, and not in the original phase plan: the **turn
+sequencer**, which moved the round itself into the engine. Phases 1, 2, 3a and 3b
+of [`harness-rebuild/turn-sequencer-plan.md`](harness-rebuild/turn-sequencer-plan.md)
+are archived; the game host's adoption and the enforcement guards remain. It went
+ahead of the turn machines rather than behind them because machines hook
+`round_start`/`round_end` and assume a telegraph-shaped round — they consume the
+round structure rather than defining it, so leaving it host-defined would have
+handed phase 5 two hosts that disagree about when a round begins.
 
 Phases 1–4 shipped as `openspec/changes/archive/2026-08-19-dungeon-bench`
 and were verified end to end in a browser, including driving the bench from

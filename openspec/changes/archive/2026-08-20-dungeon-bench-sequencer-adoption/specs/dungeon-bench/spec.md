@@ -43,6 +43,17 @@ single indivisible step.
 - **THEN** the telegraph still resolves against the tile it was locked onto, and
   the PC that left is unharmed
 
+#### Scenario: Resolving with nothing planned
+
+- **WHEN** the designer resolves telegraphs with no enemy turn planned
+- **THEN** the bench reports that there is nothing to resolve and changes nothing
+
+#### Scenario: Planning twice without resolving
+
+- **WHEN** the designer plans an enemy turn while telegraphs are still pending
+- **THEN** the bench reports that the pending telegraphs must resolve first and
+  changes nothing
+
 #### Scenario: An out-of-turn step is refused by the engine
 
 - **WHEN** the designer attempts a step the engine's round does not allow next
@@ -55,16 +66,29 @@ single indivisible step.
 - **THEN** the enemy phase completes with nothing to plan and the round moves on
   to the player, exactly as it would once every enemy had been planned
 
+## REMOVED Requirements
+
 ### Requirement: A pending telegraph cannot be discarded without resolving
 
-A round SHALL end only after every telegraph it locked has resolved or been
-skipped. The bench SHALL NOT offer any operation that ends a round while
-telegraphs are pending. Stepping back on the timeline is how a planned enemy
-turn is abandoned deliberately.
+**Reason**: The bench no longer has an operation that could discard one. Ending a
+round was a bench-side operation guarded against pending telegraphs; the engine
+now ends a round only as the `npc-attack` transition, after every telegraph has
+resolved or been skipped, so the early exit this guarded is unreachable rather
+than refused.
 
-Where the previous behaviour was a bench-side refusal, the round's end is now a
-step of the engine's round that cannot be reached early — the same guarantee,
-made structural rather than checked.
+**Migration**: None for a user — the guarantee is unchanged and now structural.
+Its replacement, "A round ends only after its telegraphs resolve", states the
+same guarantee in terms of the engine's round.
+
+## ADDED Requirements
+
+### Requirement: A round ends only after its telegraphs resolve
+
+A round SHALL end only after every telegraph it locked has resolved or been
+skipped, as a step of the engine's round rather than an operation the designer
+invokes. The bench SHALL NOT offer any operation that ends a round while
+telegraphs are pending. Stepping back on the timeline is how a planned enemy turn
+is abandoned deliberately.
 
 #### Scenario: The round ends as part of resolution
 
@@ -77,8 +101,6 @@ made structural rather than checked.
 - **WHEN** telegraphs from a planned enemy turn are still pending
 - **THEN** the bench offers no operation that would end the round and discard
   them
-
-## ADDED Requirements
 
 ### Requirement: The bench shows which phase the round is in
 

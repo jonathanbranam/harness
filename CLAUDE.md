@@ -39,7 +39,16 @@ out and it is being rebuilt — see the note below.
 > over an engine function. Preserve that invariant; it is the lesson the
 > previous effort died on.
 >
-> **Phase 5 (scoped turn machine) is next and not started.** Its rules layer,
+> **The turn sequencer landed on 2026-08-20**, ahead of phase 5: the engine owns
+> the round (`packages/dungeon-engine/src/sequencer.ts` in track-web), the bench
+> runs on it and shows the phase and the next step, and the designer can author
+> enemy turns by hand or hand them to the AI. One deliberate rule-break lives
+> here: a locked telegraph can be retargeted mid-round, retroactively — gated by
+> an engine mode that defaults to `'game'` and refuses unless the host opts in.
+> `docs/dungeon-harness/harness-rebuild/turn-sequencer-plan.md` is the plan;
+> phases 4 (the game host adopting it) and 5 (guards) remain.
+>
+> **Rebuild phase 5 (scoped turn machine) is next after that, and not started.** Its rules layer,
 > `docs/dungeon-harness/turn-machines/`, is **under evaluation and not
 > approved** — do not implement from it without an explicit go-ahead.
 > `docs/dungeon-harness/proposal.md` and `phases/` are historical — do not

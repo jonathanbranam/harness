@@ -1,6 +1,27 @@
 # The turn sequencer: moving the round into the engine
 
-**Status:** plan, approved to build in phases (2026-08-20). Spans both repos
+> # 🛠 Phases 1, 2, 3a and 3b built and archived. Phases 4 and 5 remain.
+>
+> | # | Repo | Change | Status |
+> |---|---|---|---|
+> | 1 | harness | `dungeon-bench-telegraph-window` | ✅ archived 2026-08-20 |
+> | 2 | track-web | `dungeon-turn-sequencer` | ✅ archived 2026-08-20 |
+> | — | track-web | `dungeon-engine-plannable-attacks` | ✅ archived 2026-08-20 |
+> | 3a | harness | `dungeon-bench-sequencer-adoption` | ✅ archived 2026-08-20 |
+> | 3b | harness | `dungeon-bench-enemy-planning` | ✅ archived 2026-08-20 |
+> | 4 | track-web | `dungeon-game-sequencer-adoption` | ⬜ not started |
+> | 5 | track-web | `dungeon-sequencer-guards` | ⬜ not started |
+>
+> `dungeon-engine-plannable-attacks` was not in the original plan. It came out of
+> designing 3b: `commitNpcTurn` validates an authored attack from the enemy's
+> post-move position, but no query exposed that set, so a designer would have
+> picked a destination and then guessed at targets.
+>
+> **The engine owns the round and both the bench and the designer drive it
+> through that ownership.** What remains is the game host adopting it (phase 4)
+> and the guards that retire the legacy path (phase 5).
+
+**Status:** phases 1-3b built; 4 and 5 remain. Spans both repos
 (`track-web`, `harness`).
 **Closes:** finding 5 of [`action-surface-plan.md`](action-surface-plan.md),
 deferred there as `dungeon-turn-sequencer`.

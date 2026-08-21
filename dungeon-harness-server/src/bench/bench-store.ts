@@ -389,7 +389,11 @@ export class BenchStore {
       phase: this.state.phase,
       nextStep: nextAction(this.state),
       telegraphs: this.state.npcPlans
+        // Unresolved *and* still on the board: the engine skips a telegraph
+        // whose owner died inside the window, so listing one as pending would
+        // promise an attack that can never land.
         .filter((p) => !this.state.npcPlansResolved.includes(p.unitId))
+        .filter((p) => this.state.units.some((u) => u.id === p.unitId))
         .map((p) => ({ unitId: p.unitId, targetCol: p.targetCol, targetRow: p.targetRow })),
       unplannedNpcs: engineUnplannedNpcs(this.state),
       npcAuthorship: { ...this.npcAuthorship },
@@ -564,7 +568,12 @@ export class BenchStore {
   removeUnit(unitId: string): BenchResult {
     if (!this.unit(unitId)) return fail(`No unit "${unitId}" on the board`)
     if (this.selectedId === unitId) this.selectedId = null
-    this.commit({ ...this.state, units: this.state.units.filter((u) => u.id !== unitId) }, `Removed ${unitId}.`)
+    delete this.npcAuthorship[unitId]
+    if (this.npcPlanCandidate?.unitId === unitId) this.npcPlanCandidate = null
+    this.commit(
+      this.withoutDepartedUnits({ ...this.state, units: this.state.units.filter((u) => u.id !== unitId) }),
+      `Removed ${unitId}.`,
+    )
     return ok(`Removed ${unitId}.`)
   }
 
@@ -592,11 +601,31 @@ export class BenchStore {
     return ok(`${unitId} now has ${hp} HP.`)
   }
 
+  /**
+   * Drop every round record naming units that are no longer on the board.
+   *
+   * Removing or clearing units is a *setup* operation, but the round's records
+   * are keyed by unit id — so without this the bench keeps telegraphs for
+   * units that do not exist. The engine skips such a telegraph at resolution,
+   * so nothing lands wrongly; what breaks is the display, which lists a
+   * phantom as pending and offers an Amend that then refuses with "No unit
+   * ... on the board". Found exactly that way, driving the bench in a browser.
+   */
+  private withoutDepartedUnits(state: GameState): GameState {
+    const alive = new Set(state.units.map((u) => u.id))
+    return {
+      ...state,
+      npcPlans: state.npcPlans.filter((p) => alive.has(p.unitId)),
+      npcPlannedThisRound: state.npcPlannedThisRound.filter((id) => alive.has(id)),
+      npcPlansResolved: state.npcPlansResolved.filter((id) => alive.has(id)),
+    }
+  }
+
   clearUnits(): BenchResult {
     this.selectedId = null
     this.npcAuthorship = {}
     this.npcPlanCandidate = null
-    this.commit({ ...this.state, units: [] }, 'Cleared all units.')
+    this.commit(this.withoutDepartedUnits({ ...this.state, units: [] }), 'Cleared all units.')
     return ok('Board cleared of units.')
   }
 

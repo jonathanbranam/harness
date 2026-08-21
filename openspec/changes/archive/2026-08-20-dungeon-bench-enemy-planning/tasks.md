@@ -72,13 +72,26 @@
 
 ## 7. Verify in a browser
 
-- [ ] 7.1 Hand-plan one enemy and let the AI take the rest; confirm the board
-      updates as each is planned and the unplanned list shrinks.
-- [ ] 7.2 Plan every enemy to hold, and confirm the round accepts it.
-- [ ] 7.3 Amend a telegraph mid-round, then scrub back to the frame that locked
-      it and confirm it reads as though planned that way.
-- [ ] 7.4 Drive the same sequence from chat. The agent's first reply can take
-      over two minutes — wait before concluding anything is broken.
-- [ ] 7.5 Note: element refs change on every re-render; re-snapshot before each
-      click. A small button may also ignore a synthetic click — if a control
-      seems dead, try clicking it via JS before reporting a bug.
+- [x] 7.1 Verified 2026-08-20 in the browser: per-enemy "Plan by hand" / "Hand
+      to AI", hand-planning highlights legal destinations then legal attack
+      tiles, and authorship shows as "planned by designer" / "planned by ai".
+- [x] 7.2 Covered by the all-`stay` server test plus the browser's "Every enemy
+      is planned — press Step or Plan enemy turn to move on" prompt.
+- [x] 7.3 Verified 2026-08-20 via the agent: telegraph retargeted from (4, 1) to
+      (3, 0), and at the frame where it was locked the telegraph reads the
+      **amended** target — the retroactive promise, confirmed on real frame data.
+- [x] 7.4 Verified 2026-08-20. The agent drove `dungeon_clear_units`,
+      `dungeon_place_unit`, `dungeon_round_status`, `dungeon_end_turn`,
+      `dungeon_step`, `dungeon_amend_telegraph`, `dungeon_step_to` and reported
+      the result correctly.
+- [x] 7.5 Both harness traps hit again and are recorded: stale refs, and small
+      SVG targets ignoring synthetic clicks. Driving the bench through the agent
+      turned out to be the more reliable verification path.
+
+## 8. Found while verifying
+
+- [x] 8.1 `clearUnits`/`removeUnit` left telegraphs and round records naming
+      units that no longer existed, so the UI listed a phantom telegraph and its
+      Amend refused with "No unit ... on the board". Round records now follow the
+      units they name, and a telegraph is not reported once its owner has left
+      the board. Regression tests added.

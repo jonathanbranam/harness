@@ -629,6 +629,54 @@ describe('threat for single-tile attackers', () => {
   })
 })
 
+describe('round records follow the units they name', () => {
+  // Found by driving the bench in a browser: clearing units left telegraphs
+  // behind for enemies that no longer existed, so the UI listed a phantom as
+  // pending and its Amend button refused with "No unit ... on the board".
+  it('clearing units clears the telegraphs they had locked', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 0)
+    bench.planEnemyTurn()
+    expect(bench.getState().telegraphs.length).toBeGreaterThan(0)
+
+    bench.clearUnits()
+    expect(bench.getState().telegraphs).toEqual([])
+  })
+
+  it('removing one enemy drops its telegraph and leaves the others alone', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('melee', 7, 1)
+    bench.placeUnit('short-range', 4, 0)
+    bench.placeUnit('short-range', 7, 0)
+    bench.planEnemyTurn()
+    const npcs = bench.getState().units.filter((u) => u.kind === 'npc')
+    expect(bench.getState().telegraphs).toHaveLength(2)
+
+    bench.removeUnit(npcs[0].id)
+    const left = bench.getState().telegraphs
+    expect(left).toHaveLength(1)
+    expect(left[0].unitId).toBe(npcs[1].id)
+  })
+
+  it('does not report a telegraph whose owner died inside the window', () => {
+    const bench = openBench()
+    bench.placeUnit('melee', 4, 1)
+    bench.placeUnit('short-range', 4, 2, 1) // 1 HP — one melee hit kills it
+    bench.planEnemyTurn()
+    expect(bench.getState().telegraphs).toHaveLength(1)
+
+    const pc = bench.getState().units.find((u) => u.kind === 'pc')!
+    bench.select(pc.id)
+    bench.commitSelected('attack', { col: 4, row: 2 })
+
+    // The engine will skip this telegraph at resolution, so reporting it as
+    // pending would promise an attack that can never land.
+    expect(bench.getState().telegraphs).toEqual([])
+  })
+})
+
 describe('the timeline', () => {
   it('records every action as a frame, labelled with what produced it', () => {
     const bench = openBench()
