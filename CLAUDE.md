@@ -39,19 +39,38 @@ out and it is being rebuilt — see the note below.
 > over an engine function. Preserve that invariant; it is the lesson the
 > previous effort died on.
 >
-> **The turn sequencer landed on 2026-08-20**, ahead of phase 5: the engine owns
-> the round (`packages/dungeon-engine/src/sequencer.ts` in track-web), the bench
-> runs on it and shows the phase and the next step, and the designer can author
-> enemy turns by hand or hand them to the AI. One deliberate rule-break lives
-> here: a locked telegraph can be retargeted mid-round, retroactively — gated by
-> an engine mode that defaults to `'game'` and refuses unless the host opts in.
-> The shipped game adopted the same round on 2026-08-21, so **both hosts now
-> drive one round from one implementation** — a change to how a round works is a
-> change to the engine, never to a host.
-> `docs/dungeon-harness/harness-rebuild/turn-sequencer-plan.md` is the plan; only
-> phase 5 (the enforcement guards) remains.
+> **The turn sequencer landed on 2026-08-20**: the engine owns the round
+> (`packages/dungeon-engine/src/sequencer.ts` in track-web), the bench runs on it
+> and shows the phase and the next step, and the designer can author enemy turns
+> by hand or hand them to the AI. The shipped game adopted the same round on
+> 2026-08-21, so **both hosts drive one round from one implementation** — a change
+> to how a round works is a change to the engine, never to a host. As of
+> 2026-08-21 the engine owns **every** phase transition, including `startScenario`
+> and `endPlayerTurn`; a host decides *when*, never *what*.
+> `docs/dungeon-harness/harness-rebuild/turn-sequencer-plan.md` is that plan.
 >
-> **Rebuild phase 5 (scoped turn machine) is next after that, and not started.** Its rules layer,
+> ## ⚠️ Read this before touching the bench or the engine's round
+>
+> **The bench and the game play by the same rules.** Exactly one exception
+> exists: a locked telegraph can be retargeted mid-round, retroactively, so a
+> designer who misplanned an enemy need not rewind the player's turn. It changes
+> no game state — no turn spent, no damage, no extra action — and is gated by an
+> engine mode defaulting to `'game'`.
+>
+> Anything else that reads like a bench licence to break a rule is **wrong and
+> superseded**, in particular the claim that *"the bench drives both sides by
+> hand, out of sequence, on purpose."* That began as a deferral in an archived
+> change, hardened into a spec requirement, and in 2026-08-21's
+> `dungeon-sequencer-guards` got promoted into an engine-mode exemption from the
+> turn-phase guard. **That change is committed and deliberately unarchived.**
+>
+> **`docs/dungeon-harness/harness-rebuild/phase-5-correction.md` is the plan of
+> record for the dungeon work** — start there. It carries the decisions, the four
+> changes that implement them, and a cold-start orientation. Further bench
+> exceptions get argued back one at a time, never assumed.
+>
+> **Rebuild phase 5 (scoped turn machine) comes after all of that, and is not
+> started.** Its rules layer,
 > `docs/dungeon-harness/turn-machines/`, is **under evaluation and not
 > approved** — do not implement from it without an explicit go-ahead.
 > `docs/dungeon-harness/proposal.md` and `phases/` are historical — do not

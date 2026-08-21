@@ -1,6 +1,6 @@
 # The turn sequencer: moving the round into the engine
 
-> # 🛠 Phases 1–4 built and archived. Only phase 5 remains.
+> # 🛠 Phases 1–4 archived. Phase 5 shipped on a premise that was wrong and is being corrected.
 >
 > | # | Repo | Change | Status |
 > |---|---|---|---|
@@ -10,7 +10,7 @@
 > | 3a | harness | `dungeon-bench-sequencer-adoption` | ✅ archived 2026-08-20 |
 > | 3b | harness | `dungeon-bench-enemy-planning` | ✅ archived 2026-08-20 |
 > | 4 | track-web | `dungeon-game-sequencer-adoption` | ✅ archived 2026-08-21 |
-> | 5 | track-web | `dungeon-sequencer-guards` | ⬜ not started |
+> | 5 | track-web | `dungeon-sequencer-guards` | ⚠️ built 2026-08-21, **not archived** — wrong premise, see below |
 >
 > `dungeon-engine-plannable-attacks` was not in the original plan. It came out of
 > designing 3b: `commitNpcTurn` validates an authored attack from the enemy's
@@ -19,15 +19,26 @@
 >
 > **The engine owns the round and both hosts now drive it.** The shipped game and
 > the design bench run the same round from the same code, which was the point.
-> What remains is phase 5: turning on the guards and retiring the legacy path.
 >
-> Two host-owned transitions survive by design — `player → npc-attack` and
-> `placement → npc-move`. Both are the player deciding they are finished, which
-> is a decision rather than a rule; every transition *inside* the round is the
-> engine's.
+> **Phase 5 was built and is wrong.** It added the guards, but exempted the bench
+> from the phase guard, on the premise that "the bench drives both sides by hand,
+> out of sequence, on purpose". That premise is rejected: the bench and the game
+> play by the same rules, with amending a locked telegraph as the only exception.
+> The change is committed but deliberately **unarchived**, and is amended by step
+> 3 of [`phase-5-correction.md`](phase-5-correction.md) — **read that before
+> touching anything here.**
+>
+> ~~Two host-owned transitions survive by design — `player → npc-attack` and
+> `placement → npc-move`.~~ **No longer true (2026-08-21).** They were the last
+> place the two hosts could drift, and they had already drifted. The engine now
+> owns both as `startScenario` and `endPlayerTurn` (track-web `c6e3999`, harness
+> `2c7d161`). The *decision* is still the host's — when the board is set, when the
+> player is done — but what that decision does to the round is the engine's.
 
-**Status:** phases 1-4 built and archived; phase 5 remains. Spans both repos
-(`track-web`, `harness`).
+**Status:** phases 1-4 built and archived. Phase 5 built but unarchived and
+being corrected — see [`phase-5-correction.md`](phase-5-correction.md), whose
+step 1 (the engine owning every phase transition) landed 2026-08-21. Spans both
+repos (`track-web`, `harness`).
 **Closes:** finding 5 of [`action-surface-plan.md`](action-surface-plan.md),
 deferred there as `dungeon-turn-sequencer`.
 **Depends on:** the action surface (landed 2026-08-19).

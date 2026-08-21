@@ -16,14 +16,23 @@
 >   reach/threat overlays, transport strip).
 > - **Action surface: landed** — the engine now owns what a unit may do and
 >   whether a pick is legal, in both hosts.
-> - **The turn sequencer is largely built** (2026-08-20). The engine owns the
+> - **The turn sequencer is built** (2026-08-20). The engine owns the
 >   round; the bench runs on it; the designer can author enemy turns and
 >   retarget a locked telegraph. Four changes archived across both repos, plus
 >   one unplanned engine query. The shipped game adopted it on 2026-08-21, so
->   both hosts now run the same round from the same code. Only phase 5 (guards)
->   remains —
+>   both hosts now run the same round from the same code —
 >   see [`harness-rebuild/turn-sequencer-plan.md`](harness-rebuild/turn-sequencer-plan.md).
-> - **Next after that: rebuild phase 5**, the scoped turn machine — *not started,
+> - **⚠️ Its phase 5 (`dungeon-sequencer-guards`) shipped on a wrong premise**
+>   and is committed but **unarchived**. It exempted the bench from the turn-phase
+>   guard, on the inherited claim that the bench "drives both sides out of
+>   sequence, on purpose". **Rejected 2026-08-21: the bench and the game play by
+>   the same rules**, with amending a locked telegraph as the only exception, and
+>   further bench exceptions get argued back one at a time.
+>   [`harness-rebuild/phase-5-correction.md`](harness-rebuild/phase-5-correction.md)
+>   is the plan of record for fixing it — **four changes, of which step 1 (the
+>   engine owning every phase transition) landed 2026-08-21.** Step 2, the bench
+>   setup surface, is next.
+> - **Then: rebuild phase 5**, the scoped turn machine — *not started,
 >   and its rules layer is still unapproved.*
 
 **The dungeon-harness implementation documented in

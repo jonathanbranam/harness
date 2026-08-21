@@ -1,14 +1,86 @@
 # Phase 5 correction: the bench does not play out of sequence
 
-> **Status: decided, not implemented.** Written 2026-08-21, after the designer
-> rejected the premise phase 5 shipped on. Nothing in here has been done. The
-> phase-5 implementation is still sitting uncommitted in both repos.
+> **Status: decided; step 1 of 4 built.** Written 2026-08-21, after the designer
+> rejected the premise phase 5 shipped on. **This is the plan of record for the
+> dungeon work — start here.**
 >
 > **Decisions taken (2026-08-21):** Option B. **The bench and the game play by
 > the same rules, with exactly one exception** — amending a locked telegraph.
 > Further bench exceptions will be added back one at a time, deliberately, and
-> only after the two hosts are provably identical. §8 below works out what that
-> means for scenario setup.
+> only after the two hosts are provably identical. §8 works out what that means
+> for scenario setup; §9 is the four changes that implement it.
+>
+> **§0 is the cold-start orientation** — repos, branches, commits, OpenSpec
+> state, and what to do next. Read it before anything else.
+
+## 0. Orientation for a fresh session
+
+*Read this first if you have no prior context. Everything below §1 is the
+reasoning; this section is the state of the world.*
+
+### The one rule
+
+**The bench and the game play by the same rules.** Exactly one exception:
+amending a locked telegraph (§8.4). Further bench exceptions get argued back one
+at a time, deliberately — never assumed, and never inferred from an older
+document. If something you read grants the bench a licence to break a rule,
+check it against this section before believing it.
+
+### The two repos
+
+| | Path | Branch |
+|---|---|---|
+| harness (this repo) | `/Volumes/Data/work/pi/harness` | `dungeon-harness-rebuild` |
+| track-web (the engine lives here) | `/Volumes/Data/work/pi/track-web` | `dev` |
+
+The engine is `track-web/packages/dungeon-engine`, consumed by the harness over a
+relative `file:` path. Each repo has its **own** OpenSpec root. Neither repo's
+work is complete without the other's.
+
+### Where things stand (2026-08-21)
+
+Both trees are clean and committed.
+
+| Change | Repo | State |
+|---|---|---|
+| `dungeon-round-transitions` | track-web | **Step 1 — built, validated `--strict`, NOT archived** (awaiting review) |
+| `dungeon-sequencer-guards` | track-web | **Built on the wrong premise. NOT archived.** Amended by step 3 — do not archive it as-is |
+| `add-ui-layout-recording`, `restore-live-state-on-replay-exit` | harness | Paused introspect proposals, unrelated |
+| `dungeon-tactics-sprite-rendering`, `food`, `add-from-tmdb-search`, `watch-ratings-filter-search-prototype` | track-web | Unrelated, unstarted |
+
+Relevant commits: track-web `982b61b` (phase 5 as built), `85e2423` (dev
+instance), `c6e3999` (step 1); harness `12e8313` (this plan), `2c7d161` (step 1).
+
+**Archiving rule:** an OpenSpec change is archived only after the human says the
+work is done — present it and wait. See either repo's `CLAUDE.md`.
+
+### Progress against §9
+
+1. ✅ **Phase ownership** — done 2026-08-21.
+2. ⬅️ **The bench setup surface** — next, not started.
+3. ⬜ Guards + spec correction (amends `dungeon-sequencer-guards`).
+4. ⬜ Waves and flight.
+
+### Verifying in a browser
+
+Dev servers may already be running; **do not kill or restart any you did not
+start.** For track-web you need a login, so stand up a disposable second instance
+rather than touching the dev database — three commands in
+`track-web/docs/dev-second-instance.md`. The bench is at `localhost:5177`,
+password `TEMP`.
+
+*(As of 2026-08-21 the instances found running on 3000/6035/4300/5177 were
+leftovers from earlier sessions, not the developer's — ownership unconfirmed, so
+still leave them alone.)*
+
+### Two open questions, neither blocking
+
+- Does an enemy at 1 HP flee during the player's turn, or wait for its own
+  `npc-move`? Decides whether flight is ever a *reaction* (§8.5).
+- Do bookmarks already cover "start this scenario on the player's turn", removing
+  the need for a phase-setter? (§8.6)
+
+---
 
 ## 1. The sentence that is wrong
 
@@ -76,7 +148,7 @@ one. It let the designer see an enemy attack that the game can never produce.
 `planEnemyByHand` (phase 3b) is the strictly better replacement: same designer
 intent, real telegraph, real window, engine-refereed.
 
-## 4. Should we `git revert`?
+## 4. Should we `git revert`? — decided: no
 
 **No — and revert would not fix the actual problem.**
 
@@ -99,7 +171,7 @@ A revert would:
 
 The correction is smaller than the revert. Recommend targeted correction.
 
-## 5. One decision needed before starting
+## 5. The residual question — decided: Option B
 
 Removing the escape hatch leaves a residual question: during the `player` phase,
 should the action surface still offer actions for an **enemy** unit?
@@ -208,7 +280,7 @@ Four suites (track-web unit + Gherkin, harness unit, both typechecks), then both
 hosts in a browser: a full game round, and a full bench round including planning
 by hand, planning by AI, and an amendment.
 
-## 7. What does not change
+## 7. What does not change about phase 5's other two fixes
 
 - The engine mode itself stays. It is the right fence for `amendTelegraph`; it
   was simply used for a second thing it should not have been.
@@ -508,13 +580,21 @@ disruption. That is a question for the pass, not a recommendation here.
 This is now materially larger than "correct phase 5" — §8.2 turns it into a real
 engine setup API. It should be **four changes, not one**:
 
-**1. Phase ownership (engine, both hosts).** `startScenario` and
-`endPlayerTurn` move into the engine (§8.7). No behaviour change at all — every
-transition already happens, this only moves who performs it. Standalone and
-safe, and it makes the rest legible. **Type-level enforcement is explicitly not
-part of this** (§8.7.1).
+**1. Phase ownership (engine, both hosts).** ✅ **Done 2026-08-21** —
+`dungeon-round-transitions` (track-web `c6e3999`, harness `2c7d161`; validated
+`--strict`, **not archived**, awaiting review). `startScenario` and
+`endPlayerTurn` moved into the engine (§8.7). No behaviour change — every
+transition already happened; this only moved who performs it. **Type-level
+enforcement was explicitly not part of it** (§8.7.1).
 
-**2. The bench setup surface (engine + harness).** §8.2.2 and §8.2.3. The bench
+Two things it turned up that the plan had only predicted:
+- The drift was **already real**: the game cleared the selection on both
+  transitions and the bench cleared neither, and only the bench could refuse.
+- The engine's convention of naming units by archetype alone
+  (`unitDisplayName`) cannot express *which* enemies are holding a round up when
+  several share an archetype. That one refusal now carries the id too.
+
+**2. The bench setup surface (engine + harness).** ⬅️ **next.** §8.2.2 and §8.2.3. The bench
 starts in `placement`, setup operations move into the engine behind the
 bench-mode + `placement` guard, `BenchStore` drops its local rule checks and its
 `emptyState`.
