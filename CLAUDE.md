@@ -102,36 +102,42 @@ npm run hash-password -w dungeon-harness-server -- 'your-password'
 
 No lint is configured.
 
-## OpenSpec: archive a change as soon as its work is verified
+## OpenSpec: archive a change when the user says the work is done
 
-This repo plans work as OpenSpec changes under `openspec/changes/`. **When a
-change's tasks are done and the work is verified, sync its specs and archive it
-in the same sitting:**
+This repo plans work as OpenSpec changes under `openspec/changes/`. The sequence
+at the end of a change is:
 
-```bash
-openspec validate <change-name> --strict
-openspec archive <change-name> -y      # syncs the delta into openspec/specs/
-```
+1. Finish the tasks and verify the work.
+2. **Present the change and its verification to the user** — what landed, what
+   the tests say, what was checked by hand.
+3. **Wait.** The user reviews, and may independently verify.
+4. **Only once the user confirms**, sync and archive:
+   ```bash
+   openspec validate <change-name> --strict
+   openspec archive <change-name> -y      # folds the delta into openspec/specs/
+   ```
+5. Then start the next piece of work.
 
-Do not leave verified changes sitting open. This gets more important the more
-changes stack up, and the reason is concrete rather than tidiness:
+**Do not archive on your own judgement that the work is verified.** Archiving
+asserts the change is done and checked, and that assertion is the user's to make.
+An archived change is also the harder thing to revisit.
 
-- **A delta is written against the main spec as it stands.** Archiving is what
-  folds a delta in. Two unarchived changes touching the same capability are both
-  written against the *pre-both* spec, so whichever archives second is missing
-  whatever the first added — and `openspec archive` refuses it: *"current spec
-  contains scenario(s) not present in the modified block."* You then have to go
-  back and reconcile deltas by hand, which is exactly the drift the format
-  exists to prevent.
-- **A `MODIFIED` requirement replaces the whole block**, scenarios included. The
-  longer a change waits, the more likely the requirement it modifies has moved
-  underneath it.
-- **`openspec/specs/` is the answer to "what does this system do today."** An
-  unarchived pile means that answer is stale, and the next change gets planned
-  against the wrong picture.
+Equally, **do not start the next change while a finished one sits unpresented.**
+Archiving late is only a problem in one specific case, but it is a sharp one:
 
-If a change turns out to be *partly* verified, archive nothing and say what is
-outstanding — an archived change asserts the work is done and checked.
+- **Two changes that modify the same capability.** A delta is written against the
+  main spec as it stands, and archiving is what folds a delta in — so if the
+  first is not archived, the second is authored against a spec missing the
+  first's requirements. `openspec archive` then refuses it: *"current spec
+  contains scenario(s) not present in the modified block."* Reconciling by hand
+  afterwards is exactly the drift the format exists to prevent. A `MODIFIED`
+  requirement replaces its whole block, scenarios included, so the longer a
+  change waits the more likely the requirement moved underneath it.
+- Changes touching *different* capabilities do not have this problem and can sit
+  safely. It is same-spec pile-up that hurts.
+
+If a change is only *partly* verified, present it as partly verified and say what
+is outstanding rather than archiving any of it.
 
 ## Never kill or restart the dev servers
 

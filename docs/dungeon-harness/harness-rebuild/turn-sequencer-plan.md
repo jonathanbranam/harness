@@ -393,18 +393,19 @@ repo to land first to stay green.
 | 4 | track-web | `dungeon-game-sequencer-adoption` | 2 |
 | 5 | track-web | `dungeon-sequencer-guards` | 3b, 4 |
 
-> **Archive each change as soon as its work is verified** — validate, archive,
-> and let it sync into `openspec/specs/`. Do not run two phases with an
-> unarchived one behind you.
+> **At the end of each phase: present the change and its verification, wait for
+> the user to confirm, then archive.** Archiving asserts the work is done and
+> checked, and that call is the user's. Do not start the next phase with a
+> finished one still unpresented.
 >
-> This plan is unusually exposed to that. Phases 1, 3a and 3b all modify the
-> *same* capability (`dungeon-bench`), and a delta is written against the main
-> spec as it stands — so leaving one unarchived means the next is written
-> against a spec missing the first's requirements, and `openspec archive` refuses
-> it. That happened here: archiving 3a failed twice, once because its `MODIFIED`
-> block had to carry forward scenarios phase 1 had added, and once because a
-> requirement 3a *removes* could not be expressed as a `MODIFIED` at all. Both
-> were fixable, and both were avoidable by archiving in step.
+> This plan is unusually exposed to late archiving, because phases 1, 3a and 3b
+> all modify the *same* capability (`dungeon-bench`). A delta is written against
+> the main spec as it stands, so leaving one unarchived means the next is
+> authored against a spec missing the first's requirements, and `openspec
+> archive` refuses it. That happened here: archiving 3a failed twice — once
+> because its `MODIFIED` block had to carry forward scenarios phase 1 had added,
+> and once because a requirement 3a *removes* could not be expressed as a
+> `MODIFIED` at all. Both were fixable, and both were avoidable.
 
 ### Phase 1 — `dungeon-bench-telegraph-window` (harness)
 

@@ -30,13 +30,17 @@
 > legal" into the engine across both hosts. It is a prerequisite the
 > turn-machine work inherits.
 
-## The other rule: archive as you go
+## The other rule: present, confirm, then archive
 
-**When a phase's work is verified, sync and archive its OpenSpec change before
-starting the next one.** `openspec/specs/` is what "the system does this today"
-means; an unarchived pile makes that answer stale and makes the next delta
-harder to write, because deltas are authored against the main spec as it stands.
-See the OpenSpec section of `CLAUDE.md` for the mechanics and the failure mode.
+**Each phase ends by presenting the change and its verification to the user.**
+They review, possibly verify independently, and confirm — and only then is the
+change synced and archived. Archiving asserts the work is done and checked, which
+is the user's call to make, not a conclusion to reach alone.
+
+Don't start the next phase with a finished one still unpresented. That matters
+most when consecutive phases modify the same capability, since a delta is
+authored against the main spec as it stands. See the OpenSpec section of
+`CLAUDE.md` for the mechanics and the failure it produces.
 
 ## The rule these phases obey
 
