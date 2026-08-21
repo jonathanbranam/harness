@@ -45,8 +45,11 @@ out and it is being rebuilt — see the note below.
 > enemy turns by hand or hand them to the AI. One deliberate rule-break lives
 > here: a locked telegraph can be retargeted mid-round, retroactively — gated by
 > an engine mode that defaults to `'game'` and refuses unless the host opts in.
-> `docs/dungeon-harness/harness-rebuild/turn-sequencer-plan.md` is the plan;
-> phases 4 (the game host adopting it) and 5 (guards) remain.
+> The shipped game adopted the same round on 2026-08-21, so **both hosts now
+> drive one round from one implementation** — a change to how a round works is a
+> change to the engine, never to a host.
+> `docs/dungeon-harness/harness-rebuild/turn-sequencer-plan.md` is the plan; only
+> phase 5 (the enforcement guards) remains.
 >
 > **Rebuild phase 5 (scoped turn machine) is next after that, and not started.** Its rules layer,
 > `docs/dungeon-harness/turn-machines/`, is **under evaluation and not

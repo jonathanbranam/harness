@@ -1,6 +1,6 @@
 # The turn sequencer: moving the round into the engine
 
-> # 🛠 Phases 1, 2, 3a and 3b built and archived. Phases 4 and 5 remain.
+> # 🛠 Phases 1–4 built and archived. Only phase 5 remains.
 >
 > | # | Repo | Change | Status |
 > |---|---|---|---|
@@ -9,7 +9,7 @@
 > | — | track-web | `dungeon-engine-plannable-attacks` | ✅ archived 2026-08-20 |
 > | 3a | harness | `dungeon-bench-sequencer-adoption` | ✅ archived 2026-08-20 |
 > | 3b | harness | `dungeon-bench-enemy-planning` | ✅ archived 2026-08-20 |
-> | 4 | track-web | `dungeon-game-sequencer-adoption` | ⬜ not started |
+> | 4 | track-web | `dungeon-game-sequencer-adoption` | ✅ archived 2026-08-21 |
 > | 5 | track-web | `dungeon-sequencer-guards` | ⬜ not started |
 >
 > `dungeon-engine-plannable-attacks` was not in the original plan. It came out of
@@ -17,11 +17,16 @@
 > post-move position, but no query exposed that set, so a designer would have
 > picked a destination and then guessed at targets.
 >
-> **The engine owns the round and both the bench and the designer drive it
-> through that ownership.** What remains is the game host adopting it (phase 4)
-> and the guards that retire the legacy path (phase 5).
+> **The engine owns the round and both hosts now drive it.** The shipped game and
+> the design bench run the same round from the same code, which was the point.
+> What remains is phase 5: turning on the guards and retiring the legacy path.
+>
+> Two host-owned transitions survive by design — `player → npc-attack` and
+> `placement → npc-move`. Both are the player deciding they are finished, which
+> is a decision rather than a rule; every transition *inside* the round is the
+> engine's.
 
-**Status:** phases 1-3b built; 4 and 5 remain. Spans both repos
+**Status:** phases 1-4 built and archived; phase 5 remains. Spans both repos
 (`track-web`, `harness`).
 **Closes:** finding 5 of [`action-surface-plan.md`](action-surface-plan.md),
 deferred there as `dungeon-turn-sequencer`.

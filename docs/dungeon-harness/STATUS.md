@@ -19,7 +19,9 @@
 > - **The turn sequencer is largely built** (2026-08-20). The engine owns the
 >   round; the bench runs on it; the designer can author enemy turns and
 >   retarget a locked telegraph. Four changes archived across both repos, plus
->   one unplanned engine query. Phases 4 (game adoption) and 5 (guards) remain —
+>   one unplanned engine query. The shipped game adopted it on 2026-08-21, so
+>   both hosts now run the same round from the same code. Only phase 5 (guards)
+>   remains —
 >   see [`harness-rebuild/turn-sequencer-plan.md`](harness-rebuild/turn-sequencer-plan.md).
 > - **Next after that: rebuild phase 5**, the scoped turn machine — *not started,
 >   and its rules layer is still unapproved.*
@@ -131,7 +133,8 @@ arriving in phase 5 rather than gating the work.
 Landing between phases 4 and 5, and not in the original phase plan: the **turn
 sequencer**, which moved the round itself into the engine. Phases 1, 2, 3a and 3b
 of [`harness-rebuild/turn-sequencer-plan.md`](harness-rebuild/turn-sequencer-plan.md)
-are archived; the game host's adoption and the enforcement guards remain. It went
+are archived, and phase 4 landed 2026-08-21 — both hosts now drive one round
+owned by the engine. Only the enforcement guards remain. It went
 ahead of the turn machines rather than behind them because machines hook
 `round_start`/`round_end` and assume a telegraph-shaped round — they consume the
 round structure rather than defining it, so leaving it host-defined would have
