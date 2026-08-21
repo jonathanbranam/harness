@@ -46,8 +46,8 @@ Both trees are clean and committed.
 | `dungeon-round-transitions` | track-web | ✅ **Step 1 — archived 2026-08-21** after the developer verified gameplay by hand |
 | `dungeon-bench-setup-surface` | track-web | ✅ **Step 2 — built and verified 2026-08-21** (`0537c30`). Awaiting the developer's word to archive |
 | `dungeon-bench-setup-adoption` | harness | ✅ **Step 2 — built and verified 2026-08-21** (`7d4aeae`). Awaiting the developer's word to archive |
-| `dungeon-sequencer-guards` | track-web | **Amended 2026-08-21** onto the right premise: the guard is unconditional and an enemy has no action surface. Planned, not yet re-implemented |
-| `dungeon-bench-guard-adoption` | harness | **Step 3, planned 2026-08-21.** The bench's half. Depends on the above; neither is done without the other |
+| `dungeon-sequencer-guards` | track-web | ✅ **Step 3 — amended, rebuilt and verified 2026-08-21** (`44bd18e`). Awaiting the developer's word to archive |
+| `dungeon-bench-guard-adoption` | harness | ✅ **Step 3 — built and browser-verified 2026-08-21** (`490826c`). Awaiting the developer's word to archive |
 | `add-ui-layout-recording`, `restore-live-state-on-replay-exit` | harness | Paused introspect proposals, unrelated |
 | `dungeon-tactics-sprite-rendering`, `food`, `add-from-tmdb-search`, `watch-ratings-filter-search-prototype` | track-web | Unrelated, unstarted |
 
@@ -68,10 +68,17 @@ work is done — present it and wait. See either repo's `CLAUDE.md`.
    It turned up one thing worth carrying forward: authoring a scenario is now
    itself bench-only, so a `BenchStore` cannot be *constructed* without bench
    mode. That reverses part of step 3 below — see the note there.
-3. ⬅️ **Guards + spec correction** — planned 2026-08-21. track-web's
-   `dungeon-sequencer-guards` amended in place; harness's
-   `dungeon-bench-guard-adoption` is new. Implementation not started.
-4. ⬜ Waves and flight.
+3. ✅ **Guards + spec correction** — built and browser-verified 2026-08-21.
+   track-web's `dungeon-sequencer-guards` amended in place (`44bd18e`); harness's
+   `dungeon-bench-guard-adoption` (`490826c`). Not archived: awaiting the
+   developer. All three out-of-phase symptoms in `usability.md` §2 are closed.
+
+   One break surfaced only in the browser: hand-planning an enemy lost its
+   destination highlights, because the board painted reach from the armed
+   action's targets and an enemy now has none. Nothing under test could have
+   caught it — `vitest.config.mts` covers the servers only, never a client.
+4. ⬅️ Waves and flight — **but the setup-usability change comes first** (see
+   below and `usability.md`).
 
 ### Verifying in a browser
 
