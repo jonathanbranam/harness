@@ -1,8 +1,12 @@
 # Phase 5 correction: the bench does not play out of sequence
 
-> **Status: decided; step 1 of 4 built.** Written 2026-08-21, after the designer
-> rejected the premise phase 5 shipped on. **This is the plan of record for the
-> dungeon work — start here.**
+> **Status: decided; changes 1-3 of 4 built** (1 archived, 2 and 3 awaiting the
+> developer). Written 2026-08-21, after the designer rejected the premise phase 5
+> shipped on. **This is the plan of record for the dungeon work — start here.**
+>
+> **Next is not change 4.** A setup-usability change comes between 3 and 4, and it
+> is blocked on four open questions at the end of [`usability.md`](usability.md).
+> See the end of §9.
 >
 > **Decisions taken (2026-08-21):** Option B. **The bench and the game play by
 > the same rules, with exactly one exception** — amending a locked telegraph.
@@ -625,26 +629,64 @@ Two things it turned up that the plan had only predicted:
   (`unitDisplayName`) cannot express *which* enemies are holding a round up when
   several share an archetype. That one refusal now carries the id too.
 
-**2. The bench setup surface (engine + harness).** ⬅️ **next; planned, not
-built.** `dungeon-bench-setup-surface` (track-web) + `dungeon-bench-setup-adoption`
-(harness). §8.2.2 and §8.2.3. The bench
-starts in `placement`, setup operations move into the engine behind the
-bench-mode + `placement` guard, `BenchStore` drops its local rule checks and its
-`emptyState`.
+**2. The bench setup surface (engine + harness).** ✅ **Built and
+browser-verified 2026-08-21**, not archived — awaiting the developer.
+`dungeon-bench-setup-surface` (track-web `0537c30`) +
+`dungeon-bench-setup-adoption` (harness `7d4aeae`). §8.2.2 and §8.2.3. The bench
+starts in `placement`, setup operations moved into the engine behind the
+bench-mode + `placement` guard, and `BenchStore` dropped its local rule checks,
+its `emptyState`, and its unit-id counter.
 
-**3. The guards + the spec correction (both repos).** §6 Steps 1-4 and the
-`dungeon-bench` spec change. **Must land after 2**, because the strict phase
-guard is what breaks bench setup and change 2 is what gives it a legal home.
+Two things it turned up:
+- **Authoring a scenario is now itself bench-only**, so a `BenchStore` cannot be
+  *constructed* without bench mode. That **reverses part of §6 step 3**, which
+  said to delete the test files' file-level `setEngineMode('bench')`. Annotated
+  there. The concern behind that instruction is answered by change 3 instead:
+  with the phase guard unconditional, bench mode buys no latitude over the
+  round, so setting it can no longer hide an ordering violation.
+- Driving the new setup phase by hand immediately turned up an interaction model
+  that fights the designer — see the note below and [`usability.md`](usability.md).
 
-**4. Waves and flight (engine + harness).** §8.5. Purely additive, reaches one
-phase, and safe to do last.
+**3. The guards + the spec correction (both repos).** ✅ **Built and
+browser-verified 2026-08-21**, not archived — awaiting the developer. §6 Steps
+1-4 and the `dungeon-bench` spec change: track-web's `dungeon-sequencer-guards`
+amended in place (`44bd18e`) and harness's new `dungeon-bench-guard-adoption`
+(`490826c`). It landed after 2, as required — the strict phase guard is what
+breaks bench setup, and change 2 is what gave it a legal home.
 
-**Between 3 and 4, a setup-usability change.** Driving the bench by hand as soon
-as change 2 landed turned up an interaction model that fights the designer —
-every click places, nothing drags, and selecting a piece costs you your palette.
-It is written up in [`usability.md`](usability.md), which is a living document
-the designer appends to; it becomes an OpenSpec change after change 3, because
-the phase guard changes what a selected unit shows during placement.
+All three out-of-phase symptoms in `usability.md` §2 are closed. Three things it
+turned up:
+- **A break nothing under test could catch.** Hand-planning an enemy lost its
+  destination highlights, because the board painted reach from the armed
+  action's targets and an enemy now has none — the panel asked for a click on a
+  highlighted tile with nothing highlighted, while the click itself still
+  worked. Found only by driving the browser. `vitest.config.mts` covers the
+  servers and `packages/ui`; **no client in this repo is under test at all**.
+  Worth its own decision.
+- **Three tests had stopped describing why they pass** — two refused during
+  `placement` by the phase guard, before the reach or footprint check they are
+  named for was ever consulted. They would have passed with those checks
+  deleted. The same species of stale sentence this whole correction exists to
+  delete, one layer down.
+- **§6 step 3's list of "three tests testing the removed capability" was wrong
+  by one**: `reach and threat > drops a unit out of both fields once it has
+  attacked` already used a player unit and only needed the fixture.
+
+**4. Waves and flight (engine + harness).** ⬜ Not started. §8.5. Purely
+additive, reaches one phase, and safe to do last.
+
+**Between 3 and 4, a setup-usability change.** ⬅️ **Next.** Driving the bench by
+hand as soon as change 2 landed turned up an interaction model that fights the
+designer — every click places, nothing drags, and selecting a piece costs you
+your palette. It is written up in [`usability.md`](usability.md), which is a
+living document the designer appends to. It waited for change 3 because the
+phase guard changes what a selected unit shows during placement: with an enemy
+having no action surface and no unit having one during `placement`, clicking a
+piece no longer paints a movement range, which is what frees the selection to
+become a per-unit setup mode.
+
+**It is not yet an OpenSpec change**: `usability.md` ends with four open
+questions the designer has not answered, and they decide the gesture table.
 
 Then, later and one at a time, any further bench exception (§8.6 first, if it is
 still wanted after bookmarks are reconsidered).
