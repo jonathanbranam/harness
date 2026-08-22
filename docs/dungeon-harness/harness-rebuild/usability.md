@@ -60,7 +60,8 @@ It does exactly what it was built to do, and what it was built to do is wrong.
 | Click a unit | Select it, and **suspend** the armed palette |
 | Click the selected unit again | Deselect, **restore the suspended palette**, and consume the click — it does not place |
 | Click any other tile while a unit is selected | Same: deselect, restore the palette, consume the click |
-| New Board / Clear Units | Confirmation dialog, then **wipe the timeline** rather than adding a frame to it |
+| Click a structure | Same: select it. See §5 — this is one rule, not two |
+| New Board / Clear Units | Confirmation dialog, then reset. *(Originally "wipe the timeline"; §3 supersedes that — with setup off the timeline there is no setup history to wipe.)* |
 
 The point of "suspend and restore" is that selecting a unit must not cost the
 designer their palette choice: after cancelling, the next click places the same
@@ -118,7 +119,128 @@ That is also what frees the selection to become a per-unit setup mode.
 
 ---
 
-## 3. Deferred
+## 3. Setup does not belong on the timeline
+
+*Reported 2026-08-22, after change 3 landed.*
+**Disposition: folds into the setup-usability change. It changes what that
+change is about, so it goes first.**
+
+> Setup really shouldn't be stored as part of the scenario. It isn't game play
+> that should be re-played. It is just confusing. We need to build proper undo
+> later, but recording set up is just noise.
+
+Today every setup operation commits a frame: each placement, each HP change,
+each structure move. Authoring a six-piece board buries the round that follows
+under a dozen frames of bookkeeping, and scrubbing the timeline walks back
+through the act of building the board rather than through anything that
+happened *in* it.
+
+**The timeline is a record of play.** Setup is what you did before play started.
+
+### What this supersedes
+
+- **§1's "New Board / Clear Units wipe the timeline behind a confirmation."**
+  If setup is never recorded, there is no setup history for them to wipe. The
+  confirmation is still wanted — both are destructive — but what they destroy is
+  the board, not a timeline.
+- **`BenchStore.newBoard`'s "a frame like any other"** comment, already noted in
+  §1 as a reversal, goes further: not a different kind of frame, no frame.
+- **The `dungeon-bench` spec** says the opposite in two places, so this needs a
+  spec change, not just an implementation one: *"Any action can be stepped back"*
+  is explicit that this includes **placements**, and *"The session is a timeline
+  that can be walked"* is written against every operation committing a frame.
+
+### Undo for setup is a separate thing, later
+
+The designer was explicit: *"we need to build proper undo later."* So this is
+not "move setup onto a second timeline" — it is "setup is not on the timeline",
+and a setup-scoped undo is its own piece of work. Do not smuggle one in.
+
+### One open question this raises
+
+If setup commits no frames, **what is the timeline's first frame, and how does a
+designer get back to setup?** Today they step back past the start. Two shapes:
+
+- **The authored scenario is frame 0.** One frame, holding the board as it stood
+  when `startScenario` was called. Stepping back to it re-opens setup, which is
+  what happens now — minus the dozen frames in front of it.
+- **An explicit "return to setup" operation**, with the timeline starting after
+  the scenario begins.
+
+Assumed: **frame 0**, because it keeps the existing gesture and needs no new
+control. Confirm before the change is written.
+
+---
+
+## 4. A selected structure is invisible on the board
+
+*Reported 2026-08-22.*
+**Disposition: folds into the setup-usability change.**
+
+Selecting a structure shows a *"Remove structure at (4, 2)"* button in the
+panel and nothing at all on the board. `selectedStructure` is client-only state
+in `DungeonPage` and is passed to `BenchControls` but **never to `BoardView`**,
+which therefore cannot draw it. A selected unit gets a dark stroke on its token;
+a structure gets nothing.
+
+The move-a-structure gesture depends on knowing which one is selected, so this
+is not only cosmetic — it is the gesture's only feedback before the click that
+commits it.
+
+---
+
+## 5. With a palette armed, clicking a structure should select it
+
+*Reported 2026-08-22.*
+**Disposition: folds into the setup-usability change. Answers open question 1.**
+
+> When you select a unit from the UI, then click on a unit, it selects the unit
+> on the map. This is good, but if you click on a structure it says "there is a
+> structure there". Instead, select the structure.
+
+Same root cause as §1: `handleTileClick`'s setup branch checks the armed palette
+**first**, so a click on an occupied tile becomes a placement attempt and comes
+back as the engine's refusal. With no palette armed the code already does the
+right thing — it selects the structure and clears any unit selection.
+
+So the rule is one rule, and it covers both kinds of piece:
+
+**Clicking a piece always means that piece.** Unit or structure, palette armed or
+not: select it, and suspend the armed palette so cancelling restores it.
+
+This settles **open question 1** below in the affirmative, and extends it to
+structures — which is the half the question did not think to ask.
+
+---
+
+## 6. Exactly one power center; towers are optional
+
+*Reported 2026-08-22.*
+**Disposition: folds into the setup-usability change — but the check belongs in
+the engine, not here.**
+
+> There should only be one power center allowed during setup. Don't allow adding
+> two. Do allow 0 towers.
+
+- **A second power center is refused.** One per scenario.
+- **Zero towers is a valid scenario.** No minimum, no maximum stated.
+
+**This is a game rule, so it goes in `scenario.placeStructure` in the engine**
+(`packages/dungeon-engine/src/scenario.ts`), refusing with a reason the way every
+other authoring refusal does. It must not be a check in `BenchStore`, in the
+intent layer, or in the client — that is the harness deriving a rule of its own,
+which is the mistake the whole rebuild exists to undo. The client's job is to
+show the engine's refusal, and ideally to disable the palette entry once a power
+center is placed.
+
+**Also check `generateBoard`**: `board-gen.ts:122` clamps `powerCenters` to
+`Math.floor(cols / 2)`, so a generated board can hold several. Whatever the
+engine decides is the rule, board generation has to obey it — otherwise New Board
+produces a scenario the designer could not have authored by hand.
+
+---
+
+## 7. Deferred
 
 Not scheduled. Recorded so they are not rediscovered as bugs.
 
@@ -136,13 +258,23 @@ Not scheduled. Recorded so they are not rediscovered as bugs.
 
 Answer inline; the driver will fold answers into the change when it is written.
 
-1. **A palette is armed and the designer clicks a tile that holds a unit.**
-   Select that unit (suspending the palette), or refuse the placement with a
-   reason? Assumed: **select it** — clicking a piece always means the piece.
+1. ~~**A palette is armed and the designer clicks a tile that holds a unit.**~~
+   **Answered 2026-08-22 — select it**, and the same for a structure. See §5.
+  a. Yes, select it - unit or structure
 2. **Does the confirmation dialog need a "don't ask again"?** Assumed: no. It
    guards a destructive action taken rarely.
+  a. Agree NO
 3. **Should Clear Units also clear structures?** Assumed: **no** — it clears
-   units, the board and its structures stand. (New Board replaces both.)
+   units, the board and its structures stand. (New Board replaces both.) With §6
+   in play, note this means Clear Units leaves the single power center standing,
+   which is what makes the board still authorable afterwards.
+  a. Hrm. Reconsidering these. New Board does several things: removes all units,
+  power center back in standard location, randomize terrain. So, sure, Clear
+  Units should only clear units not structures.
 4. **Does a drag that ends on an illegal tile snap back silently, or report the
    engine's refusal?** Assumed: report it, the same way a refused click does —
    the engine already has the sentence.
+5. **With setup off the timeline (§3), what is frame 0 and how does a designer
+   reopen setup?** Assumed: frame 0 is the authored scenario, and stepping back
+   to it reopens setup — the gesture that exists today, minus the noise.
+  a. yes. report illegal placement reason and snap back
