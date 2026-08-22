@@ -153,7 +153,9 @@ Context you will not get from the files alone:
   model to follow.
 
 Constraints:
-- Never kill or restart the dev servers. <ports>. Don't start a second copy.
+- Never kill or restart the dev servers. <ports>. Don't start a second copy, and
+  never start anything of your own on one of those ports — use <agent ports> and
+  stop what you start.
 - Do NOT commit and do NOT archive.
 - If a test only goes green because a guard was disabled or an assertion
   weakened, re-aim the test instead, and say so in your report.
@@ -200,8 +202,26 @@ is what the human is going to check. So check it first.
   themselves. If a restart is genuinely needed (a changed `.env`), **ask**.
 - Don't start a second copy of anything already running — `lsof -i:<port>` first
   if unsure.
-- Never squat the human's standard ports. Anything you start yourself goes on a
-  port they don't use, and you stop what you start.
+- **Never start anything on a port the human uses**, whether or not something is
+  listening on it right now. Their ports here are 4100/5175, 4200/5176 and
+  4300/5177; anything you start goes well clear of all of them (4400/5277 by
+  convention for the dungeon harness), and **you stop what you start.**
+- **A running server on a standard port is not proof it is the human's.** Check
+  before you assume:
+
+  ```bash
+  lsof -nP -p "$(lsof -ti:4300 -sTCP:LISTEN)" | grep scratchpad
+  ```
+
+  Output means an agent started it, and the session id is in the path. No output
+  means it is the human's — leave it alone.
+
+  This is worth doing even though "leave it alone" is the safe answer either way.
+  On 2026-08-21 a driver session left a dungeon server holding 4300 for a day;
+  every later session, including one that browser-verified against it, assumed it
+  belonged to the human and worked around it. The human could not start their own
+  server that whole time and had no way to see why. **The cost of a squatted port
+  is not a crash — it is a capability the human quietly loses.**
 
 **Driving it:**
 

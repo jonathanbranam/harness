@@ -173,11 +173,55 @@ own terminal, for **every app in this workspace** — `deck-harness-server` +
 server/client pair added to this monorepo (see "Keep in sync" below). Do
 **not** run `lsof -ti:<port> | xargs kill`, `pkill`, or otherwise stop these
 processes, and do not start a second copy of a server or client that's
-already running (check `lsof -i:<port>` first if unsure — deck-harness-server
-defaults to port 4100, client-deck to 5175; see each `vite.config.ts`/`.env`
-for other harnesses' ports). If a server needs to be
+already running. If a server needs to be
 restarted (e.g. to pick up a changed `.env` value that `tsx watch` won't
 hot-reload), **ask the user to restart it** rather than doing it yourself.
+
+### An agent never starts anything on a developer port
+
+The developer's ports for this repo are **4100/5175** (deck), **4200/5176**
+(introspect) and **4300/5177** (dungeon). Those numbers belong to the
+developer, whether or not something is listening on them right now.
+
+**Never start an agent-owned process on one.** The point is not politeness
+about a port already in use — it is that the developer must be able to start
+their own server at any moment. A process squatting a standard port silently
+denies them that, and nothing about the port or the command line says who
+owns it, so they assume it is theirs and leave it alone. That is the failure:
+not a crash, but a server they cannot start and cannot explain.
+
+If you need your own instance, take a port well clear of every number above —
+**4400/5277** by convention for the dungeon harness, and the equivalent for the
+others. This is a convention, not a registry; if two agent instances are needed
+at once, pick another pair rather than growing the list.
+
+**Two things make this harder here than in track-web**, and both are worth
+knowing before you try:
+
+- **The clients hardcode their ports.** `client-*/vite.config.ts` sets
+  `DEV_PORT` and `BACKEND_PORT` as constants, with no env override —
+  track-web's `client-games` reads `VITE_DEV_PORT` and `VITE_API_TARGET`, and
+  this repo's clients do not. So a second client needs those two lines added
+  first. **Without the proxy override, a client on any port still proxies
+  `/api` to the developer's server**, which defeats the whole exercise.
+- **The servers do take `PORT`** (`<name>-harness-server/src/env.ts`), so a
+  second server is just `PORT=4400 npx tsx src/index.ts`.
+
+**Stop what you start.** An agent-started process outlives the session that
+started it, and the developer has no way to know it is not theirs.
+
+**Telling the two apart:** an agent-started process has its log open inside the
+Claude scratchpad (`/private/tmp/claude-501/<repo>/<session-id>/scratchpad/`);
+a developer-started one, run in their own terminal, does not.
+
+```bash
+lsof -nP -p "$(lsof -ti:4300 -sTCP:LISTEN)" | grep scratchpad
+```
+
+Output means an agent owns it, and the session id is right there in the path.
+No output means it is the developer's — **leave it alone**. Check this before
+concluding a running server is theirs; the port alone does not tell you, and
+guessing wrong in the safe direction still leaves a stray process behind.
 
 ## Verifying UI changes: use playwright-cli
 
